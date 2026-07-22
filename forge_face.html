@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>THE FORGE</title>
+<style>
+:root{--bg:#080a09;--panel:#0d1210;--line:#1a221d;--seal:#e8a544;--phos:#8fefb2;--ground:#7fb3d5;--dim:#5c6c63;--text:#d4e6db;--alert:#e2685a;--fire:#ff7a45;--ember:#c9662f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.55 "SF Mono",Consolas,Menlo,monospace;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#bar{border-bottom:1px solid var(--line);padding:9px 16px;display:flex;align-items:center;gap:12px}
+#bar b{color:var(--fire);letter-spacing:.24em}
+.pill{font-size:10px;padding:3px 8px;border:1px solid var(--line);border-radius:10px;color:var(--dim)}
+.pill.on{border-color:var(--phos);color:var(--phos)}
+.pill.fire{border-color:var(--fire);color:var(--fire)}
+button{background:transparent;border:1px solid var(--line);color:var(--text);font:inherit;font-size:11px;padding:6px 12px;border-radius:3px;cursor:pointer;letter-spacing:.03em}
+button:hover{border-color:var(--phos)}
+button.go{border-color:var(--phos);color:var(--phos)}
+button.fire{border-color:var(--fire);color:var(--fire)}button.fire:hover{background:rgba(255,122,69,.12)}
+#main{flex:1;display:grid;grid-template-columns:320px 1fr;grid-template-rows:auto 1fr;overflow:hidden}
+#mjc{grid-column:2;grid-row:1;border-bottom:1px solid var(--line);border-left:1px solid var(--line);padding:9px 14px;display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,transparent,rgba(232,165,68,.04))}
+.orb{width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#123,#061014);border:1px solid var(--seal);box-shadow:0 0 12px rgba(232,165,68,.3);animation:br 4s ease-in-out infinite;flex:none}
+@keyframes br{0%,100%{box-shadow:0 0 10px rgba(232,165,68,.2)}50%{box-shadow:0 0 20px rgba(232,165,68,.4)}}
+#mjt{font-size:12px;flex:1}#mjt .w{color:var(--seal);font-size:10px;letter-spacing:.12em}
+#stw{grid-column:1;grid-row:1/3;border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.hd{padding:9px 14px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.12em;color:var(--dim);display:flex;gap:8px;align-items:center}
+.wisp{width:10px;height:10px;border-radius:50%;background:var(--seal);box-shadow:0 0 8px var(--seal);animation:pl 2.4s ease-in-out infinite;flex:none}
+.wisp.busy{animation:sp .9s linear infinite,pl 2.4s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:.7;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
+@keyframes sp{to{filter:hue-rotate(50deg)}}
+#sw{flex:1;overflow-y:auto;padding:12px}
+#sr{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
+#sr input{flex:1;background:#060a08;border:1px solid var(--line);color:var(--text);font:inherit;padding:8px;border-radius:3px;font-size:12px}
+#frg{grid-column:2;grid-row:2;border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.shaper{padding:14px;border-bottom:1px solid var(--line)}
+.shaper label{font-size:10px;color:var(--dim);letter-spacing:.07em}
+.shaper input{width:100%;background:#060a08;border:1px solid var(--line);color:var(--text);font:inherit;font-size:12px;padding:7px 9px;border-radius:3px;margin:6px 0}
+.shaper textarea{width:100%;min-height:88px;background:#060a08;border:1px solid var(--line);color:var(--text);font:inherit;font-size:12px;padding:8px;border-radius:3px;resize:vertical}
+#fire{flex:1;overflow-y:auto;padding:16px;background:repeating-linear-gradient(90deg,transparent,transparent 21px,rgba(255,122,69,.02) 21px,rgba(255,122,69,.02) 22px)}
+.card{border:1px solid var(--line);border-radius:5px;padding:12px;margin-bottom:8px}
+.card h4{font-size:10px;letter-spacing:.1em;color:var(--fire);margin-bottom:6px}
+.code{background:#060a08;border-left:2px solid var(--ember);padding:8px 10px;font-size:11px;white-space:pre-wrap;border-radius:2px}
+.out{background:rgba(143,239,178,.05);border-left:2px solid var(--phos);padding:8px 10px;font-size:12px;white-space:pre-wrap;border-radius:2px;margin-top:6px}
+.hint{color:var(--dim);font-size:11px;padding:8px;line-height:1.6}
+.rowbtns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+</style></head>
+<body>
+<div id="bar">
+  <b>△ THE FORGE</b>
+  <span class="pill fire" id="p-forge">the place</span>
+  <span class="pill" id="p-st">…</span>
+  <span class="pill" id="p-mj">manjuel: sealed</span>
+</div>
+<div id="main">
+  <div id="stw">
+    <div class="hd"><span class="wisp" id="wisp"></span> STEWARD · reached from outside · reasons + tests</div>
+    <div id="sw"><div class="hint">Steward is the finished gateway. The Forge asks him from the outside — his research, and through him, Manjuel's rulings. He is never edited here.</div></div>
+    <div id="sr"><input id="task" placeholder="ask steward to look into something…"><button class="go" onclick="askSteward()">ASK</button></div>
+  </div>
+  <div id="mjc">
+    <div class="orb"></div>
+    <div id="mjt"><span class="w">MANJUEL</span><br><span id="mjx">sealed, watching the fire. Reached only through Steward.</span></div>
+    <button onclick="askManjuel()">ASK HIM</button>
+  </div>
+  <div id="frg">
+    <div class="hd" style="border-left:1px solid var(--line)">△ the fire · shape a figure of pure code, run it, remold it — nothing here is real until you carry it out</div>
+    <div class="shaper">
+      <label>SHAPE A FIGURE · pure code, drawn in the fire</label>
+      <input id="h-name" placeholder="name it…">
+      <textarea id="h-code" placeholder="the code it will run (Python)…"></textarea>
+      <div class="rowbtns"><button class="fire" onclick="shapeIt()">△ SHAPE IN FIRE</button></div>
+    </div>
+    <div id="fire"><div class="hint">The fire is banked. Shape a figure — a small piece of code — run it, watch it, remold it. It stays inert here. Only you can carry a figure out and make it real. Nothing else can.</div></div>
+  </div>
+</div>
+<script>
+const TOKEN="__FORGE_TOKEN__",BASE=location.origin,$=id=>document.getElementById(id);
+function esc(s){return (s||"").replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+function model(){return "llama3.2:3b-instruct-q4_K_M";}
+async function post(p,d){const r=await fetch(BASE+p,{method:"POST",headers:{"Content-Type":"application/json","X-Forge-Token":TOKEN},body:JSON.stringify(d)});return r.json();}
+function busy(b){$("wisp").className=b?"wisp busy":"wisp";}
+function mj(t){$("mjx").textContent=t;}
+
+(async()=>{try{const d=await(await fetch(BASE+"/ping")).json();
+  $("p-forge").textContent="forge: "+(d.doctrine||[]).length+" doc";
+  // check steward reachable
+  const s=await post("/ask_manjuel",{message:"ping"});
+  $("p-st").textContent=s.error?"steward: offline":"steward: ● reached";$("p-st").className=s.error?"pill":"pill on";
+}catch(e){$("p-st").textContent="forge offline";}})();
+
+let CUR=null;
+function render(name,code,run){
+  let h='<div class="card"><h4>△ '+esc(name)+'</h4><div class="code">'+esc(code).slice(0,700)+'</div>';
+  if(run){h+='<h4 style="margin-top:8px">IT DID THIS</h4><div class="out">'+esc(run.output||"(quiet)")+'</div>';}
+  h+='<div class="rowbtns"><button class="go" onclick="runIt()">RUN</button><button onclick="remoldIt()">REMOLD</button><button onclick="smoothIt()">SMOOTH AWAY</button><button class="fire" onclick="carryOut()">CARRY OUT OF THE FIRE</button></div></div>';
+  $("fire").innerHTML=h;
+}
+async function shapeIt(){
+  const name=$("h-name").value.trim(),code=$("h-code").value;
+  if(!code.trim()){$("fire").innerHTML='<div class="hint">give the figure some code.</div>';return;}
+  busy(true);mj("A figure takes shape in the fire. I watch.");
+  const r=await post("/shape",{name,code});CUR=r.id;render(r.name,code,null);busy(false);
+}
+async function runIt(){
+  if(!CUR)return;busy(true);mj("The figure moves. Let us see.");
+  const r=await post("/run",{id:CUR});render(($("h-name").value.trim()||"figure"),$("h-code").value,r.run);
+  if(r.run)mj(r.run.exit===0?"It did what it was shaped to do.":"It faltered. Remold it.");busy(false);
+}
+async function remoldIt(){if(!CUR)return;const code=$("h-code").value;await post("/remold",{id:CUR,code});mj("Smoothed and drawn again.");render(($("h-name").value.trim()||"figure"),code,null);}
+async function smoothIt(){if(!CUR)return;await post("/smooth",{id:CUR});CUR=null;$("fire").innerHTML='<div class="hint">The fire is banked again. Nothing kept, nothing lost.</div>';mj("The fire forgets it.");}
+async function carryOut(){
+  if(!CUR)return;
+  const dest=prompt("Only you can make this real. Where should it go? (a real file path)");
+  if(!dest)return;
+  if(!confirm("Carry this out of the Forge to:\\n"+dest+"\\n\\nThis is the one door out. Nothing else can do this.")) return;
+  const r=await post("/delegate",{id:CUR,destination:dest,operator_confirm:true});
+  if(r.delegated){mj("You carried it out of the fire. It is real now.");
+    $("fire").insertAdjacentHTML("beforeend",'<div class="hint" style="color:var(--phos)">✓ carried out to '+esc(r.to)+'</div>');
+  }else mj("It could not be carried out: "+(r.error||"?"));
+}
+async function askSteward(){
+  const task=$("task").value.trim();if(!task)return;busy(true);
+  $("sw").innerHTML='<div class="hint">Asking the finished Steward…</div>';mj("Steward reasons; I watch.");
+  try{
+    const d=await post("/ask_steward",{task,models:[model()],angles:[task,"risks of: "+task]});
+    if(d.error){$("sw").innerHTML='<div class="hint" style="color:var(--alert)">'+esc(d.error)+'</div>';busy(false);return;}
+    let h='<div class="card"><h4>PLAN</h4>'+esc(d.plan||"")+'</div>';
+    (d.responses||[]).forEach(x=>{h+= x.error?'<div class="hint" style="color:var(--alert)">'+esc(x.model)+': '+esc(x.error)+'</div>':'<div class="out">['+x.score+'] '+esc(x.text).slice(0,300)+'</div>';});
+    if(d.ruling)h+='<div class="card"><h4>MANJUEL RULES</h4>'+esc(d.ruling)+'</div>';
+    $("sw").innerHTML=h;if(d.ruling)mj(esc(d.ruling).slice(0,140));
+  }catch(e){$("sw").innerHTML='<div class="hint" style="color:var(--alert)">'+esc(e.message)+'</div>';}
+  busy(false);
+}
+async function askManjuel(){const q=prompt("Say something to Manjuel (through Steward):");if(!q)return;mj("…");
+  const r=await post("/ask_manjuel",{message:q});mj(r.error?"(couldn't reach him): "+r.error:esc(r.reply||"…").slice(0,200));}
+$("task").addEventListener("keydown",e=>{if(e.key==="Enter")askSteward();});
+</script>
+</body></html>

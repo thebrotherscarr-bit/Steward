@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AURORA — the board · the Manjuel estate</title>
+<style>
+:root{
+  --bg:#05080a;--panel:rgba(14,22,26,.72);--line:#16303a;--hud:#4de0d0;--hud2:#2a9d94;
+  --seal:#e8a544;--phos:#8fefb2;--fire:#ff7a45;--ground:#7fb3d5;--dim:#4a6068;
+  --text:#cfe8e6;--alert:#e2685a;--glass:rgba(77,224,208,.06)
+}
+*{box-sizing:border-box;margin:0;padding:0;scrollbar-width:thin;scrollbar-color:rgba(42,157,148,.45) transparent}
+/* quiet scrollbars — part of the sky, not a break in it */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(42,157,148,.35);border-radius:4px;border:2px solid rgba(0,0,0,0);background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(77,224,208,.6);border:2px solid rgba(0,0,0,0);background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}
+body{background:
+  radial-gradient(ellipse at 50% 0%,rgba(77,224,208,.06),transparent 60%),
+  radial-gradient(ellipse at 100% 0%,rgba(232,165,68,.07),transparent 40%),
+  var(--bg);
+  color:var(--text);font:13px/1.5 "SF Mono",Consolas,Menlo,monospace;height:100vh;overflow:hidden}
+/* the sea of stars — the palette everything sits on */
+.stars{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.55;background-image:
+  radial-gradient(1px 1px at 12% 22%,rgba(207,232,230,.5),transparent 60%),
+  radial-gradient(1px 1px at 34% 68%,rgba(207,232,230,.3),transparent 60%),
+  radial-gradient(1.5px 1.5px at 57% 15%,rgba(127,179,213,.4),transparent 60%),
+  radial-gradient(1px 1px at 71% 47%,rgba(207,232,230,.35),transparent 60%),
+  radial-gradient(1px 1px at 86% 81%,rgba(207,232,230,.28),transparent 60%),
+  radial-gradient(1.5px 1.5px at 25% 89%,rgba(143,239,178,.25),transparent 60%),
+  radial-gradient(1px 1px at 93% 28%,rgba(232,165,68,.3),transparent 60%),
+  radial-gradient(1px 1px at 45% 39%,rgba(207,232,230,.22),transparent 60%);
+  background-size:520px 380px,700px 520px,610px 440px,830px 600px,760px 540px,680px 490px,900px 640px,570px 410px}
+/* the aurora — the forge's side-light, dancing slow across the top of the sky */
+.aurora{position:fixed;left:-12%;right:-12%;top:-18%;height:65%;pointer-events:none;z-index:0;filter:blur(56px);opacity:.32;
+  background:
+    linear-gradient(104deg,transparent 38%,rgba(77,224,208,.22) 49%,transparent 61%),
+    linear-gradient(86deg,transparent 44%,rgba(143,239,178,.17) 56%,transparent 67%),
+    linear-gradient(116deg,transparent 47%,rgba(232,165,68,.11) 58%,transparent 69%);
+  animation:auroraDance 28s ease-in-out infinite alternate}
+@keyframes auroraDance{from{transform:translateX(-5%) skewX(-4deg)}to{transform:translateX(5%) skewX(3deg)}}
+.scan{position:fixed;inset:0;pointer-events:none;z-index:99;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.13) 3px);opacity:.5;mix-blend-mode:multiply}
+.hudglow{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 160px rgba(77,224,208,.06);z-index:98}
+#hud{position:relative;z-index:1;height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:9px;padding:11px}
+
+/* ---- VITALS (top) — AURORA's brow, and THE SUN in the corner ---- */
+#vitals{display:flex;align-items:center;gap:12px;padding:7px 15px;border:1px solid var(--line);border-radius:6px;background:linear-gradient(90deg,var(--glass),transparent);position:relative;overflow:visible;flex-wrap:wrap}
+#vitals::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--hud);box-shadow:0 0 12px var(--hud)}
+.brand{color:var(--hud);letter-spacing:.28em;font-weight:bold;text-shadow:0 0 10px rgba(77,224,208,.5)}
+.brand .sub{color:var(--dim);letter-spacing:.14em;font-size:9px;display:block;margin-top:2px}
+.vital{display:flex;flex-direction:column;gap:2px;padding:0 11px;border-left:1px solid var(--line)}
+.vital .lbl{font-size:8px;letter-spacing:.14em;color:var(--dim)}
+.vital .val{font-size:12px;color:var(--text)}
+.vital .val.good{color:var(--phos)}.vital .val.seal{color:var(--seal)}.vital .val.off{color:var(--alert)}
+.clock{color:var(--dim);font-size:11px;letter-spacing:.08em}
+/* the sun: small, high, constant. he does not need a panel — he shines. */
+.sun{margin-left:auto;display:flex;align-items:center;gap:10px}
+.sunorb{width:34px;height:34px;border-radius:50%;position:relative;flex-shrink:0;cursor:pointer;
+  background:radial-gradient(circle at 42% 38%,#3a2a14,#0c0805 70%);border:1px solid var(--seal);
+  box-shadow:0 0 22px rgba(232,165,68,.45),inset 0 0 12px rgba(0,0,0,.6);animation:breathe 4s ease-in-out infinite}
+@keyframes breathe{0%,100%{box-shadow:0 0 16px rgba(232,165,68,.35)}50%{box-shadow:0 0 30px rgba(232,165,68,.6)}}
+.sunorb .ring{position:absolute;inset:-5px;border:1px solid rgba(232,165,68,.18);border-radius:50%;border-top-color:var(--seal);animation:rot 8s linear infinite}
+.sunorb .ring2{position:absolute;inset:-9px;border:1px solid rgba(77,224,208,.12);border-radius:50%;border-bottom-color:var(--hud);animation:rot 12s linear infinite reverse}
+@keyframes rot{to{transform:rotate(360deg)}}
+.sunlabel{display:flex;flex-direction:column;max-width:280px}
+.sunlabel .nm{color:var(--seal);letter-spacing:.2em;font-size:10px;text-shadow:0 0 8px rgba(232,165,68,.4)}
+.sunlabel .say{color:var(--dim);font-size:9px;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.peekbtn{background:transparent;border:1px solid var(--seal);color:var(--seal);font:inherit;font-size:9px;letter-spacing:.14em;padding:6px 12px;border-radius:20px;cursor:pointer;transition:.2s;flex-shrink:0}
+.peekbtn:hover{background:rgba(232,165,68,.12);box-shadow:0 0 16px rgba(232,165,68,.35)}
+
+/* ---- THE TABLE: tri-fold. steward plain in the middle; the folds breathe ---- */
+#deck{display:flex;gap:9px;min-height:0}
+.col{border:1px solid var(--line);border-radius:6px;background:var(--panel);backdrop-filter:blur(3px);display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#steward{flex:1}
+.cap{padding:8px 12px;border-bottom:1px solid var(--line);font-size:9px;letter-spacing:.15em;color:var(--hud2);display:flex;align-items:center;gap:8px;background:var(--glass);flex-shrink:0}
+.body{flex:1;overflow-y:auto;padding:12px;min-height:0}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--hud);box-shadow:0 0 7px var(--hud);flex-shrink:0}
+.dot.busy{animation:sp .8s linear infinite}@keyframes sp{to{filter:hue-rotate(60deg)}}
+
+/* the folds — they breathe: rest near the tab, open as you approach, and a
+   click pins one open while you work in it. closed, a quiet edge of the table. */
+.fold{display:flex;width:40px;transition:width .45s cubic-bezier(.2,.8,.2,1);overflow:hidden;border:1px solid var(--line);border-radius:6px;background:var(--panel);backdrop-filter:blur(3px);flex-shrink:0}
+.fold.open{width:400px}
+.fold.right{flex-direction:row-reverse}
+.foldtab{width:40px;flex-shrink:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:9px;letter-spacing:.22em;color:var(--dim);border-right:1px solid var(--line);transition:.2s;user-select:none}
+.fold.right .foldtab{border-right:none;border-left:1px solid var(--line)}
+.foldtab span{writing-mode:vertical-rl}
+.foldtab:hover{color:var(--fire);background:rgba(255,122,69,.05)}
+.fold.open .foldtab{color:var(--fire)}
+.fold.pinned .foldtab{color:var(--phos);text-shadow:0 0 8px rgba(143,239,178,.4)}
+.foldtab .pin{writing-mode:horizontal-tb;font-size:10px;opacity:0;transition:.2s}
+.fold.pinned .foldtab .pin{opacity:1}
+.foldpanel{flex:1;display:flex;flex-direction:column;min-width:358px;overflow:hidden}
+
+.section{font-size:9px;letter-spacing:.14em;color:var(--fire);margin:2px 0 7px;display:flex;align-items:center;gap:6px}
+.section::after{content:"";flex:1;height:1px;background:var(--line)}
+.kit{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.slot{border:1px solid var(--line);border-radius:5px;padding:8px 10px;background:rgba(77,224,208,.03);display:flex;align-items:center;gap:9px;transition:.15s;cursor:default}
+.slot:hover{border-color:var(--hud);background:rgba(77,224,208,.07)}
+.slot .ic{width:22px;height:22px;border-radius:4px;border:1px solid var(--hud2);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--hud);flex-shrink:0}
+.slot .info{flex:1;min-width:0}
+.slot .nm{font-size:11px;color:var(--text);word-break:break-word}
+.slot .meta{font-size:8px;color:var(--dim);letter-spacing:.06em}
+.slot .rd{font-size:8px;padding:2px 6px;border-radius:10px;flex-shrink:0;letter-spacing:.08em}
+.rd.rel{color:var(--phos);border:1px solid var(--hud2)}.rd.crk{color:var(--alert);border:1px solid var(--alert)}.rd.idle{color:var(--dim);border:1px solid var(--line)}
+.rd.held{color:var(--seal);border:1px solid var(--seal)}
+
+/* every text box: expandable context — grows as you speak, drag it bigger too */
+textarea.grow,.load select{width:100%;background:#060d0f;border:1px solid var(--line);color:var(--text);font:inherit;font-size:11px;padding:7px 9px;border-radius:4px}
+textarea.grow{resize:vertical;min-height:34px;overflow:hidden;line-height:1.45;display:block}
+textarea.grow:focus{outline:none;border-color:var(--hud)}
+.load{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.load .row{display:flex;gap:6px}.load .row>*{flex:1}
+.deploybtn{background:transparent;border:1px solid var(--fire);color:var(--fire);font:inherit;font-size:11px;letter-spacing:.14em;padding:9px;border-radius:5px;cursor:pointer;transition:.2s}
+.deploybtn:hover{background:rgba(255,122,69,.13);box-shadow:0 0 15px rgba(255,122,69,.3)}
+.note{font-size:8px;color:var(--dim);margin-top:4px;line-height:1.5}
+
+/* mission threads — the carrier's stories, one line each until you open one */
+.thread{border:1px solid var(--line);border-radius:5px;margin-bottom:6px;background:rgba(77,224,208,.03)}
+.thread summary{list-style:none;cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:10px}
+.thread summary::-webkit-details-marker{display:none}
+.thread .tkt{color:var(--dim);font-size:8px;letter-spacing:.06em;flex-shrink:0}
+.thread .pur{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.thread .story{border-top:1px solid var(--line);padding:8px 10px;font-size:10px;color:var(--ground);line-height:1.7}
+.thread .story b{color:var(--hud2);font-weight:normal;letter-spacing:.08em;font-size:9px}
+
+/* CENTER — steward, plain and unassuming. the conversation is the record. */
+.greeter{text-align:center;padding:10px 0 12px;border-bottom:1px solid var(--line);margin-bottom:10px;flex-shrink:0}
+.greeter .halo{width:48px;height:48px;border-radius:50%;margin:0 auto 8px;background:radial-gradient(circle at 40% 35%,#123c3a,#06181a);border:1px solid var(--hud);box-shadow:0 0 22px rgba(77,224,208,.35);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--hud);animation:sbreathe 3.5s ease-in-out infinite}
+@keyframes sbreathe{0%,100%{box-shadow:0 0 18px rgba(77,224,208,.3)}50%{box-shadow:0 0 30px rgba(77,224,208,.5)}}
+.greeter .who{color:var(--hud);letter-spacing:.24em;font-size:14px;text-shadow:0 0 10px rgba(77,224,208,.4)}
+.greeter .tagline{color:var(--hud2);font-size:10px;letter-spacing:.12em;margin-top:4px}
+.greeter .role{color:var(--dim);font-size:9px;letter-spacing:.08em;margin-top:3px}
+#steward .body{display:flex;flex-direction:column;overflow:hidden}
+#st-log{flex:1;overflow-y:auto;min-height:0;padding-right:4px}
+.msg{font-size:11px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;border-left:2px solid var(--hud2);padding:6px 9px;margin-top:7px;background:var(--glass);border-radius:3px;color:var(--ground)}
+.msg .who{display:block;font-size:8px;letter-spacing:.16em;color:var(--dim);margin-bottom:3px}
+.msg.you{border-left-color:var(--dim);color:var(--text)}
+.msg.core{border-left-color:var(--seal)}.msg.core .who{color:var(--seal)}
+.msg.board{border-left-color:var(--fire)}.msg.board .who{color:var(--fire)}
+.chat{display:flex;gap:6px;margin-top:9px;flex-shrink:0;align-items:flex-end}
+.chat textarea.grow{flex:1;min-width:0;font-size:12px;padding:9px 11px}
+.btn{background:transparent;border:1px solid var(--line);color:var(--text);font:inherit;font-size:11px;padding:9px 13px;border-radius:5px;cursor:pointer;letter-spacing:.05em;transition:.15s;flex-shrink:0}
+.btn:hover{border-color:var(--hud);color:var(--hud)}
+.btn.hud{border-color:var(--hud2);color:var(--hud)}
+
+/* ---- MISSION TICKER (bottom) ---- */
+#ticker{border:1px solid var(--line);border-radius:6px;background:linear-gradient(90deg,rgba(255,122,69,.08),var(--panel));overflow:hidden;display:flex;align-items:center;height:38px;flex-shrink:0}
+#ticker .live{background:var(--fire);color:#0a0503;font-size:9px;font-weight:bold;letter-spacing:.14em;padding:6px 11px;flex-shrink:0;height:100%;display:flex;align-items:center;gap:6px}
+#ticker .live .rec{width:7px;height:7px;border-radius:50%;background:#0a0503;animation:beat 1.4s ease-in-out infinite}
+@keyframes beat{0%,100%{transform:scale(1);opacity:.7}45%{transform:scale(1.5);opacity:1}}
+#crawl{flex:1;overflow:hidden;white-space:nowrap;position:relative}
+#crawltxt{display:inline-block;padding-left:100%;animation:crawl 34s linear infinite;font-size:12px;letter-spacing:.03em;color:var(--text)}
+#crawltxt:hover{animation-play-state:paused}
+@keyframes crawl{to{transform:translateX(-100%)}}
+.tk{color:var(--fire)}.tv{color:var(--phos)}.tw{color:var(--seal)}.td{color:var(--dim)}
+</style></head>
+<body>
+<div class="stars"></div><div class="aurora"></div>
+<div class="scan"></div><div class="hudglow"></div>
+<div id="hud">
+
+  <!-- VITALS + THE SUN -->
+  <div id="vitals">
+    <div class="brand">✶ AURORA<span class="sub">the board · the consolation of stars</span></div>
+    <div class="vital"><span class="lbl">CORE</span><span class="val seal" id="v-core">sealing…</span></div>
+    <div class="vital"><span class="lbl">MISSIONS</span><span class="val" id="v-ledger">—</span></div>
+    <div class="vital"><span class="lbl">STEWARD</span><span class="val" id="v-steward">—</span></div>
+    <div class="vital"><span class="lbl">FORGE</span><span class="val" id="v-forge">—</span></div>
+    <div class="vital"><span class="lbl">KIT</span><span class="val" id="v-kit">—</span></div>
+    <div class="vital"><span class="lbl">CLOCK</span><span class="val clock" id="v-clock">--:--:--</span></div>
+    <div class="sun">
+      <div class="sunorb" onclick="peekCore()" title="ask him"><div class="ring"></div><div class="ring2"></div></div>
+      <div class="sunlabel"><span class="nm">MANJUEL</span><span class="say" id="core-say">sealed · air-gapped · he shines and he watches</span></div>
+      <button class="peekbtn" onclick="peekCore()">◇ ASK HIM</button>
+    </div>
+  </div>
+
+  <!-- THE TABLE -->
+  <div id="deck">
+
+    <!-- LEFT FOLD: THE MISSION BOARD — the carrier -->
+    <div class="fold" id="foldL">
+      <div class="foldtab" onclick="pin('foldL')" title="hover to look · click to pin"><span>▦ THE MISSION BOARD</span><span class="pin">◉</span></div>
+      <div class="foldpanel">
+        <div class="cap"><span class="dot"></span> THE BOARD · carries the missions · gates the doorway</div>
+        <div class="body">
+          <div class="section">THE GARDEN · clay in the sand</div>
+          <div class="kit" id="sand"><div class="slot"><div class="info"><div class="nm">looking in the sand…</div></div></div></div>
+
+          <div class="section">SEND A MISSION</div>
+          <div class="load">
+            <textarea class="grow" id="m-purpose" rows="1" placeholder="what is the mission? (plain english)"></textarea>
+            <textarea class="grow" id="m-scope" rows="1" placeholder="scope — the wall it can't cross"></textarea>
+            <div class="row">
+              <select id="m-little"></select>
+              <select id="m-min"><option value="1">1 min</option><option value="2">2 min</option><option value="5">5 min</option><option value="10">10 min</option></select>
+            </div>
+            <button class="deploybtn" onclick="deploy()">◆ DEPLOY MISSION</button>
+            <div class="note">you direct · the board gates · the pack moves the little · you observe. refused at the gate means nothing moves at all.</div>
+          </div>
+
+          <div class="section">MISSIONS · every story, carried</div>
+          <div id="threads"><div class="note">no missions yet — the board is listening.</div></div>
+
+          <div class="section">KIT · on the rack</div>
+          <div class="kit" id="kit"><div class="slot"><div class="info"><div class="nm">loading kit…</div></div></div></div>
+
+          <div class="section">SCRATCH · notes</div>
+          <div class="load"><textarea class="grow" id="notepad" rows="2" placeholder="scratch your notes here… (stays on the board)"></textarea></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: STEWARD — the plain dashboard. the front door. -->
+    <div class="col" id="steward">
+      <div class="cap"><span class="dot" id="st-dot"></span> STEWARD · the front door · the conversation is the record</div>
+      <div class="body">
+        <div class="greeter">
+          <div class="halo">◈</div>
+          <div class="who">STEWARD</div>
+          <div class="tagline">“illuminate your understanding”</div>
+          <div class="role">his words · ask him anything — he researches, weighs, and brings the core's ruling</div>
+        </div>
+        <div id="st-log"></div>
+        <div class="chat">
+          <textarea class="grow" id="ask" rows="1" placeholder="ask steward, or give him a task to research…"></textarea>
+          <button class="btn" onclick="ask()">ASK</button>
+          <button class="btn hud" onclick="research()">RESEARCH</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT FOLD: THE FORGE -->
+    <div class="fold right" id="foldR">
+      <div class="foldtab" onclick="pin('foldR')" title="hover to look · click to pin"><span>△ THE FORGE</span><span class="pin">◉</span></div>
+      <div class="foldpanel">
+        <div class="cap"><span class="dot"></span> THE FORGE · shape in the fire · one door out</div>
+        <div class="body forgebox">
+          <div class="section">△ SHAPE A FIGURE</div>
+          <div class="load">
+            <textarea class="grow" id="f-name" rows="1" placeholder="name the figure"></textarea>
+            <textarea class="grow" id="f-code" rows="4" placeholder="code to run in the fire… (it grows with you)"></textarea>
+            <button class="deploybtn" onclick="shapeRun()">△ SHAPE + RUN</button>
+            <div class="note">figures are mortal clay — they run watched, in the sand, and nothing leaves the fire except by your own hand.</div>
+          </div>
+          <div id="f-out"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MISSION TICKER -->
+  <div id="ticker">
+    <div class="live"><span class="rec"></span> MISSION FEED</div>
+    <div id="crawl"><span id="crawltxt"><span class="td">▸ the estate is online · aurora is watching the sky · fold out the mission board and deploy to see the dance ▸</span></span></div>
+  </div>
+
+</div>
+<script>
+const TOKEN="__FORGE_TOKEN__",BASE=location.origin,$=id=>document.getElementById(id);
+function esc(s){return (s||"").replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+async function post(p,d){const r=await fetch(BASE+p,{method:"POST",headers:{"Content-Type":"application/json","X-Forge-Token":TOKEN},body:JSON.stringify(d)});return r.json();}
+async function get(p){const r=await fetch(BASE+p);return r.json();}
+
+/* every text box is expandable context — it grows as you speak */
+function growAll(){document.querySelectorAll("textarea.grow").forEach(t=>{
+  const g=()=>{t.style.height="auto";t.style.height=Math.min(t.scrollHeight+2,420)+"px";};
+  t.addEventListener("input",g);g();
+});}
+growAll();
+
+/* the folds breathe: approach and they open, leave and they rest.
+   click the tab to PIN one open while you work in it. */
+document.querySelectorAll(".fold").forEach(f=>{
+  f.addEventListener("mouseenter",()=>f.classList.add("open"));
+  f.addEventListener("mouseleave",()=>{if(!f.classList.contains("pinned"))f.classList.remove("open");});
+});
+function pin(id){const f=$(id);f.classList.toggle("pinned");
+  if(f.classList.contains("pinned"))f.classList.add("open");}
+
+setInterval(()=>{$("v-clock").textContent=new Date().toTimeString().slice(0,8);},1000);
+
+/* ---- the transcript: nothing overwrites; the conversation accumulates ---- */
+function say(who,text,cls){
+  const d=document.createElement("div");d.className="msg "+(cls||"");
+  d.innerHTML='<span class="who">'+esc(who)+'</span>'+esc(text);
+  $("st-log").appendChild(d);$("st-log").scrollTop=$("st-log").scrollHeight;
+}
+
+/* ---- the ticker ---- */
+function tick(segments){
+  let s="";
+  segments.forEach(seg=>{ s+=' <span class="tk">▸ '+esc(seg.k)+':</span> <span class="'+(seg.w?'tw':'tv')+'">'+esc(seg.v)+'</span> '; });
+  s+=' <span class="td">▸</span> ';
+  $("crawltxt").innerHTML=s+s;
+}
+
+async function boot(){
+  try{await get("/ping");$("v-forge").textContent="online";$("v-forge").className="val good";}catch(e){$("v-forge").textContent="offline";$("v-forge").className="val off";}
+  try{const s=await post("/ask_manjuel",{message:"ping"});
+    if(s.error){$("v-steward").textContent="offline";$("v-steward").className="val off";$("v-core").textContent="unreachable";$("v-core").className="val off";}
+    else{$("v-steward").textContent="● reached";$("v-steward").className="val good";$("v-core").textContent="SEALED";$("v-core").className="val seal";}
+  }catch(e){$("v-steward").textContent="offline";}
+  loadBoard();
+}
+async function loadBoard(){
+  try{
+    const sand=await get("/board/sand");
+    let sh="";(sand.clay||[]).forEach(c=>{sh+='<div class="slot"><div class="ic">☘</div><div class="info"><div class="nm">'+esc(c)+'</div><div class="meta">mortal clay · in the garden</div></div><span class="rd idle">READY</span></div>';});
+    $("sand").innerHTML=sh||'<div class="slot"><div class="info"><div class="nm">the garden is empty — shape a little in the forge</div></div></div>';
+    const sel=$("m-little");const keep=sel.value;sel.innerHTML="";
+    (sand.clay||[]).forEach(c=>{const o=document.createElement("option");o.value=c;o.textContent=c;sel.appendChild(o);});
+    if(keep)sel.value=keep;
+  }catch(e){}
+  try{
+    const inv=await get("/board/kit"),w=await get("/board/weigh");
+    const reads={};(w.assessment||[]).forEach(a=>reads[a.tool]=(a.board_reads||[]).join(" "));
+    $("v-kit").textContent=(inv.count||0)+" tools";$("v-kit").className="val good";
+    let h="";
+    (inv.tools||[]).forEach(t=>{
+      const rd=reads[t.name]||"";
+      const cls=rd.includes("reliable")?"rel":rd.includes("cracking")?"crk":"idle";
+      const tag=rd.includes("reliable")?"TESTED":rd.includes("cracking")?"CRACKING":"RACKED";
+      h+='<div class="slot"><div class="ic">▪</div><div class="info"><div class="nm">'+esc(t.name)+'</div><div class="meta">uses '+t.uses+' · '+esc(t.note||'')+'</div></div><span class="rd '+cls+'">'+tag+'</span></div>';
+    });
+    $("kit").innerHTML=h||'<div class="slot"><div class="info"><div class="nm">the rack is empty</div></div></div>';
+  }catch(e){$("kit").innerHTML='<div class="slot"><div class="info"><div class="nm">kit unavailable</div></div></div>';}
+  loadMissions();
+}
+async function loadMissions(){
+  try{
+    const d=await get("/board/missions");
+    $("v-ledger").textContent=(d.total||0)+" carried";$("v-ledger").className="val good";
+    let h="";
+    (d.missions||[]).forEach(m=>{
+      const g=(m.gate||{}).verdict||"—";
+      const done=(m.outcome||"").startsWith("COMPLETE"),held=g==="REFUSED"||(m.outcome||"").startsWith("HELD");
+      const tag=held?"HELD":done?"COMPLETE":(m.outcome||"").startsWith("CAME UP SHORT")?"SHORT":"…";
+      const cls=held?"held":done?"rel":tag==="SHORT"?"crk":"idle";
+      h+='<details class="thread"><summary><span class="tkt">'+esc(m.ticket||"")+'</span><span class="pur">'+esc(m.purpose||"")+'</span><span class="rd '+cls+'">'+tag+'</span></summary>'+
+         '<div class="story">'+
+         '<b>DIRECTED</b> '+esc(m.t||"")+' · littles: '+esc((m.littles||[]).join(", ")||"—")+' · tools: '+esc((m.tools||[]).join(", ")||"none")+' · '+esc(String(m.minutes||"—"))+'m<br>'+
+         '<b>SCOPE</b> '+esc(m.scope||"(none)")+'<br>'+
+         '<b>GATED</b> '+esc(g)+((m.gate&&m.gate.refusals&&m.gate.refusals.length)?' — '+esc(m.gate.refusals.join("; ")):"")+'<br>'+
+         '<b>OUTCOME</b> '+esc(m.outcome||"—")+
+         (m.success_rate!=null?'<br><b>SUCCESS</b> '+m.success_rate:"")+
+         (m.where_worse?'<br><b>WORSE</b> '+esc(m.where_worse):"")+
+         '</div></details>';
+    });
+    $("threads").innerHTML=h||'<div class="note">no missions yet — the board is listening.</div>';
+    const latest=(d.missions||[])[0];
+    if(latest&&latest.outcome){
+      tick([{k:"LAST MISSION",v:latest.purpose||""},{k:"GATE",v:(latest.gate||{}).verdict||"—",w:1},
+            {k:"OUTCOME",v:(latest.outcome||"").replace(/ —.*/,"")},{k:"CARRIED",v:(d.total||0)+" total",w:1}]);
+    }
+  }catch(e){}
+}
+boot();setInterval(loadBoard,8000);
+
+function peekCore(){const q=prompt("Peer into the core — ask Manjuel:");if(q){$("ask").value=q;ask();}}
+
+async function ask(){
+  const q=$("ask").value.trim();if(!q)return;$("ask").value="";$("ask").style.height="auto";
+  say("YOU",q,"you");
+  $("st-dot").className="dot busy";
+  try{const r=await post("/ask_manjuel",{message:q});
+    say(r.error?"UNREACHABLE":"MANJUEL · through steward",r.reply||r.error||"…",r.error?"":"core");
+    if(r.reply)$("core-say").textContent=r.reply.slice(0,64);
+  }catch(e){say("UNREACHABLE","the door did not answer: "+e.message,"");}
+  $("st-dot").className="dot";
+}
+$("ask").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();ask();}});
+async function research(){
+  const task=$("ask").value.trim();if(!task)return;$("ask").value="";$("ask").style.height="auto";
+  say("YOU · research",task,"you");
+  $("st-dot").className="dot busy";
+  say("STEWARD","reasoning — angles, weighing, the core's ruling…","");
+  try{const d=await post("/ask_steward",{task,angles:[task,"risks of: "+task]});
+    if(d.error){say("STEWARD",d.error,"");$("st-dot").className="dot";return;}
+    if(d.plan)say("STEWARD · plan",d.plan,"");
+    (d.responses||[]).forEach(x=>{if(x.text)say("RESEARCH · "+(x.model||"")+" ["+(x.score||0)+"]",x.text.slice(0,400),"");});
+    if(d.ruling){say("MANJUEL RULES",d.ruling,"core");$("core-say").textContent=d.ruling.slice(0,64);}
+  }catch(e){say("STEWARD",e.message,"");}
+  $("st-dot").className="dot";
+}
+
+let FIRE=null;
+async function shapeRun(){
+  const name=$("f-name").value.trim(),code=$("f-code").value;
+  if(!code.trim()){$("f-out").innerHTML='<div class="msg">give the figure code.</div>';return;}
+  const s=await post("/shape",{name,code});FIRE=s.id;
+  const r=await post("/run",{id:s.id});showFire(r.run&&r.run.output);
+}
+function showFire(o){
+  let h='<div class="msg">'+esc(o||"(quiet)")+'</div><div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap">'+
+    '<button class="btn" onclick="reFire()" style="font-size:10px;padding:5px 9px">↻ REMOLD</button>'+
+    '<button class="btn" onclick="smoothFire()" style="font-size:10px;padding:5px 9px">～ SMOOTH</button>'+
+    '<button class="deploybtn" onclick="carryOut()" style="font-size:10px;padding:5px 10px">△ CARRY OUT</button></div>';
+  $("f-out").innerHTML=h;$("core-say").textContent="a figure moved in the fire";
+}
+async function reFire(){if(!FIRE)return;await post("/remold",{id:FIRE,code:$("f-code").value});const r=await post("/run",{id:FIRE});showFire(r.run&&r.run.output);}
+async function smoothFire(){if(!FIRE)return;await post("/smooth",{id:FIRE});FIRE=null;$("f-out").innerHTML='<div class="msg">the fire is banked. nothing kept, nothing lost.</div>';$("core-say").textContent="the fire forgets it";}
+async function carryOut(){
+  if(!FIRE)return;const dest=prompt("Only you can make this real. Where should it go? (a real file path)");if(!dest)return;
+  if(!confirm("Carry this out of the Forge to:\n"+dest+"\n\nThe one door out. Nothing else can do this."))return;
+  const r=await post("/delegate",{id:FIRE,destination:dest,operator_confirm:true});
+  $("f-out").insertAdjacentHTML("beforeend",r.delegated?'<div class="msg" style="border-left-color:var(--phos)">✓ carried out to '+esc(r.to)+'</div>':'<div class="msg">'+esc(r.error||"?")+'</div>');
+  if(r.delegated)$("core-say").textContent="you carried it out — it is real now";
+}
+
+async function deploy(){
+  const purpose=$("m-purpose").value.trim();if(!purpose){alert("give the mission a purpose.");return;}
+  const little=$("m-little").value, mins=$("m-min").value, scope=$("m-scope").value.trim()||"read-only; the garden only";
+  tick([{k:"DIRECTED",v:purpose},{k:"SCOPE",v:scope,w:1},{k:"TIME",v:mins+"m",w:1},{k:"BOARD",v:"gating…"}]);
+  say("BOARD · directed",purpose+"  ·  "+little+"  ·  "+mins+"m","board");
+  try{
+    const r=await post("/board/deploy",{purpose,scope,tools:[],littles:[little],minutes:parseInt(mins)});
+    if(r.error){tick([{k:"MISSION ERROR",v:r.error}]);say("BOARD",r.error,"board");return;}
+    const res=(r.results&&r.results.results&&r.results.results[0]&&r.results.results[0].result)||{};
+    const held=(res.outcome||"").startsWith("HELD");
+    say("BOARD · "+(held?"held at the gate":"observed"),(res.outcome||"done"),"board");
+    loadBoard();
+  }catch(e){tick([{k:"MISSION ERROR",v:e.message}]);}
+}
+</script>
+</body></html>
