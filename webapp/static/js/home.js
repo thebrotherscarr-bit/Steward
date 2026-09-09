@@ -200,6 +200,11 @@ const Home = {
       const input = document.getElementById('home-input');
       if (input) input.focus();      // the loop: he can answer without reaching
       this.paintRecent();
+      // A turn can commit, or open a sitting, or close one. The panels that
+      // read those follow it -- a repository card still saying "2 changed"
+      // after the commit it just watched is the two halves disagreeing again.
+      this.readGit();
+      this.readSittings();
     }
   },
 
@@ -318,11 +323,14 @@ const Home = {
   // button that shelled out to git would be a second write-path past
   // everything this estate checks.
   commit() {
+    // HIS OWN PHRASING, from the record: "git commit" appears 36 times in
+    // sessions.jsonl and the estate composes the message from what changed.
+    // The first wrapper here read "Commit the working tree with this message:
+    // X" and the Router passed that WHOLE SENTENCE as the message -- a commit
+    // titled after its own instruction. A quoted message reads the way he
+    // types one, and an empty field falls back to what already works.
     const msg = (document.getElementById('git-msg') || {}).value || '';
-    const said = msg.trim()
-      ? `Commit the working tree with this message: ${msg.trim()}`
-      : 'Commit the working tree. Read what changed and write one line saying what it was.';
-    this.ask(said);
+    this.ask(msg.trim() ? `git commit: "${msg.trim()}"` : 'git commit');
   },
 
   push() {
