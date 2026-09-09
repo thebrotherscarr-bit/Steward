@@ -27,10 +27,10 @@ func findFixture(t *testing.T, name string) []byte {
 func TestPlayContract(t *testing.T) {
 	raw := findFixture(t, "playground_vectors.json")
 	var doc struct {
-		NameRe  string   `json:"name_re"`
-		Good    []string `json:"good_names"`
-		Bad     []string `json:"bad_names"`
-		Render  struct {
+		NameRe string   `json:"name_re"`
+		Good   []string `json:"good_names"`
+		Bad    []string `json:"bad_names"`
+		Render struct {
 			Body string            `json:"body"`
 			Vars map[string]string `json:"vars"`
 			Want string            `json:"want"`
@@ -45,8 +45,8 @@ func TestPlayContract(t *testing.T) {
 			Receipt string `json:"receipt"`
 		} `json:"receipt_example"`
 		Seat struct {
-			Re      string `json:"re"`
-			Cases   []struct {
+			Re    string `json:"re"`
+			Cases []struct {
 				Raw      string `json:"raw"`
 				Seat     string `json:"seat"`
 				Question string `json:"question"`

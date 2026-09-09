@@ -48,6 +48,15 @@ const Home = {
 
       <div id="home-brief" class="card home-brief"></div>
 
+      <div class="card" id="home-engine-card">
+        <div class="card-header">
+          <span class="card-title">The engine</span>
+          <span class="flex" id="home-engine-controls"></span>
+        </div>
+        <div id="home-engine"></div>
+        <pre id="home-boot" class="home-boot" hidden></pre>
+      </div>
+
       <div class="card" id="home-recent-card" hidden>
         <div class="card-title">Recent</div>
         <div id="home-recent"></div>
@@ -113,6 +122,143 @@ const Home = {
     el.textContent = text || '';
   },
 
+  // The engine, as the door reports it -- never cached. A dashboard that
+  // remembered "open" would keep saying so after a crash.
+  paintEngine() {
+    const box = document.getElementById('home-engine');
+    const bar = document.getElementById('home-engine-controls');
+    if (!box || !bar) return;
+    const t = (iso) => { try { return new Date(iso).toLocaleTimeString(); } catch { return iso; } };
+
+    if (Run.unreachable) {
+      box.innerHTML = '<div class="eng-row eng-bad">The MCP door did not answer. ' +
+        'Nothing can be opened or closed until it does.' +
+        '<span class="brief-src">run/state</span></div>';
+      bar.innerHTML = '';
+      return;
+    }
+    if (!Run.engineOpen) {
+      box.innerHTML = '<div class="eng-row eng-warn">No engine on <b>' +
+        escHtml(Run.world || 'this world') + '</b>. Nothing will run until one is open. ' +
+        'Booting starts a sitting; closing pays its toll.' +
+        '<span class="brief-src">run/state</span></div>';
+      bar.innerHTML = '<button class="btn btn-sm btn-primary" id="eng-boot">Boot</button>';
+      document.getElementById('eng-boot').onclick = () => this.boot();
+      return;
+    }
+
+    const rows = ['<div class="eng-row">Engine open on <b>' + escHtml(Run.world) +
+      '</b> — sitting <b>' + escHtml(Run.sitting || '?') + '</b>' +
+      (Run.session ? ' · session <code>' + escHtml(Run.session) + '</code>' : '') +
+      (Run.started ? '<span class="muted"> · started ' + escHtml(t(Run.started)) + '</span>' : '') +
+      '<span class="brief-src">run/state</span></div>'];
+
+    // THE ROW THAT USED TO BE A SENTENCE IN A CHANGELOG. The engine runs
+    // whatever manjuel/*.py said when it was spawned, and he no longer has a
+    // REPL to restart. Seats, skills and pipelines hot-reload at the next turn
+    // and are deliberately NOT counted here -- an alarm over a doc edit would
+    // teach him to ignore the one row that matters.
+    if (Run.stale) {
+      rows.push('<div class="eng-row eng-warn">This engine is running code from before ' +
+        'your last edit — <code>' + escHtml(Run.staleFile || 'manjuel') + '</code> changed at ' +
+        escHtml(t(Run.codeChanged)) + ', and this process started at ' +
+        escHtml(t(Run.started)) + '. Reboot to pick it up. ' +
+        '<span class="muted">(Seats, skills and pipelines hot-reload; only code needs this.)</span>' +
+        '<span class="brief-src">run/state</span></div>');
+    }
+    box.innerHTML = rows.join('');
+    bar.innerHTML = '<button class="btn btn-sm" id="eng-close">Close sitting</button>' +
+      '<button class="btn btn-sm ' + (Run.stale ? 'btn-primary' : '') + '" id="eng-boot">Reboot</button>';
+    document.getElementById('eng-close').onclick = () => this.closeSitting();
+    document.getElementById('eng-boot').onclick = () => this.boot();
+  },
+
+  bootLine(text, append) {
+    const el = document.getElementById('home-boot');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = append ? (el.textContent + text) : text;
+    el.scrollTop = el.scrollHeight;
+  },
+
+  busy(on, what) {
+    const bar = document.getElementById('home-engine-controls');
+    if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = on; });
+    if (what) this.bootLine(what + '\n', true);
+  },
+
+  // Closing is not a formality: it pays the toll and writes `ended`. A sitting
+  // left open is exactly what makes the next open refuse, and a killed engine
+  // is what leaves one open.
+  async closeSitting() {
+    this.busy(true, 'closing the sitting (the toll is paid, `ended` is written)...');
+    try {
+      this.bootLine(await App.tool('env_close', {}) + '\n', true);
+    } catch (e) {
+      this.bootLine('REFUSED: ' + e.message + '\n', true);
+    }
+    await Run.check();
+    this.busy(false);
+    this.paintEngine();
+    this.paint();
+  },
+
+  // The boot, in the order the REPL does it. Each step shows its own words,
+  // and a step that fails says so while the rest still runs -- boot.py's own
+  // rule: "a boot report that vanishes when one thing is down is worse than
+  // no boot report".
+  async boot() {
+    this.bootLine('', false);
+    this.busy(true, '');
+    if (Run.engineOpen) {
+      this.bootLine('closing the open sitting first...\n', true);
+      try { this.bootLine(await App.tool('env_close', {}) + '\n', true); }
+      catch (e) { this.bootLine('close refused: ' + e.message + '\n', true); }
+    }
+    this.bootLine('\nopening a fresh engine...\n', true);
+    try {
+      this.bootLine(await App.tool('env_open', {}) + '\n', true);
+    } catch (e) {
+      this.bootLine('REFUSED: ' + e.message + '\n', true);
+      await Run.check();
+      this.busy(false);
+      this.paintEngine();
+      return;
+    }
+    await Run.check();
+    this.paintEngine();
+    this.paint();
+    await this.bootStep('/warm', "\nloading this pipeline's models (/warm)...\n");
+    await this.bootStep('/status', '\nthe boot report (/status)...\n');
+    this.busy(false);
+    await Run.check();
+    this.paintEngine();
+    this.paint();
+  },
+
+  // One /command through the council stream, its printed text shown as it
+  // arrives. A command's output IS its text; its delivery carries nothing
+  // extra worth repeating.
+  bootStep(command, header) {
+    return new Promise((done) => {
+      this.bootLine(header, true);
+      const es = new EventSource(API.base + '/council/stream?' +
+                                 new URLSearchParams({ objective: command }));
+      es.addEventListener('engine', (e) => {
+        let d; try { d = JSON.parse(e.data); } catch { return; }
+        if (d.event === 'text' || d.event === 'report') this.bootLine(d.text || '', true);
+        if (d.event === 'error') this.bootLine('\n' + (d.text || '') + '\n', true);
+      });
+      es.addEventListener('stream_end', () => { es.close(); done(); });
+      es.addEventListener('stream_error', (e) => {
+        let d = {}; try { d = JSON.parse(e.data); } catch {}
+        this.bootLine('\nREFUSED: ' + (d.error || 'the step was refused') + '\n', true);
+        es.close(); done();
+      });
+      es.onerror = () => { es.close(); done(); };
+    });
+  },
+
   // ---- the brief ----------------------------------------------------------
 
   // Each fact is asked for on its own and is allowed to fail on its own. A
@@ -131,6 +277,7 @@ const Home = {
     void state;
     this.brief = { muster, rack };
     this.paint();
+    this.paintEngine();
   },
 
   bad(v) { return v && typeof v === 'object'; },
@@ -147,9 +294,13 @@ const Home = {
     } else if (!Run.engineOpen) {
       out.push({
         tone: 'warn', source: 'run/state',
+        // The Boot button below now DOES open one. What still holds is the
+        // part that matters: nothing opens BY ITSELF. Opening starts a
+        // sitting, and a sitting nobody meant to start is what every
+        // refusal in this system guards against.
         text: 'No engine is open' + (Run.world ? ' on ' + Run.world : '') + ', so nothing typed above will run. ' +
-              'This page will not open one for you — that would start a sitting you never started.',
-        act: { label: 'How', hint: 'env_open' }
+              'Booting starts a sitting; nothing opens one on its own.',
+        act: { label: 'Boot', to: 'engine' }
       });
     }
 
@@ -199,11 +350,13 @@ const Home = {
       <div class="brief-row brief-${r.tone}">
         <div class="brief-text">${escHtml(r.text)}</div>
         <div class="brief-side">
-          ${r.act && r.act.to ? `<button class="btn btn-sm" data-goto="${r.act.to}">${escHtml(r.act.label)}</button>` : ''}
+          ${r.act && r.act.to === 'engine' ? `<button class="btn btn-sm btn-primary" data-boot="1">${escHtml(r.act.label)}</button>` : ''}
+          ${r.act && r.act.to && r.act.to !== 'engine' ? `<button class="btn btn-sm" data-goto="${r.act.to}">${escHtml(r.act.label)}</button>` : ''}
           ${r.act && r.act.hint ? `<code>${escHtml(r.act.hint)}</code>` : ''}
           <span class="brief-src">${escHtml(r.source)}</span>
         </div>
       </div>`).join('');
+    box.querySelectorAll('[data-boot]').forEach(btn => { btn.onclick = () => this.boot(); });
     box.querySelectorAll('[data-goto]').forEach(btn => {
       btn.onclick = () => { history.pushState(null, '', '/' + btn.dataset.goto); App.router(); };
     });

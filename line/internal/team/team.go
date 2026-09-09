@@ -67,7 +67,7 @@ type Message struct {
 	Receipt    string `json:"receipt"`
 }
 
-func teamPath(home string) string   { return filepath.Join(home, "state", "team.jsonl") }
+func teamPath(home string) string    { return filepath.Join(home, "state", "team.jsonl") }
 func secretsPath(home string) string { return filepath.Join(home, "state", "chat_secrets.json") }
 
 // Receipt binds a crossing (cutter reproduces this byte-for-byte).

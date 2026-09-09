@@ -144,9 +144,9 @@ func AskStream(ctx context.Context, host, model, question string, onToken func(s
 // Detail carries what the door reports about one answer: token counts and
 // durations where Ollama states them, wall time always measured locally.
 type Detail struct {
-	EvalCount     int64
+	EvalCount      int64
 	EvalDurationMs int64
-	WallMs        int64
+	WallMs         int64
 }
 
 // AskDetail is Ask with telemetry: the answer plus what it cost.

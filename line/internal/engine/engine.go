@@ -57,6 +57,11 @@ func (e Event) Str(k string) string {
 var terminal = map[string]bool{
 	"delivery": true, "refused": true, "aborted": true, "cancelled": true,
 	"unreachable": true,
+	// `command` ends a turn that ran no pipeline -- a /command, @seat, the
+	// toll, a remember cue. Before it existed those turns emitted nothing
+	// terminal and this pump waited for the life of the process: /warm over
+	// the wire was measured at 25s with one event and no ending.
+	"command": true,
 }
 
 const (
@@ -73,6 +78,15 @@ const (
 type Engine struct {
 	Ground string
 	Name   string
+	// Started is when this process was spawned. The code it runs is whatever
+	// manjuel/*.py said at that instant -- Python does not reload a module
+	// under a live process -- so this is what makes "the engine is older than
+	// the code" answerable instead of something a human has to remember.
+	Started time.Time
+	// CoreCmd is the command that spawned it, kept so the door can find the
+	// code this engine is actually running rather than a tree someone
+	// configured separately and hoped was the same one.
+	CoreCmd string
 
 	runMu   sync.Mutex // one run at a time per world
 	sendMu  sync.Mutex // C3/I3: writes to stdin serialised on their own lock
@@ -126,6 +140,77 @@ func SittingOpen(ground string) (n float64, started string, open bool) {
 		return num, st, true
 	}
 	return 0, "", false
+}
+
+// ---------------------------------------------------------------------
+// is the engine older than the code it is running
+// ---------------------------------------------------------------------
+
+// CodeRoot is the directory holding the manjuel package this engine runs,
+// derived from the command that spawned it -- never guessed, never configured
+// separately, so it cannot point at a different tree than the one executing.
+func CodeRoot(coreCmd string) string {
+	for _, f := range splitCommand(coreCmd) {
+		if strings.HasSuffix(strings.ToLower(f), ".py") {
+			if d := filepath.Dir(f); d != "" && d != "." {
+				return d
+			}
+		}
+	}
+	return ""
+}
+
+// CodeChanged reports the newest .py under the core, and when it changed.
+//
+// ONLY .py IS COUNTED, and that is the whole point. CLAUDE.md's rule: agents/,
+// skills/, pipelines.md and commands.md are HOT-RELOADED into a running engine
+// at the next turn, so editing a skill needs no restart and must not raise an
+// alarm. manjuel/*.py is NOT reloaded -- a code edit sits on disk while the old
+// code keeps running -- so that, and only that, makes an engine stale.
+//
+// A corner it cannot read reports no change rather than a false alarm. A
+// dashboard that cried "restart" over an unreadable directory would train him
+// to ignore the one row that matters.
+func CodeChanged(coreCmd string) (when time.Time, what string) {
+	root := CodeRoot(coreCmd)
+	if root == "" {
+		return time.Time{}, ""
+	}
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "__pycache__", ".git", "logs", "index", "sessions", "worlds",
+				"agent_workspace", "node_modules", "tests":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".py") {
+			return nil
+		}
+		st, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if st.ModTime().After(when) {
+			when, what = st.ModTime(), p
+		}
+		return nil
+	})
+	return when, what
+}
+
+// Stale answers the question the operator used to carry in his head across a
+// day of edits: is this engine running code that has since changed on disk?
+func (e *Engine) Stale() (stale bool, changed time.Time, what string) {
+	changed, what = CodeChanged(e.CoreCmd)
+	if changed.IsZero() || e.Started.IsZero() {
+		return false, changed, what
+	}
+	return changed.After(e.Started), changed, what
 }
 
 // ---------------------------------------------------------------------
@@ -194,7 +279,12 @@ func Open(name, ground, coreCmd string) (*Engine, error) {
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
-	e := &Engine{Ground: ground, Name: name, cmd: cmd, in: stdin, out: sc, errBuf: errBuf}
+	e := &Engine{Ground: ground, Name: name, cmd: cmd, in: stdin, out: sc, errBuf: errBuf,
+		// The instant the process was spawned, and the command that spawned
+		// it: together they answer whether this engine is older than the code
+		// it is running, which used to be a thing the operator had to hold in
+		// his head across a day of edits.
+		Started: time.Now(), CoreCmd: coreCmd}
 
 	done := make(chan Event, 1)
 	go func() {

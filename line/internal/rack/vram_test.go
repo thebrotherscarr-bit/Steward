@@ -34,10 +34,10 @@ func TestVramGoldens(t *testing.T) {
 			CtxDefault    int              `json:"ctx_default"`
 		} `json:"constants"`
 		Vectors []struct {
-			Name    string `json:"name"`
-			Models  []Voice `json:"models"`
-			Verdict string  `json:"verdict"`
-			Total   int64   `json:"total"`
+			Name    string   `json:"name"`
+			Models  []Voice  `json:"models"`
+			Verdict string   `json:"verdict"`
+			Total   int64    `json:"total"`
 			Evict   []string `json:"evict"`
 		} `json:"vectors"`
 	}

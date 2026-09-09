@@ -62,9 +62,9 @@ type Run struct {
 	Score     *bool  `json:"score,omitempty"`
 }
 
-func promptsDir(home string) string { return filepath.Join(home, "prompts") }
+func promptsDir(home string) string   { return filepath.Join(home, "prompts") }
 func manifestPath(home string) string { return filepath.Join(promptsDir(home), "manifest.json") }
-func runsPath(home string) string { return filepath.Join(promptsDir(home), "runs.jsonl") }
+func runsPath(home string) string     { return filepath.Join(promptsDir(home), "runs.jsonl") }
 
 // Receipt binds a run (cutter reproduces this byte-for-byte).
 func Receipt(kind, prompt string, version int, input, output, ts string) string {
@@ -358,7 +358,7 @@ func RunPrompt(home, name string, v int, vars map[string]string, voice string) (
 		ID: id, TS: ts, Kind: "prompt_run", Prompt: name, Version: p.Version,
 		Voice: routed, Override: strings.TrimSpace(voice) != "",
 		Input: input, Output: answer,
-		Receipt: Receipt("prompt_run", name, p.Version, input, answer, ts),
+		Receipt:   Receipt("prompt_run", name, p.Version, input, answer, ts),
 		LatencyMs: det.WallMs, EvalCount: det.EvalCount,
 	}
 	if err := appendRun(home, r); err != nil {
@@ -408,7 +408,7 @@ func SeatAsk(home, seat, question, voice, method string) (Run, error) {
 		ID: id, TS: ts, Kind: "seat_ask", Seat: seat,
 		Voice: routed, Override: true, Method: strings.TrimSpace(method),
 		Input: question, Output: answer,
-		Receipt: Receipt("seat_ask", seat, 0, question, answer, ts),
+		Receipt:   Receipt("seat_ask", seat, 0, question, answer, ts),
 		LatencyMs: det.WallMs, EvalCount: det.EvalCount,
 	}
 	if err := appendRun(home, r); err != nil {
@@ -472,7 +472,7 @@ func EvalPrompt(home, name string, v int, dataset, voice string) (EvalReport, er
 			ID: id, TS: ts, Kind: "prompt_eval_case", Prompt: name, Version: p.Version,
 			Voice: routed, Override: strings.TrimSpace(voice) != "",
 			Input: canonicalVars(c.Input), Output: answer,
-			Receipt: Receipt("prompt_eval_case", name, p.Version, canonicalVars(c.Input), answer, ts),
+			Receipt:   Receipt("prompt_eval_case", name, p.Version, canonicalVars(c.Input), answer, ts),
 			LatencyMs: det.WallMs, EvalCount: det.EvalCount, Score: &pass,
 		})
 		rep.Got = append(rep.Got, answer)

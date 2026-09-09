@@ -314,7 +314,7 @@ func appendHead(dir, chanName, actor string, ref *Entry, scalar []byte, mb Membe
 	h := &Entry{
 		TS: NowTS(), Kind: "head",
 		Payload: Payload{N: int64(len(entries) + 1), Chan: chanName, To: "@channel",
-			Ct: fmt.Sprintf("head %d: %s n=%d %s", len(entries)+1, actor, ref.Payload.N, ref.Hash[:16]),
+			Ct:   fmt.Sprintf("head %d: %s n=%d %s", len(entries)+1, actor, ref.Payload.N, ref.Hash[:16]),
 			Mode: ModeOpen, Cites: []string{ref.Hash}, Mark: mb.Mark},
 		Prev: prev, Actor: actor,
 	}

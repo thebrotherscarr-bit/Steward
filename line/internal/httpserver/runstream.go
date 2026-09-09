@@ -245,10 +245,7 @@ func (s *Server) handleRunState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	open, sitting, pending := tools.EngineOpen(tn)
 	w.Header().Set("Content-Type", "application/json")
-	b, _ := json.Marshal(map[string]any{
-		"world": tn.Name, "open": open, "sitting": sitting, "pending": pending,
-	})
+	b, _ := json.Marshal(tools.Facts(tn))
 	w.Write(b)
 }

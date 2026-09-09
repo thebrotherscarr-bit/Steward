@@ -59,12 +59,24 @@ const Run = {
       this.engineOpen = !!r.open;
       this.world = r.world || '';
       this.sitting = r.sitting || '';
+      this.session = r.session || '';
       this.pending = r.pending || '';
+      // The engine holds whatever manjuel/*.py said when it was spawned.
+      // ONLY code counts: seats, skills and pipelines hot-reload at the
+      // next turn, and an alarm over a doc edit would teach him to ignore
+      // the one row that matters.
+      this.started = r.started || '';
+      this.stale = !!r.stale;
+      this.staleFile = r.stale_file || '';
+      this.codeChanged = r.code_changed || '';
       this.unreachable = false;
     } catch {
       this.engineOpen = false;
       this.world = '';
       this.sitting = '';
+      this.session = '';
+      this.started = '';
+      this.stale = false;
       this.pending = '';
       this.unreachable = true;
     }

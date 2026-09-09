@@ -11,9 +11,9 @@ import (
 
 // Planner v1 contract (byte-pinned with the cutter — change both or neither).
 const (
-	VramBudget   = int64(15_000_000_000)
+	VramBudget    = int64(15_000_000_000)
 	GraphOverhead = int64(1_500_000_000)
-	CtxDefault   = 4096
+	CtxDefault    = 4096
 )
 
 var kvPerToken = map[string]int64{

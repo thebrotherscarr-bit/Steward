@@ -668,3 +668,14 @@ td code {
                animation: micpulse 1.4s ease-in-out infinite; }
 @keyframes micpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
+/* ---- the engine, controllable from the dashboard ---- */
+.eng-row { padding: 9px 0; font-size: 12px; line-height: 1.55;
+           border-bottom: 1px solid var(--border); }
+.eng-row:last-child { border-bottom: 0; }
+.eng-row .brief-src { float: right; }
+.eng-warn { border-left: 3px solid #f9e2af; padding-left: 10px; }
+.eng-bad  { border-left: 3px solid #f38ba8; padding-left: 10px; }
+.home-boot { margin-top: 10px; max-height: 40vh; overflow: auto; font-size: 11px;
+             white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border);
+             border-radius: var(--radius, 6px); padding: 10px; line-height: 1.5; }
+

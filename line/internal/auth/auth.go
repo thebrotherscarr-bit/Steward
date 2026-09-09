@@ -31,20 +31,20 @@ const Domain = "atlas-auth-v1"
 
 // Key is one stored credential (hash only — the secret never persists).
 type Key struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Hash     string   `json:"hash"`
-	Salt     string   `json:"salt"`
-	Tenants  []string `json:"tenants"`
-	Created  string   `json:"created"`
-	Revoked  string   `json:"revoked,omitempty"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Hash    string   `json:"hash"`
+	Salt    string   `json:"salt"`
+	Tenants []string `json:"tenants"`
+	Created string   `json:"created"`
+	Revoked string   `json:"revoked,omitempty"`
 }
 
 type store struct {
 	Keys []Key `json:"keys"`
 }
 
-func authPath(home string) string { return filepath.Join(home, "state", "auth.json") }
+func authPath(home string) string  { return filepath.Join(home, "state", "auth.json") }
 func auditPath(home string) string { return filepath.Join(home, "state", "auth_audit.jsonl") }
 
 // KDF stretches a key with its salt: HMAC-SHA256 keyed by salt over the

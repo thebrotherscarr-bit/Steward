@@ -13,12 +13,12 @@ import (
 
 // VC is a W3C Verifiable Credential 2.0.
 type VC struct {
-	Context           []string        `json:"@context"`
-	Type              []string        `json:"type"`
-	Issuer            string          `json:"issuer"`
-	IssuanceDate      string          `json:"issuanceDate"`
+	Context           []string          `json:"@context"`
+	Type              []string          `json:"type"`
+	Issuer            string            `json:"issuer"`
+	IssuanceDate      string            `json:"issuanceDate"`
 	CredentialSubject CredentialSubject `json:"credentialSubject"`
-	Proof             *Proof          `json:"proof,omitempty"`
+	Proof             *Proof            `json:"proof,omitempty"`
 }
 
 // CredentialSubject carries the .us declaration mapped to VC fields.

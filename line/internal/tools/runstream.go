@@ -2,7 +2,9 @@ package tools
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"atlas/line/internal/engine"
 	"atlas/line/internal/tenant"
@@ -62,16 +64,56 @@ func ListenStream(t tenant.Tenant, seconds int, sink func(engine.Event)) (string
 	return e.Listen(seconds, sink)
 }
 
+// EngineFacts is what the dashboard needs to show the engine and offer the
+// right control: whether one is standing, what it is waiting on, and whether
+// it is running code that has since changed on disk.
+type EngineFacts struct {
+	Open    bool   `json:"open"`
+	World   string `json:"world"`
+	Sitting string `json:"sitting"`
+	Session string `json:"session"`
+	Pending string `json:"pending"`
+	Started string `json:"started,omitempty"`
+	// Stale means manjuel/*.py changed after this process was spawned, so it
+	// is running code the disk no longer holds. NOT set for a changed skill or
+	// pipeline: those hot-reload at the next turn (CLAUDE.md), and an alarm
+	// that cried over a doc edit would teach him to ignore the one row that
+	// matters.
+	Stale       bool   `json:"stale"`
+	StaleFile   string `json:"stale_file,omitempty"`
+	CodeChanged string `json:"code_changed,omitempty"`
+}
+
 // EngineOpen reports whether a world has an engine standing, and what it is
 // waiting on. The glass asks this before it offers a send box, so the refusal
 // is a disabled button with a reason rather than a failed turn.
 func EngineOpen(t tenant.Tenant) (open bool, sitting string, pending string) {
+	f := Facts(t)
+	return f.Open, f.Sitting, f.Pending
+}
+
+// Facts reads the engine's own state. Nothing here is remembered between
+// calls: a dashboard that cached "open" would keep saying so after a crash.
+func Facts(t tenant.Tenant) EngineFacts {
+	f := EngineFacts{World: t.Name}
 	e, ok := engines.Get(t.Home)
 	if !ok {
-		return false, "", ""
+		return f
 	}
+	f.Open = true
+	o := e.Opened()
+	f.Sitting, f.Session = o.Str("sitting"), o.Str("session")
 	if p := e.Pending(); p != nil {
-		pending = p.Str("prompt")
+		f.Pending = p.Str("prompt")
 	}
-	return true, e.Opened().Str("sitting"), pending
+	if !e.Started.IsZero() {
+		f.Started = e.Started.Format(time.RFC3339)
+	}
+	stale, changed, what := e.Stale()
+	f.Stale = stale
+	if !changed.IsZero() {
+		f.CodeChanged = changed.Format(time.RFC3339)
+		f.StaleFile = filepath.Base(what)
+	}
+	return f
 }

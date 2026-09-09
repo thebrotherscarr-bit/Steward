@@ -27,14 +27,14 @@ func findFixture(t *testing.T, name string) []byte {
 func TestAuthContract(t *testing.T) {
 	raw := findFixture(t, "auth_vectors.json")
 	var doc struct {
-		KeyRe string `json:"key_re"`
-		KidRe string `json:"kid_re"`
-		Iters int    `json:"iters"`
+		KeyRe  string `json:"key_re"`
+		KidRe  string `json:"kid_re"`
+		Iters  int    `json:"iters"`
 		Domain string `json:"domain"`
-		KDF   struct {
-			Key   string `json:"key"`
-			Salt  string `json:"salt"`
-			Hash  string `json:"hash"`
+		KDF    struct {
+			Key  string `json:"key"`
+			Salt string `json:"salt"`
+			Hash string `json:"hash"`
 		} `json:"kdf_example"`
 		Scope []struct {
 			Tenants []string `json:"tenants"`

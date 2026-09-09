@@ -17,13 +17,13 @@ import (
 type Role struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	Permissions map[string]string `json:"permissions"` // tool → allow/deny
+	Permissions map[string]string `json:"permissions"`       // tool → allow/deny
 	Implies     []string          `json:"implies,omitempty"` // roles this role includes
 }
 
 // Policy defines the RBAC policy for a tenant.
 type Policy struct {
-	Roles  map[string]Role `json:"roles"`
+	Roles  map[string]Role   `json:"roles"`
 	Assign map[string]string `json:"assign"` // agent_id → role_name
 }
 

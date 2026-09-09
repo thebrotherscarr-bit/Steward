@@ -28,13 +28,13 @@ type acceptCase struct {
 }
 
 type vector struct {
-	ID     string       `json:"id"`
-	OK     bool         `json:"ok"`
-	Detail string       `json:"detail"`
-	Priv   int64        `json:"priv"`
-	Msg    string       `json:"msg"`
-	Sig    string       `json:"sig"`
-	Cases  []acceptCase `json:"cases"`
+	ID     string         `json:"id"`
+	OK     bool           `json:"ok"`
+	Detail string         `json:"detail"`
+	Priv   int64          `json:"priv"`
+	Msg    string         `json:"msg"`
+	Sig    string         `json:"sig"`
+	Cases  []acceptCase   `json:"cases"`
 	Cert   map[string]any `json:"cert"`
 }
 

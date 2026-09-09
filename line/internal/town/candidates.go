@@ -1,8 +1,8 @@
 // Candidates: what the trade needs this cycle (trade_tasks.candidates,
 // ported decision-for-decision).
 //
-//   * each OPEN work order   -> "trade:wo:<id>"
-//   * each overdue property  -> "trade:patrol:<slug>:<YYYY-MM>" (the month is
+//   - each OPEN work order   -> "trade:wo:<id>"
+//   - each overdue property  -> "trade:patrol:<slug>:<YYYY-MM>" (the month is
 //     part of the key, so patrols recur naturally)
 //
 // known holds every seed_key already in the board history, any status —

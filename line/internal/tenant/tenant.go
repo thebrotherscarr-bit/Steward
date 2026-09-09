@@ -87,7 +87,7 @@ type Tenant struct {
 	Name     string
 	Home     string
 	Manifest Manifest
-	Engine   string     // command that wakes this project's ask_steward engine
+	Engine   string      // command that wakes this project's ask_steward engine
 	Policy   rbac.Policy // RBAC policy for this tenant
 }
 
@@ -103,10 +103,10 @@ func (t Tenant) resolve(rel string) string {
 
 // LinePath / LogPath / RoadCandidates kept for orient compatibility, now
 // manifest-driven.
-func (t Tenant) LinePath() string    { return t.resolve(t.Manifest.Line) }
-func (t Tenant) LogPath() string     { return t.resolve(t.Manifest.Log) }
-func (t Tenant) RoadPath() string    { return t.resolve(t.Manifest.Road) }
-func (t Tenant) StatePath() string   { return t.resolve(t.Manifest.State) }
+func (t Tenant) LinePath() string  { return t.resolve(t.Manifest.Line) }
+func (t Tenant) LogPath() string   { return t.resolve(t.Manifest.Log) }
+func (t Tenant) RoadPath() string  { return t.resolve(t.Manifest.Road) }
+func (t Tenant) StatePath() string { return t.resolve(t.Manifest.State) }
 
 func (t Tenant) RoadCandidates() []string {
 	cands := []string{}
@@ -165,8 +165,8 @@ func (t Tenant) WallRoot() string {
 
 // Registry is the set of tenants this server carries.
 type Registry struct {
-	order        []string
-	byName       map[string]Tenant
+	order         []string
+	byName        map[string]Tenant
 	defaultTenant string
 }
 
