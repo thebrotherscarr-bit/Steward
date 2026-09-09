@@ -69,6 +69,7 @@ const App = {
       case 'traces': this.pageParam ? await this.renderTraceDetail(el) : await this.renderTraces(el); break;
       case 'tools': await this.renderTools(el); break;
       case 'evals': await this.renderEvals(el); break;
+      case 'records': await this.renderRecords(el); break;
       case 'chat': await Chat.render(el); break;
       case 'playground': await Play.render(el); break;
       case 'flows': await Flows.render(el); break;
@@ -564,7 +565,7 @@ const App = {
         <div class="page-header">
           <div>
             <div class="page-title">Evaluations</div>
-            <div class="page-subtitle">The last run, whole — then ${evals.length} scored evals, ${passed} passed, ${failed} failed</div>
+            <div class="page-subtitle">The last run, whole — then ${evals.length} scored evals, ${passed} passed, ${failed} failed. The suites, the standups and the sittings are on <a href="/records" onclick="event.preventDefault();history.pushState(null,'','/records');App.router();">Records</a>.</div>
           </div>
           <div class="flex"><span id="ev-run-state" class="badge">—</span>
             <button class="btn btn-sm" id="ev-run-cancel" type="button" hidden>Cancel</button></div>
@@ -573,11 +574,10 @@ const App = {
           <div class="card-title">The run</div>
           <div id="ev-run" class="chat-log council-log"></div>
         </div>
-        <div id="ev-proof"></div>
         <div class="card">
           <div class="card-title">Scored evals <span class="muted">— written by the Add-an-eval flow, not by the suites</span></div>
           ${evals.length === 0
-            ? '<div class="empty-text">None scored yet. The suites and standups above are read from the record; this table is what someone scored by hand from a trace.</div>'
+            ? '<div class="empty-text">None scored yet. The suites and standups are on <a href="/records" onclick="event.preventDefault();history.pushState(null,&#39;&#39;,&#39;/records&#39;);App.router();">Records</a>, read from the record; this table is what someone scored by hand from a trace.</div>'
             : '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Trace</th><th>Score</th><th>Passed</th><th>Detail</th><th>Time</th></tr></thead><tbody>' +
               evals.map(e => `
                 <tr>
@@ -593,7 +593,6 @@ const App = {
       `;
       const c = document.getElementById('ev-run-cancel');
       if (c) c.onclick = () => Run.cancel();
-      this.paintProof();
       this.paintRun();
       Run.check();
     } catch (e) {
@@ -738,8 +737,10 @@ const App = {
   // Every card names the file it came from; a world that never ran a suite
   // says so rather than rendering as a zero, because "zero passed" and "never
   // run" are opposite claims.
-  async paintProof() {
-    const box = document.getElementById('ev-proof');
+  // Paints into whichever box it is given -- it lived on Evals, it lives on
+  // Records now, and the id is the caller's business rather than this one's.
+  async paintProof(boxId) {
+    const box = document.getElementById(boxId || 'rec-proof');
     if (!box) return;
     box.innerHTML = '<div class="loading">Reading the record...</div>';
     let p;
@@ -853,6 +854,111 @@ const App = {
           <td>${(r.failed || []).length ? escHtml((r.failed || []).join(', ')) : '<span class="muted">—</span>'}</td>
           <td><code>${escHtml(r.report || '')}</code></td></tr>`).join('') +
         `</tbody></table></div></div>` : '');
+  },
+
+  // === RECORDS ===
+  // The estate's own memory: what was proven, what sat, and every document it
+  // carries, sorted by what the document IS.
+  async renderRecords(el) {
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">Records</div>
+          <div class="page-subtitle">What was proven, what sat, and what this ground carries — read from the record, never counted here</div>
+        </div>
+      </div>
+      <div id="rec-proof"></div>
+      <div class="card mt-16">
+        <div class="card-title">The documents</div>
+        <!-- The kinds get their own line and WRAP. In the header they were one
+             unwrapping flex row 621px wide inside a narrower card, so "skills"
+             and "logs" were clipped off the right edge -- two whole kinds
+             invisible on a page whose job is to show what the ground carries. -->
+        <div class="flex" id="rec-kinds" style="flex-wrap:wrap;gap:6px;margin:8px 0 12px"></div>
+        <div id="rec-list"><div class="loading">Reading what this ground carries...</div></div>
+      </div>
+      <div id="rec-doc"></div>`;
+    this.paintProof('rec-proof');
+    this.paintDocs();
+  },
+
+  // The docs, by kind. `records` sorts them; this page only draws the sections
+  // it is handed, so a kind added to the tool appears here without an edit.
+  async paintDocs() {
+    const bar = document.getElementById('rec-kinds');
+    const list = document.getElementById('rec-list');
+    if (!bar || !list) return;
+    let r;
+    try {
+      r = JSON.parse(await this.tool('records', {}));
+    } catch (e) {
+      list.innerHTML = `<div class="eng-row eng-bad">The documents could not be read:
+        ${escHtml(e.message || 'refused')}<span class="brief-src">records</span></div>`;
+      return;
+    }
+    this._recs = r;
+    const kinds = r.kinds || [];
+    if (!kinds.length) { list.innerHTML = '<div class="empty-text">This ground carries no documents.</div>'; return; }
+    this._recKind = this._recKind && kinds.some(k => k.kind === this._recKind)
+      ? this._recKind : kinds[0].kind;
+
+    bar.innerHTML = kinds.map(k =>
+      `<button class="btn btn-sm ${k.kind === this._recKind ? 'btn-primary' : ''}" data-kind="${escHtml(k.kind)}">
+         ${escHtml(k.kind)} <span class="muted">${k.count}</span></button>`).join('') +
+      `<span class="brief-src">records · ${r.count} documents</span>`;
+    bar.querySelectorAll('[data-kind]').forEach(btn => {
+      btn.onclick = () => { this._recKind = btn.dataset.kind; this.paintDocs(); };
+    });
+
+    const kind = kinds.find(k => k.kind === this._recKind) || kinds[0];
+    // Every kind is sorted by name by the tool, except logs, which come back
+    // newest first and capped -- so the note says so rather than letting the
+    // page look like the whole of logs/.
+    list.innerHTML =
+      (kind.kind === 'logs'
+        ? '<div class="stat-note" style="margin-bottom:10px">The newest 60 transcripts, most recent first. The rest are on disk in <code>logs/</code>.</div>'
+        : '') +
+      '<div class="table-wrap"><table><thead><tr><th>document</th><th>kind</th><th>size</th><th>changed</th></tr></thead><tbody>' +
+      kind.documents.map(d => `<tr class="rec-row" data-name="${escHtml(d.name)}" style="cursor:pointer">
+        <td><code>${escHtml(d.name)}</code>${d.sealed ? ' <span class="badge badge-yellow">sealed</span>' : ''}</td>
+        <td><span class="muted">${escHtml(d.kind)}</span></td>
+        <td>${(d.bytes / 1024).toFixed(1)} KB</td>
+        <td>${escHtml(when(Date.parse(d.modified) || 0))}</td></tr>`).join('') +
+      '</tbody></table></div>';
+    list.querySelectorAll('.rec-row').forEach(tr => {
+      tr.onclick = () => this.openDoc(tr.dataset.name);
+    });
+  },
+
+  // One document whole, with the sha256 of the bytes that were served. The
+  // receipt is the point: a page showing a document can be checked against the
+  // disk without trusting the page.
+  async openDoc(name) {
+    const box = document.getElementById('rec-doc');
+    if (!box) return;
+    box.innerHTML = `<div class="card mt-16"><div class="loading">Reading ${escHtml(name)}...</div></div>`;
+    let d;
+    try {
+      d = JSON.parse(await this.tool('records', { name: name }));
+    } catch (e) {
+      box.innerHTML = `<div class="card mt-16"><div class="eng-row eng-bad">
+        ${escHtml(e.message || 'refused')}<span class="brief-src">records</span></div></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card mt-16">
+      <div class="card-header">
+        <span class="card-title">${escHtml(d.name)}
+          ${d.sealed ? '<span class="badge badge-yellow">sealed — read, never edited</span>' : ''}</span>
+        <span class="flex"><button class="btn btn-sm" id="rec-close">Close</button></span>
+      </div>
+      <div class="stat-note">${escHtml(d.kind)} · ${(d.bytes / 1024).toFixed(1)} KB ·
+        changed ${escHtml(when(Date.parse(d.modified) || 0))}
+        <br><span class="hash">sha256 ${escHtml(d.sha256)}</span></div>
+      <pre class="home-boot" style="max-height:60vh;overflow:auto">${escHtml(d.text || '')}</pre>
+    </div>`;
+    const c = document.getElementById('rec-close');
+    if (c) c.onclick = () => { box.innerHTML = ''; };
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
   // === MESSAGES (team bridge) ===

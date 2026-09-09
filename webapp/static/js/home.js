@@ -39,6 +39,19 @@ const Home = {
         </div>
       </div>
 
+      <!-- THE ENGINE FIRST. Nothing below this card runs until one is open --
+           not the box, not the git buttons, not a brief row's action -- and it
+           used to sit three cards down. His word: "move to top of this screen
+           above the chat bar". -->
+      <div class="card" id="home-engine-card">
+        <div class="card-header">
+          <span class="card-title">The engine</span>
+          <span class="flex" id="home-engine-controls"></span>
+        </div>
+        <div id="home-engine"></div>
+        <pre id="home-boot" class="home-boot" hidden></pre>
+      </div>
+
       <div class="card home-box">
         <div id="home-thread" class="home-thread" hidden></div>
         <form id="home-form" class="chat-form">
@@ -58,20 +71,6 @@ const Home = {
           <span class="flex" id="home-git-controls"></span>
         </div>
         <div id="home-git"></div>
-      </div>
-
-      <div class="card" id="home-sittings-card" hidden>
-        <div class="card-title">Recent sittings</div>
-        <div id="home-sittings"></div>
-      </div>
-
-      <div class="card" id="home-engine-card">
-        <div class="card-header">
-          <span class="card-title">The engine</span>
-          <span class="flex" id="home-engine-controls"></span>
-        </div>
-        <div id="home-engine"></div>
-        <pre id="home-boot" class="home-boot" hidden></pre>
       </div>
 
       <div class="card" id="home-recent-card" hidden>
@@ -383,28 +382,6 @@ const Home = {
   // THE SITTINGS, read from the record. Every one of them is a real sitting
   // with a toll owed or paid; a run of them with no toll is a thing he can
   // see rather than discover at a release gate.
-  async readSittings() {
-    const card = document.getElementById('home-sittings-card');
-    const box = document.getElementById('home-sittings');
-    if (!card || !box) return;
-    const p = this.proofs;
-    if (!p) { return; }
-    const rc = p.record || {};
-    const rows = (rc.recent || []).slice(-6).reverse();
-    if (!rows.length) return;
-    card.hidden = false;
-    box.innerHTML = `<div class="sit-head">${rc.sittings} sittings · ${rc.tolled} tolled ·
-        ${rc.runs} runs${rc.still_open ? ' · <span class="tool-bad">' + rc.still_open +
-        ' never closed</span>' : ''}<span class="brief-src">sessions/sessions.jsonl</span></div>` +
-      rows.map(r => `<div class="sit-row">
-        <span class="sit-n">${escHtml(String(r.n))}</span>
-        <span class="muted">${escHtml(String(r.started || '').replace('T', ' '))}</span>
-        <span>${escHtml(String(r.runs))} runs</span>
-        <span>${r.ended ? (r.toll_paid ? '<span class="badge badge-green">tolled</span>'
-                                       : '<span class="badge badge-yellow">no toll</span>')
-                        : '<span class="tool-bad">still open</span>'}</span></div>`).join('');
-  },
-
   block(text) {
     const el = document.getElementById('home-block');
     if (!el) return;
@@ -577,7 +554,6 @@ const Home = {
     this.paint();
     this.paintEngine();
     this.readGit();
-    this.readSittings();
   },
 
   bad(v) { return v && typeof v === 'object'; },
@@ -588,21 +564,13 @@ const Home = {
     const out = [];
     const b = this.brief || {};
 
-    // 1. CAN I WORK. This one gates everything else on the page.
-    if (Run.unreachable) {
-      out.push({ tone: 'bad', text: 'The MCP door did not answer. Nothing here can run until it does.', source: 'run/state' });
-    } else if (!Run.engineOpen) {
-      out.push({
-        tone: 'warn', source: 'run/state',
-        // The Boot button below now DOES open one. What still holds is the
-        // part that matters: nothing opens BY ITSELF. Opening starts a
-        // sitting, and a sitting nobody meant to start is what every
-        // refusal in this system guards against.
-        text: 'No engine is open' + (Run.world ? ' on ' + Run.world : '') + ', so nothing typed above will run. ' +
-              'Booting starts a sitting; nothing opens one on its own.',
-        act: { label: 'Boot', to: 'engine' }
-      });
-    }
+    // 1. CAN I WORK -- ANSWERED BY THE CARD ABOVE, NOT HERE. The engine card
+    // moved to the top of this page at his word, and it already says both
+    // things this row used to: that the door is unreachable, or that no engine
+    // is open, each with the Boot button beside it. Saying it again three
+    // inches lower was the same duplication that came off the Chat header in
+    // the same pass -- one fact printed twice, the smaller copy looking like a
+    // second, separate fault.
 
     // 2. IS SOMETHING WAITING ON ME. Nothing on this page outranks it.
     if (Run.pending) {
@@ -734,8 +702,18 @@ const Home = {
         (this.brief.muster || '').split('\n').slice(1).map(s => s.trim()).filter(Boolean).length;
       if (sub) sub.textContent = 'Nothing is waiting on you.';
       box.className = 'card home-brief quiet';
+      // IT SAYS WHAT IS TRUE, not one fixed sentence. This line hardcoded
+      // "engine open on X" and only ever ran while one WAS open, because the
+      // no-engine row above used to stop the page reaching it. That row moved
+      // to the engine card this pass, and the first paint afterwards read
+      // "The estate is standing. engine open on research, sitting —" with no
+      // engine open at all -- the exact class of lie this whole page was just
+      // fixed for.
+      const eng = Run.engineOpen
+        ? `engine open on <b>${escHtml(Run.world || '—')}</b>, sitting ${escHtml(Run.sitting || '—')}`
+        : 'no engine open — see the card above';
       box.innerHTML = `<div class="brief-ok">The estate is standing.
-        <span class="muted">engine open on <b>${escHtml(Run.world || '—')}</b>, sitting ${escHtml(Run.sitting || '—')}${worlds ? ` · ${worlds} worlds carried` : ''}</span>
+        <span class="muted">${eng}${worlds ? ` · ${worlds} worlds carried` : ''}</span>
         <span class="brief-src">run/state · muster</span></div>`;
       return;
     }

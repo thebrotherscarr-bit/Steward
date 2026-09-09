@@ -37,7 +37,6 @@ const Chat = {
           <div class="page-subtitle">The whole estate — law gate, one Router, every tool, the recompose</div>
         </div>
         <div class="flex">
-          <span id="chat-engine" class="badge">checking...</span>
           <button class="btn btn-sm" id="chat-clear" type="button">Clear</button>
         </div>
       </div>
@@ -292,12 +291,10 @@ const Chat = {
     if (!this.el || !document.getElementById('chat-thread')) return;  // not the live page
 
     if (what === 'state') {
-      const b = document.getElementById('chat-engine');
-      if (b) {
-        if (Run.unreachable) { b.className = 'badge badge-red'; b.textContent = 'door unreachable'; }
-        else if (Run.engineOpen) { b.className = 'badge badge-green'; b.textContent = 'engine open · sitting ' + (Run.sitting || '?'); }
-        else { b.className = 'badge badge-yellow'; b.textContent = 'no engine'; }
-      }
+      // The engine pill came off this header at his word ("not needed now"):
+      // the composer below is disabled with the whole reason written under it,
+      // and a badge saying the same thing in two words was the smaller, more
+      // alarming half of one fact.
       const send = document.getElementById('chat-send');
       if (send) send.disabled = !Run.engineOpen;
       this.foot(Run.engineOpen ? '' :
