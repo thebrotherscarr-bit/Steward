@@ -40,6 +40,7 @@ const Home = {
       </div>
 
       <div class="card home-box">
+        <div id="home-thread" class="home-thread" hidden></div>
         <form id="home-form" class="chat-form">
           <button class="btn btn-mic" type="button" id="home-mic" title="Speak (local whisper, nothing leaves this machine)">&#127908;</button>
           <input id="home-input" class="input home-input" type="text" autocomplete="off"
@@ -47,7 +48,6 @@ const Home = {
           <button class="btn btn-primary" type="submit" id="home-go">Run</button>
         </form>
         <div id="home-block" class="home-block" hidden></div>
-        <div id="home-out" class="home-out" hidden></div>
       </div>
 
       <div id="home-brief" class="card home-brief"></div>
@@ -75,6 +75,9 @@ const Home = {
     });
     input.focus();
     document.getElementById('home-mic').onclick = () => this.mic();
+    // The thread renders before anything is asked, so a conversation
+    // survives navigating away and back.
+    this.thread();
 
     this.paintRecent();
     await this.read();
@@ -98,23 +101,63 @@ const Home = {
     input.value = '';
     Chat.thread.push({ who: 'him', text: q });
     Chat.thread.push({ who: 'council', text: '', live: true });
-    this.out('', false);
+    this.thread();
     Run.start({ objective: q });
   },
 
-  out(text, show) {
-    const el = document.getElementById('home-out');
-    if (!el) return;
-    el.hidden = show === false ? true : !text;
-    el.textContent = text || '';
-    el.scrollTop = el.scrollHeight;
+  // The last few exchanges of the SHARED thread. Chat renders all of it;
+  // this renders the tail. One array, so the two views cannot disagree.
+  TAIL: 6,
+
+  thread() {
+    const box = document.getElementById('home-thread');
+    if (!box) return;
+    const all = Chat.thread || [];
+    const tail = all.slice(-this.TAIL);
+    box.hidden = !tail.length;
+    if (!tail.length) return;
+    const more = all.length - tail.length;
+    box.innerHTML =
+      (more > 0 ? `<div class="home-more">${more} earlier — the whole conversation is on Chat</div>` : '') +
+      tail.map(m => this.line(m)).join('');
+    box.scrollTop = box.scrollHeight;
+  },
+
+  line(m) {
+    if (m.who === 'him') return `<div class="home-said">${escHtml(m.text)}</div>`;
+    const t = m.turn;
+    if (m.live) return `<div class="home-heard live">${escHtml((t && t.answer) || '')}</div>`;
+    if (t && t.waiting) {
+      return `<div class="home-heard home-gate"><b>The council is asking</b>
+        <div>${escHtml(t.waiting)}</div>
+        <div class="muted">Answer it on Chat — the gate is yours.</div></div>`;
+    }
+    if (t && t.refusal && !t.answer) {
+      return `<div class="home-heard home-bad"><b>REFUSED</b> ${escHtml(t.refusal)}</div>`;
+    }
+    // The failures go on the ANSWER's face, wherever the answer is shown.
+    // An answer that ran on a broken tool says so here too, or this page is
+    // lying by omission the way the old stat cards did.
+    let foot = '';
+    if (t) {
+      const fails = Run.failures(t);
+      if (fails.length) {
+        foot += `<div class="home-bad-note"><b>NOT EVERYTHING RAN</b><br>${fails.map(escHtml).join('<br>')}</div>`;
+      }
+      foot += `<div class="home-said-meta">${escHtml(t.pipeline || 'default')} · ${escHtml(Run.elapsed(t))}</div>`;
+    }
+    return `<div class="home-heard">${escHtml((t && t.answer) || m.text || '')}${foot}</div>`;
   },
 
   // The dashboard's half of a turn: the answer as it streams, one line of what
   // is happening, and -- when it lands -- anything that FAILED, because an
   // answer that ran on a broken tool says so wherever it is shown (LAW 5).
   onRun(what) {
-    if (!document.getElementById('home-out')) return;   // not the live page
+    // The guard names the element this handler actually writes into. It
+    // named `home-out` after that element was replaced by the thread, so
+    // every event returned here and no finished turn was ever attached:
+    // the bubbles rendered empty while the answers streamed past.
+    if (!document.getElementById('home-thread')) return;   // not the live page
     if (what === 'state') { this.paintEngine(); this.paint(); return; }
     if (what === 'start') {
       this.block('starting...');
@@ -122,22 +165,27 @@ const Home = {
       return;
     }
     if (what === 'event') {
-      this.out(Run.turn.answer || '', true);
+      // Only the live bubble moves per event; rebuilding the tail on every
+      // token would fight the scroll and re-render the whole conversation
+      // hundreds of times in one turn.
+      const live = document.querySelector('#home-thread .home-heard.live');
+      if (live) live.textContent = Run.turn.answer || '';
+      else this.thread();
       this.block(Run.nowLine() + ' \u00b7 ' + Run.elapsed());
+      const box = document.getElementById('home-thread');
+      if (box) box.scrollTop = box.scrollHeight;
       return;
     }
     if (what === 'end') {
       this.tick(false);
-      const t = Run.turn;
-      let tail = t.answer || t.refusal || '';
-      const fails = Run.failures(t);
-      if (fails.length) {
-        tail += '\n\nNOT EVERYTHING RAN\n' + fails.join('\n') +
-                '\n(machine-emitted from what happened, not a seat\'s account of it)';
-      }
-      this.out(tail, true);
-      this.block((t.pipeline || 'default') + ' \u00b7 ' + Run.elapsed() +
-                 ' \u00b7 the whole run is on Evals');
+      // Chat owns the thread's entries; this marks the one it was streaming
+      // into so both views agree the turn is over.
+      const last = (Chat.thread || [])[Chat.thread.length - 1];
+      if (last && last.who === 'council') { last.turn = Run.turn; last.live = false; }
+      this.thread();
+      this.block('');
+      const input = document.getElementById('home-input');
+      if (input) input.focus();      // the loop: he can answer without reaching
       this.paintRecent();
     }
   },
@@ -149,7 +197,7 @@ const Home = {
     this._tick = null;
     if (!on) return;
     this._tick = setInterval(() => {
-      if (!Run.running || !document.getElementById('home-out')) { this.tick(false); return; }
+      if (!Run.running || !document.getElementById('home-thread')) { this.tick(false); return; }
       this.block(Run.nowLine() + ' \u00b7 ' + Run.elapsed());
     }, 1000);
   },
