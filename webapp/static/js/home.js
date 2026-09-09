@@ -94,6 +94,34 @@ const Home = {
 
     this.paintRecent();
     await this.read();
+    this.watch(true);
+  },
+
+  // THE GLASS GOES STALE IF NOBODY REPAINTS IT. He read an open sitting off
+  // this page an hour after it closed -- the page was right when it was
+  // painted, and was never painted again. Nothing here is cached between
+  // reads; the fault was that there was only ever one read.
+  //
+  // Paused while the tab is hidden, refreshed the moment it comes back (which
+  // is the moment he looks at it), and stopped as soon as the dashboard is no
+  // longer on screen -- guarded on the element this page actually writes into,
+  // because a route away leaves the interval holding a dead document.
+  watch(on) {
+    clearInterval(this._watch);
+    this._watch = null;
+    if (this._vis) { document.removeEventListener('visibilitychange', this._vis); this._vis = null; }
+    if (!on) return;
+    this._vis = () => {
+      if (document.hidden) return;
+      if (!document.getElementById('home-brief')) { this.watch(false); return; }
+      this.read();
+    };
+    document.addEventListener('visibilitychange', this._vis);
+    this._watch = setInterval(() => {
+      if (!document.getElementById('home-brief')) { this.watch(false); return; }
+      if (document.hidden) return;      // resumed by the listener above
+      this.read();
+    }, 15000);
   },
 
   // ---- the launch ---------------------------------------------------------
@@ -359,10 +387,9 @@ const Home = {
     const card = document.getElementById('home-sittings-card');
     const box = document.getElementById('home-sittings');
     if (!card || !box) return;
-    let p;
-    try { p = JSON.parse(await App.tool('proofs', {})); }
-    catch { return; }
-    const rc = (p && p.record) || {};
+    const p = this.proofs;
+    if (!p) { return; }
+    const rc = p.record || {};
     const rows = (rc.recent || []).slice(-6).reverse();
     if (!rows.length) return;
     card.hidden = false;
@@ -532,13 +559,21 @@ const Home = {
       try { return await App.tool(n, a); }
       catch (e) { return { err: e.message || 'unreadable' }; }
     };
-    const [state, muster, rack] = await Promise.all([
+    const [state, muster, rack, proofs] = await Promise.all([
       Run.check().then(() => null).catch(() => null),
       ask('muster'),
-      ask('rack_list')
+      ask('rack_list'),
+      ask('proofs')
     ]);
     void state;
+    // proofs is asked for ONCE and kept. It carries four things -- the suites,
+    // the standups, the parity runs and the record -- and this page used to
+    // fetch the whole document twice and render only the record.
+    let p = null;
+    try { p = typeof proofs === 'string' ? JSON.parse(proofs) : null; } catch {}
+    this.proofs = p;
     this.brief = { muster, rack };
+    this.readAt = Date.now();       // stamped so the quiet line cannot lie
     this.paint();
     this.paintEngine();
     this.readGit();
@@ -587,6 +622,89 @@ const Home = {
     if (this.bad(b.muster)) {
       out.push({ tone: 'bad', text: 'The worlds could not be read: ' + b.muster.err, source: 'muster' });
     }
+
+    // 4. DO THE PROOFS STILL HOLD. Silent when they do.
+    out.push(...this.proofRows());
+    return out;
+  },
+
+  // Epoch milliseconds, or null if the value cannot be read as a time. NULL IS
+  // THE POINT: the two stamps compared below come from different clocks --
+  // `at` is epoch SECONDS from the Python suites, `code_changed` is an RFC3339
+  // STRING from Go -- and a guard that quietly coerced a bad one would date a
+  // live proof to 1970 and cry stale forever. Unreadable means silent.
+  ms(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') {
+      if (!isFinite(v) || v <= 0) return null;
+      return v > 1e12 ? v : v * 1000;      // ms already, or seconds
+    }
+    if (typeof v === 'string') {
+      const t = Date.parse(v);
+      return isFinite(t) ? t : null;
+    }
+    return null;
+  },
+
+  // The suites and the standup, read from what `proofs` already served. A row
+  // appears only when it changes the next move.
+  proofRows() {
+    const out = [];
+    const p = this.proofs;
+    if (!p) return out;
+
+    if (p.suites_error) {
+      out.push({ tone: 'warn', source: 'tests/last_run.json',
+                 text: 'The suites have left no verdict on disk: ' + p.suites_error });
+    }
+
+    const suites = p.suites || {};
+    let newest = null;
+    for (const name of Object.keys(suites)) {
+      const r = suites[name] || {};
+      const at = this.ms(r.at);
+      if (at != null && (newest == null || at > newest)) newest = at;
+
+      if (r.green === false || (r.state && r.state !== 'finished')) {
+        const failed = Array.isArray(r.failures) ? r.failures : [];
+        const first = failed.length ? String(failed[0]) : '';
+        out.push({
+          tone: 'bad', source: 'tests/last_run.json',
+          text: (r.state && r.state !== 'finished')
+            ? 'The ' + name + ' suite did not finish — it stopped at ' +
+              (r.passed != null ? r.passed : '?') + ' of ' + (r.total != null ? r.total : '?') + '.'
+            : ((r.total - r.passed) || failed.length || '?') + ' of ' + r.total + ' ' + name +
+              ' failed' + (first ? ': ' + first : '') + '.',
+          act: { label: 'Evals', to: 'evals' }
+        });
+      }
+    }
+
+    // THE PROOF PREDATES THE CODE. Same reasoning the engine's own stale row
+    // uses, and skipped outright if either clock is unreadable.
+    const changed = this.ms(Run.codeChanged);
+    if (newest != null && changed != null && changed > newest && !out.length) {
+      out.push({
+        tone: 'warn', source: 'tests/last_run.json',
+        text: 'The suites were last proven ' + when(newest) + ', and ' +
+              (Run.staleFile || 'the core') + ' changed at ' + when(changed) +
+              '. That verdict is about code the disk no longer holds.'
+      });
+    }
+
+    // The standup he runs himself. Newest line wins; never run is not a fault.
+    const runs = Array.isArray(p.standups) ? p.standups : [];
+    const last = runs.length ? runs[runs.length - 1] : null;
+    if (last && (last.green === false || (last.state && last.state !== 'finished'))) {
+      const failed = Array.isArray(last.failed) ? last.failed : [];
+      out.push({
+        tone: 'bad', source: last.report || 'tests/run_history.jsonl',
+        text: 'The last standup failed ' + when(last.at) + ' — ' +
+              (last.passed != null ? last.passed : '?') + ' of ' +
+              (last.total != null ? last.total : '?') + ' held' +
+              (failed.length ? ', starting with ' + String(failed[0]) : '') + '.'
+      });
+    }
     return out;
   },
 
@@ -595,6 +713,20 @@ const Home = {
     if (!box) return;
     const rows = this.rows();
     const sub = document.getElementById('home-sub');
+
+    // A PAGE SHOWING OLD BYTES SAYS SO, on every path. Judged before either
+    // branch below, because what he read off the stale glass was a ROW -- an
+    // engine card an hour out of date -- and a confession that only fired on
+    // the quiet line would have missed it completely. The stale rows still
+    // render: old facts plus "these are old" beats hiding them, since half of
+    // them are still true and this way he can see which.
+    if (this.readAt && Date.now() - this.readAt > 60000) {
+      rows.unshift({
+        tone: 'warn', source: 'last read',
+        text: 'Nothing has been read since ' + when(this.readAt) +
+              '. Everything below is that old.'
+      });
+    }
 
     if (!rows.length) {
       // GREEN IS SILENCE: one line, and it names where it read that from.
