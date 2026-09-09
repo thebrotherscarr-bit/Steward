@@ -662,3 +662,9 @@ td code {
   animation: seatcaret 1s step-end infinite; margin-left: 1px; }
 @keyframes seatcaret { 50% { opacity: 0; } }
 
+/* ---- the mic: local whisper, held by the engine, not the browser ---- */
+.btn-mic { font-size: 15px; line-height: 1; padding: 8px 11px; }
+.btn-mic.hot { border-color: #f38ba8; background: rgba(243,139,168,0.16);
+               animation: micpulse 1.4s ease-in-out infinite; }
+@keyframes micpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+

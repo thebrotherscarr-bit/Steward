@@ -44,6 +44,27 @@ func (h *Handlers) StreamCouncil(w http.ResponseWriter, r *http.Request) {
 	h.pipeSSE(w, r, req)
 }
 
+// ListenCouncil proxies GET /run/listen: one spoken turn, captured by the
+// core's own whisper on this machine. No audio touches this process, the
+// browser or the network -- the engine holds the microphone.
+func (h *Handlers) ListenCouncil(w http.ResponseWriter, r *http.Request) {
+	req, err := http.NewRequest("GET", h.mcpURL()+"/run/listen", nil)
+	if err != nil {
+		jsonErr(w, 502, err.Error())
+		return
+	}
+	qq := req.URL.Query()
+	if v := r.URL.Query().Get("seconds"); v != "" {
+		qq.Set("seconds", v)
+	}
+	if err := h.scopeProject(r, qq, r.URL.Query().Get("project")); err != nil {
+		jsonErr(w, 401, err.Error())
+		return
+	}
+	req.URL.RawQuery = qq.Encode()
+	h.pipeSSE(w, r, req)
+}
+
 // CouncilState proxies GET /run/state: is an engine standing on this world, and
 // is it waiting on an answer? The glass asks before it offers a send box, so a
 // refusal is a disabled control with a reason rather than a turn that fails.

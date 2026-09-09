@@ -38,6 +38,7 @@ const Home = {
 
       <div class="card home-box">
         <form id="home-form" class="chat-form">
+          <button class="btn btn-mic" type="button" id="home-mic" title="Speak (local whisper, nothing leaves this machine)">&#127908;</button>
           <input id="home-input" class="input home-input" type="text" autocomplete="off"
                  placeholder="Say what you want done..." />
           <button class="btn btn-primary" type="submit" id="home-go">Run</button>
@@ -60,6 +61,7 @@ const Home = {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.go(); }
     });
     input.focus();
+    document.getElementById('home-mic').onclick = () => this.mic();
 
     this.paintRecent();
     await this.read();
@@ -80,6 +82,35 @@ const Home = {
     Run.start({ objective: q });
     history.pushState(null, '', '/chat');
     App.router();
+  },
+
+  // Speak, and the words land IN THE BOX. He reads them, fixes whatever
+  // whisper misheard, and presses Enter. Nothing is sent on his behalf.
+  mic() {
+    const btn = document.getElementById('home-mic');
+    const input = document.getElementById('home-input');
+    if (Run.listening) { Run.stopHearing(); this.block(''); btn.classList.remove('hot'); return; }
+    if (!Run.engineOpen) { toast('No engine is open on this world', 'error'); return; }
+    btn.classList.add('hot');
+    this.block('opening the microphone...');
+    Run.hear(
+      (note) => this.block(note),
+      (text) => {
+        btn.classList.remove('hot');
+        this.block('');
+        input.value = (input.value ? input.value + ' ' : '') + text;
+        input.focus();
+        // The caret goes to the end so he can keep talking or keep typing.
+        input.setSelectionRange(input.value.length, input.value.length);
+      },
+      (why) => { btn.classList.remove('hot'); this.block(why); toast(why, 'error'); });
+  },
+
+  block(text) {
+    const el = document.getElementById('home-block');
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || '';
   },
 
   // ---- the brief ----------------------------------------------------------

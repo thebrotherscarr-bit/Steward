@@ -381,6 +381,58 @@ func (e *Engine) Answer(text string, sink func(Event)) (Result, error) {
 	return e.pump(sink)
 }
 
+// Listen captures one spoken turn through the core's own voice.py -- the
+// compiled whisper.cpp, the room calibration, the estate vocabulary bias, and
+// the same call the REPL's /chat makes. Nothing about hearing is implemented
+// on this side of the wire.
+//
+// IT DOES NOT RUN WHAT IT HEARD. The text is returned for the operator to read,
+// edit and send himself. A microphone that fired objectives at the council on
+// its own would be a gate nobody holds (RULE 6), and a misheard word would run
+// before he ever saw it.
+//
+// runMu is held for the capture: one microphone, one input device, and a
+// capture racing a run would interleave two conversations in one ledger.
+func (e *Engine) Listen(seconds int, sink func(Event)) (string, error) {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+	if e.closed.Load() {
+		return "", fmt.Errorf("this engine is closed")
+	}
+	if p := e.Pending(); p != nil {
+		return "", fmt.Errorf("refused: the engine is waiting on an answer (%q); "+
+			"answer it before speaking a new one", p.Str("prompt"))
+	}
+	row := map[string]any{"cmd": "listen"}
+	if seconds > 0 {
+		row["seconds"] = seconds
+	}
+	if err := e.send(row); err != nil {
+		return "", err
+	}
+	// A capture ends in `heard` or `error` and in nothing else. It is not a
+	// turn: no delivery is coming, so pump()'s terminal set would wait forever.
+	for e.out.Scan() {
+		var ev Event
+		if json.Unmarshal(e.out.Bytes(), &ev) != nil {
+			continue
+		}
+		if sink != nil {
+			sink(ev)
+		}
+		switch ev.Kind() {
+		case "heard":
+			return ev.Str("text"), nil
+		case "error":
+			return "", fmt.Errorf("%s", ev.Str("text"))
+		}
+	}
+	if err := e.out.Err(); err != nil {
+		return "", fmt.Errorf("the engine's pipe broke: %w%s", err, e.stderrTail())
+	}
+	return "", fmt.Errorf("the engine stopped speaking mid-capture%s", e.stderrTail())
+}
+
 // Cancel is Ctrl-C. It must NOT take runMu -- the whole point is to reach a
 // turn that is holding it.
 //

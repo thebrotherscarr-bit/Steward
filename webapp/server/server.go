@@ -47,6 +47,7 @@ func (s *Server) ListenAndServe() error {
 	// The council, not a voice: one Manjuel turn with every engine event live.
 	mux.HandleFunc("GET /api/council/stream", s.handlers.StreamCouncil)
 	mux.HandleFunc("GET /api/council/state", s.handlers.CouncilState)
+	mux.HandleFunc("GET /api/council/listen", s.handlers.ListenCouncil)
 	mux.HandleFunc("GET /ws", s.handlers.WS)
 	mux.HandleFunc("GET /api/prompts", s.handlers.ListPrompts)
 	mux.HandleFunc("GET /api/prompts/get", s.handlers.GetPrompt)

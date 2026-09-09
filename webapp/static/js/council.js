@@ -29,6 +29,8 @@
 const Run = {
   es: null,
   running: false,
+  listening: false,
+  mic: null,
   engineOpen: false,
   world: '',
   sitting: '',
@@ -158,6 +160,51 @@ const Run = {
     try { if (this.es) this.es.close(); } catch {}
     this.es = null;
     this.running = false;
+  },
+
+  // hear() captures one spoken turn through the core's voice.py -- the same
+  // compiled whisper the REPL's /chat uses, on this machine, holding this
+  // machine's microphone. No audio reaches the browser or the network.
+  //
+  // The words come back to the CALLER, not to the council. Whoever asked puts
+  // them in a box for him to read and send: a microphone that fired objectives
+  // on its own would be a gate nobody holds (RULE 6).
+  hear(onNote, onHeard, onFail) {
+    if (this.listening || this.running) return;
+    this.listening = true;
+    this.emit('state');
+    const es = new EventSource(API.base + '/council/listen');
+    es.addEventListener('engine', (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      // voice.py's own words -- "listening — speak; the turn ends when you go
+      // quiet", then "2.3s heard — transcribing…". Shown verbatim; this layer
+      // has nothing truer to say about a microphone than voice.py does.
+      if (d.event === 'note') onNote(d.text || '');
+      if (d.event === 'error') { es.close(); this.listening = false; this.emit('state'); onFail(d.text || 'the microphone failed'); }
+      if (d.event === 'heard') { es.close(); this.listening = false; this.emit('state'); onHeard(d.text || ''); }
+    });
+    es.addEventListener('stream_error', (e) => {
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      es.close(); this.listening = false; this.emit('state');
+      onFail(d.error || 'the capture was refused');
+    });
+    es.addEventListener('stream_end', () => {
+      es.close();
+      if (this.listening) { this.listening = false; this.emit('state'); }
+    });
+    es.onerror = () => {
+      if (!this.listening) return;
+      es.close(); this.listening = false; this.emit('state');
+      onFail('the capture stream broke');
+    };
+    this.mic = es;
+  },
+
+  stopHearing() {
+    try { if (this.mic) this.mic.close(); } catch {}
+    this.mic = null;
+    this.listening = false;
+    this.emit('state');
   },
 
   async cancel() {

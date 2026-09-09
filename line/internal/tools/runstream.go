@@ -51,6 +51,17 @@ func AnswerStream(t tenant.Tenant, text string, sink func(engine.Event)) (engine
 	return e.Answer(text, sink)
 }
 
+// ListenStream captures one spoken turn through the core's voice.py. The
+// text is RETURNED, never run: the operator reads it, edits it if whisper
+// misheard, and sends it himself (RULE 6).
+func ListenStream(t tenant.Tenant, seconds int, sink func(engine.Event)) (string, error) {
+	e, ok := engines.Get(t.Home)
+	if !ok {
+		return "", fmt.Errorf("no engine is open on %q -- open one before speaking", t.Name)
+	}
+	return e.Listen(seconds, sink)
+}
+
 // EngineOpen reports whether a world has an engine standing, and what it is
 // waiting on. The glass asks this before it offers a send box, so the refusal
 // is a disabled button with a reason rather than a failed turn.

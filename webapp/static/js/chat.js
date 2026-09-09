@@ -45,6 +45,7 @@ const Chat = {
         <div id="chat-thread" class="chat-thread"></div>
         <div id="chat-now" class="chat-now" hidden></div>
         <form id="chat-form" class="chat-form">
+          <button class="btn btn-mic" type="button" id="chat-mic" title="Speak (local whisper, nothing leaves this machine)">&#127908;</button>
           <input id="chat-input" class="input" type="text" autocomplete="off"
                  placeholder="Say what you want done..." />
           <button class="btn btn-primary" type="submit" id="chat-send">Send</button>
@@ -62,6 +63,23 @@ const Chat = {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
     });
     document.getElementById('chat-cancel').onclick = () => Run.cancel();
+    document.getElementById('chat-mic').onclick = () => {
+      const btn = document.getElementById('chat-mic');
+      const input = document.getElementById('chat-input');
+      if (Run.listening) { Run.stopHearing(); this.now(''); btn.classList.remove('hot'); return; }
+      if (!Run.engineOpen) { toast('No engine is open on this world', 'error'); return; }
+      btn.classList.add('hot');
+      Run.hear(
+        (note) => this.now(note),
+        (text) => {
+          btn.classList.remove('hot');
+          this.now('');
+          input.value = (input.value ? input.value + ' ' : '') + text;
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        },
+        (why) => { btn.classList.remove('hot'); this.now(''); toast(why, 'error'); });
+    };
     document.getElementById('chat-clear').onclick = () => {
       this.thread = []; this.draw();
     };

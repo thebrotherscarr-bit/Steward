@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"atlas/line/internal/engine"
 	"atlas/line/internal/tools"
@@ -138,6 +139,97 @@ func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
 			// The browser closed the tab. The turn keeps running inside the
 			// engine and its transcript still lands -- a closed glass does not
 			// cancel the council's work, and only run_cancel does that.
+			return
+		}
+	}
+}
+
+// GET /run/listen — one spoken turn, over SSE.
+//
+// SSE rather than a plain request because a capture lasts as long as the
+// operator takes to speak, and voice.py's own progress lines ("listening --
+// speak; the turn ends when you go quiet", then "2.3s heard -- transcribing")
+// are what make a mic button feel alive instead of frozen. They ride the same
+// `engine` frame as every other event.
+//
+// The turn ends with `heard`, carrying the text. NOTHING IS RUN: the glass puts
+// those words in the box for him to read and send.
+func (s *Server) handleRunListen(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if s.auth.On {
+		cred := s.credentialFor(bearer(r.Header.Get("Authorization")))
+		if err := s.gateCall("run_start", map[string]any{"project": q.Get("project")}, cred); err != nil {
+			s.m.err()
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+	}
+	s.m.inc("run/listen")
+	tn, err := s.tenants.Resolve(q.Get("project"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	seconds := 0
+	if v, err := strconv.Atoi(q.Get("seconds")); err == nil {
+		seconds = v
+	}
+
+	frames := make(chan engine.Event, 64)
+	done := make(chan struct{})
+	var said string
+	var callErr error
+	go func() {
+		defer close(done)
+		defer close(frames)
+		said, callErr = tools.ListenStream(tn, seconds, func(ev engine.Event) { frames <- ev })
+	}()
+
+	emit := func(kind string, data any) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", kind, string(b))
+		flusher.Flush()
+	}
+	emit("stream_open", map[string]any{"world": tn.Name, "listening": true})
+
+	gone := r.Context().Done()
+	for {
+		select {
+		case ev, ok := <-frames:
+			if !ok {
+				frames = nil
+				continue
+			}
+			emit("engine", ev)
+		case <-done:
+			// Guarded: frames is nil once drained and closed, and ranging a
+			// nil channel blocks forever (the fault that deadlocked
+			// /run/stream after every turn).
+			if frames != nil {
+				for ev := range frames {
+					emit("engine", ev)
+				}
+			}
+			if callErr != nil {
+				emit("stream_error", map[string]any{"error": callErr.Error()})
+				return
+			}
+			emit("stream_end", map[string]any{"heard": said})
+			return
+		case <-gone:
+			// He closed the tab mid-capture. The engine finishes the capture
+			// and drops the text on the floor; nothing was run, so nothing is
+			// half-done.
 			return
 		}
 	}
