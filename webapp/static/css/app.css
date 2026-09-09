@@ -292,16 +292,11 @@ td code {
   position: relative;
   max-width: 400px;
 }
-.search-bar .input { padding-left: 36px; }
-.search-bar::before {
-  content: '&#128269;';
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-3);
-  font-size: 14px;
-}
+.search-bar .input { padding-left: 12px; }
+/* the magnifier was an HTML entity inside CSS -- content: '&#128269;' --
+   which CSS does not decode, so nine literal characters rendered on top of
+   the placeholder. Removed rather than re-escaped: a placeholder that reads
+   beats an icon that might not. */
 
 /* Trace timeline */
 .timeline { position: relative; padding-left: 28px; }

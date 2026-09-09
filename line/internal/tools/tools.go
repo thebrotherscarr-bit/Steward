@@ -225,6 +225,13 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
+		Name: "seats", Writes: false,
+		Description: "the world's own seat declarations and the pipelines they stand in, from agents/ and pipelines.md",
+		Args:        []string{"project?"},
+		Fn:          toolSeats,
+	})
+
+	r.add(Tool{
 		Name: "proofs", Writes: false,
 		Description: "what this world has PROVED, from its own record: the suites' stamp, every live standup, the parity history",
 		Args:        []string{"project?"},

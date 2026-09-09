@@ -212,45 +212,98 @@ const App = {
   },
 
   // === AGENTS ===
+  // THE SEATS, read from agents/*.md and pipelines.md -- the source of truth.
+  // This page listed the webapp's own SQLite table, which nothing writes, on a
+  // ground holding fourteen declared seats. Third instance of that fault today
+  // and the last page carrying it.
   async renderAgents(el) {
-    el.innerHTML = '<div class="loading">Loading agents...</div>';
+    el.innerHTML = '<div class="loading">Reading the seats...</div>';
+    let d;
     try {
-      const data = await API.listAgents();
-      const agents = data.agents || [];
-      el.innerHTML = `
-        <div class="page-header">
-          <div>
-            <div class="page-title">Agent Registry</div>
-            <div class="page-subtitle">${agents.length} agents enrolled</div>
-          </div>
-          <div class="search-bar">
-            <input class="input" placeholder="Search agents..." oninput="App.filterAgents(this.value)">
-          </div>
-        </div>
-        <div class="agent-grid" id="agent-grid">
-          ${agents.map(a => `
-            <div class="agent-card" onclick="location.href='/agents/${a.id}'">
-              <div class="agent-card-name">${escHtml(a.id)}</div>
-              <div class="agent-card-office">${escHtml(a.office || '—')}</div>
-              <div class="agent-card-role">${escHtml(a.role || '—')}</div>
-              <div class="agent-card-meta">
-                <span class="badge ${a.mode === 'primary' ? 'badge-blue' : 'badge-muted'}">${escHtml(a.mode || '—')}</span>
-                <span class="badge badge-muted">reports to: ${escHtml(a.reports_to || '—')}</span>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `;
+      d = JSON.parse(await this.tool('seats', {}));
     } catch (e) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">!</div><div class="empty-text">${escHtml(e.message)}</div></div>`;
+      el.innerHTML = `<div class="empty"><div class="empty-icon">!</div>
+        <div class="empty-text">The seats could not be read: ${escHtml(e.message || 'refused')}</div></div>`;
+      return;
     }
+    const seats = d.seats || [];
+    this._seats = seats;
+
+    // Which pipelines exist at all, so a seat that stands in none is visibly
+    // a racked seat rather than an omission.
+    const pipes = [];
+    for (const s of seats) for (const st of (s.stands_in || [])) {
+      if (pipes.indexOf(st.pipeline) < 0) pipes.push(st.pipeline);
+    }
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">Seats</div>
+          <div class="page-subtitle">${seats.length} declared in <code>agents/</code> ·
+            ${pipes.length} pipelines in <code>pipelines.md</code></div>
+        </div>
+        <div class="search-bar">
+          <input class="input" placeholder="Search seats..." oninput="App.filterAgents(this.value)">
+        </div>
+      </div>
+      ${d.seats_error ? `<div class="card"><div class="eng-row eng-bad">
+        agents/ could not be read: ${escHtml(d.seats_error)}
+        <span class="brief-src">seats</span></div></div>` : ''}
+      <div id="agent-grid">${seats.map((s, i) => this.seatCard(s, i)).join('')}</div>`;
+
+    el.querySelectorAll('[data-prompt]').forEach(b => {
+      b.onclick = () => {
+        const box = document.getElementById('prompt-' + b.dataset.prompt);
+        if (box) { box.hidden = !box.hidden; b.textContent = box.hidden ? 'prompt' : 'hide prompt'; }
+      };
+    });
+  },
+
+  seatCard(s, i) {
+    if (s.error) {
+      return `<div class="card seat-card"><div class="eng-row eng-bad">
+        <b>${escHtml(s.file)}</b> could not be read: ${escHtml(s.error)}</div></div>`;
+    }
+    const f = s.fields || {};
+    const order = s.field_order || Object.keys(f);
+    // The model and the gate lead, because they are what he tunes.
+    const lead = ['Model Target', 'Stage', 'When', 'Wakes On', 'Wakes'];
+    const rest = order.filter(k => lead.indexOf(k) < 0 && (f[k] || '').trim());
+
+    const stands = (s.stands_in || []).map(st =>
+      `<span class="badge badge-blue" title="${escHtml(st.note || '')}">${escHtml(st.pipeline)}
+       <span class="muted">#${st.step}</span>${st.when ? ' · ' + escHtml(st.when) : ''}</span>`).join(' ');
+
+    return `<div class="card seat-card" data-seat="${escHtml((s.name || '').toLowerCase())}">
+      <div class="card-header">
+        <span class="card-title">${escHtml(s.name)}</span>
+        <span class="flex">
+          ${f['Model Target'] ? `<code class="seat-model">${escHtml(f['Model Target'])}</code>` : ''}
+          ${s.prompt ? `<button class="btn btn-sm" data-prompt="${i}">prompt</button>` : ''}
+        </span>
+      </div>
+      <div class="seat-rows">
+        ${lead.filter(k => (f[k] || '').trim()).map(k =>
+          `<div class="seat-row"><span class="seat-k">${escHtml(k)}</span>
+           <span class="seat-v">${escHtml(f[k])}</span></div>`).join('')}
+        ${rest.map(k =>
+          `<div class="seat-row"><span class="seat-k">${escHtml(k)}</span>
+           <span class="seat-v muted">${escHtml(f[k])}</span></div>`).join('')}
+      </div>
+      <div class="seat-stands">
+        ${stands || '<span class="muted">stands in no pipeline — racked, summoned when its flag is raised</span>'}
+        <span class="brief-src">${escHtml(s.file)}</span>
+      </div>
+      ${s.prompt ? `<pre class="seat-prompt" id="prompt-${i}" hidden>${escHtml(s.prompt)}</pre>` : ''}
+    </div>`;
   },
 
   filterAgents(q) {
-    q = q.toLowerCase();
-    document.querySelectorAll('.agent-card').forEach(card => {
-      const text = card.textContent.toLowerCase();
-      card.style.display = text.includes(q) ? '' : 'none';
+    q = (q || '').trim().toLowerCase();
+    document.querySelectorAll('#agent-grid .seat-card').forEach(c => {
+      const hay = (c.dataset.seat || '') + ' ' + c.textContent.toLowerCase();
+      c.hidden = q !== '' && hay.indexOf(q) < 0;
     });
   },
 
