@@ -2,7 +2,9 @@ package server
 
 import (
 	"atlas/webapp/handlers"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -17,6 +19,27 @@ type Server struct {
 
 func New(h *handlers.Handlers, port string, static embed.FS) *Server {
 	return &Server{handlers: h, port: port, static: static}
+}
+
+// etags hashes every embedded file ONCE, at startup. The bytes cannot change
+// while the process runs -- they are compiled into it -- so a tag computed here
+// is correct for the life of the binary, and a rebuild produces a different
+// binary with different tags.
+func etags(root fs.FS) map[string]string {
+	out := map[string]string{}
+	_ = fs.WalkDir(root, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		b, err := fs.ReadFile(root, path)
+		if err != nil {
+			return nil
+		}
+		sum := sha256.Sum256(b)
+		out[path] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		return nil
+	})
+	return out
 }
 
 func (s *Server) ListenAndServe() error {
@@ -80,19 +103,48 @@ func (s *Server) ListenAndServe() error {
 	staticFS, _ := fs.Sub(s.static, "static")
 	fileServer := http.FileServer(http.FS(staticFS))
 
+	// EVERY STATIC FILE CARRIES A VALIDATOR, so a rebuilt binary reaches a tab
+	// that is already open.
+	//
+	// Measured 2026-09-09: `curl -D -` on /js/home.js returned 200 with
+	// Content-Length and NOTHING ELSE -- no ETag, no Last-Modified, no
+	// Cache-Control. An embed.FS reports the zero time as ModTime, so
+	// http.FileServer emits no Last-Modified, and it never emits an ETag. A
+	// response with no validator and no freshness header may be cached
+	// heuristically and served without ever revalidating, which is how one
+	// open tab kept the same bytes across four rebuilds while a freshly
+	// navigated one saw every change.
+	//
+	// `no-cache` is not `no-store`: the browser still caches and still sends
+	// If-None-Match, and an unchanged file still answers 304 with no body. It
+	// simply may not serve a stale copy WITHOUT ASKING. A rebuild changes the
+	// bytes, which changes the tag, which ends the 304.
+	tags := etags(staticFS)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/health" || len(r.URL.Path) > 4 && r.URL.Path[:5] == "/api/" {
 			http.NotFound(w, r)
 			return
 		}
-		f, err := staticFS.(fs.ReadFileFS).ReadFile(r.URL.Path[1:])
-		if err == nil {
-			_ = f
+		serve := func(path string) {
+			if tag, ok := tags[path]; ok {
+				// http.ServeContent reads the ETag off this header and does the
+				// If-None-Match comparison itself, so there is no second copy of
+				// the conditional-request logic here.
+				w.Header().Set("Etag", tag)
+			}
+			w.Header().Set("Cache-Control", "no-cache")
 			fileServer.ServeHTTP(w, r)
+		}
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if _, err := staticFS.(fs.ReadFileFS).ReadFile(name); err == nil {
+			serve(name)
 			return
 		}
+		// Every unknown path is the single-page app's own routing (/records,
+		// /evals, ...), answered with index.html and ITS tag.
 		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		serve("index.html")
 	})
 
 	return http.ListenAndServe(":"+s.port, s.gated(mux))
