@@ -585,3 +585,37 @@ td code {
               background: rgba(243,139,168,0.08); }
 .cev-steps { width: 100%; margin-top: 8px; font-size: 11px; }
 .cev-steps td, .cev-steps th { padding: 2px 6px; text-align: left; }
+
+/* ---- the chat: a conversation, nothing else ---- */
+.chat-card { display: flex; flex-direction: column; }
+.chat-thread { display: flex; flex-direction: column; gap: 12px; min-height: 240px;
+               max-height: 58vh; overflow-y: auto; padding: 4px 2px; }
+.chat-empty { text-align: center; padding: 40px 0; }
+.chat-now { font-size: 11px; color: var(--muted, #6c7086); padding: 6px 2px 0;
+            font-family: var(--mono, monospace); }
+.chat-now::before { content: '●  '; color: var(--accent, #89b4fa); }
+.chat-foot { font-size: 11px; margin-top: 8px; }
+/* [hidden] is a UA rule and loses to any class selector, so a .btn marked
+   hidden kept showing -- the Cancel button stayed up after every turn ended. */
+[hidden] { display: none !important; }
+.chat-meta { font-size: 11px; color: var(--muted, #6c7086); margin-top: 8px;
+             padding-top: 6px; border-top: 1px solid var(--border);
+             white-space: nowrap; }
+.chat-link { background: none; border: 0; padding: 0 0 0 10px; cursor: pointer;
+             color: var(--accent, #89b4fa); font: inherit; text-decoration: none; }
+.chat-detail { margin-top: 8px; font-size: 11px; }
+.chat-tools div { font-family: var(--mono, monospace); }
+.chat-steps { width: 100%; font-size: 11px; margin-top: 6px; }
+.chat-steps td { padding: 2px 6px; }
+
+/* the failures are never behind a click: an answer that ran on a failed tool
+   says so on its face, or the page is lying by omission */
+.chat-notrun { border: 1px solid #f38ba8; background: rgba(243,139,168,0.08);
+               border-radius: 6px; padding: 6px 8px; margin: 8px 0; font-size: 11px; }
+.chat-refused { border-color: #f38ba8; }
+
+/* the gate: the one bubble waiting on the operator */
+.chat-gate { border-color: #f9e2af; background: rgba(249,226,175,0.10); max-width: 100%; }
+.chat-gate-title { font-weight: 600; color: #f9e2af; }
+.chat-gate-prompt { white-space: pre-wrap; margin: 6px 0; }
+

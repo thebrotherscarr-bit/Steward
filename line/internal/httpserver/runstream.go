@@ -111,8 +111,18 @@ func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
 			// Drain whatever the sink queued before the turn ended: a delivery
 			// event that never reached the glass is a turn the operator cannot
 			// see the result of.
-			for ev := range frames {
-				emit("engine", ev)
+			//
+			// GUARDED, and it was not: `frames` is set to nil above when the
+			// channel closes, and ranging a NIL channel blocks forever. That
+			// deadlocked this handler after every turn whose events all arrived
+			// before `done` -- stream_end was never sent, the goroutine leaked,
+			// and the glass showed a finished answer under a running spinner.
+			// nil here means already drained and closed, so there is nothing to
+			// lose by skipping it.
+			if frames != nil {
+				for ev := range frames {
+					emit("engine", ev)
+				}
 			}
 			if callErr != nil {
 				emit("stream_error", map[string]any{"error": callErr.Error()})

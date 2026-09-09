@@ -485,8 +485,21 @@ const App = {
   },
 
   // === EVALS ===
+  // === EVALS: the run, then the judgements on it ===
+  //
+  // The waterfall lives HERE, not on Chat (the operator, 2026-09-09: "this
+  // looks like the evals loops. lets put it there"). Chat is the conversation;
+  // this page is the evidence -- every seat, every tool, every result, the
+  // per-seat table and the transcript, live while a turn runs and kept after
+  // it ends. It reads Run (council.js), the same object Chat reads, so the two
+  // pages can never tell different stories about the same turn.
+  //
+  // NOTHING ON THIS PAGE IS INFERRED. Each row is an event the engine emitted.
+  // `failed` is the engine's own field, the per-seat numbers are its
+  // StepResults -- never a reading of what a seat said about itself (LAW 5).
   async renderEvals(el) {
     el.innerHTML = '<div class="loading">Loading evals...</div>';
+    if (!this._runBound) { Run.on(() => this.paintRun()); this._runBound = true; }
     try {
       const data = await API.listEvals();
       const evals = data.evals || [];
@@ -496,8 +509,14 @@ const App = {
         <div class="page-header">
           <div>
             <div class="page-title">Evaluations</div>
-            <div class="page-subtitle">${evals.length} evals — ${passed} passed, ${failed} failed</div>
+            <div class="page-subtitle">The last run, whole — then ${evals.length} scored evals, ${passed} passed, ${failed} failed</div>
           </div>
+          <div class="flex"><span id="ev-run-state" class="badge">—</span>
+            <button class="btn btn-sm" id="ev-run-cancel" type="button" hidden>Cancel</button></div>
+        </div>
+        <div class="card">
+          <div class="card-title">The run</div>
+          <div id="ev-run" class="council-log"></div>
         </div>
         <div class="stats">
           <div class="stat"><div class="stat-label">Total</div><div class="stat-value">${evals.length}</div></div>
@@ -521,9 +540,110 @@ const App = {
               `).join('') + '</tbody></table></div>'}
         </div>
       `;
+      const c = document.getElementById('ev-run-cancel');
+      if (c) c.onclick = () => Run.cancel();
+      this.paintRun();
+      Run.check();
     } catch (e) {
       el.innerHTML = `<div class="empty"><div class="empty-icon">!</div><div class="empty-text">${escHtml(e.message)}</div></div>`;
     }
+  },
+
+  // paintRun draws the whole turn from Run's kept events. It redraws on every
+  // event rather than appending, so a page opened halfway through a run shows
+  // everything that already happened instead of only the rest.
+  paintRun() {
+    const box = document.getElementById('ev-run');
+    if (!box) return;
+    const t = Run.turn;
+    const badge = document.getElementById('ev-run-state');
+    const cancel = document.getElementById('ev-run-cancel');
+    if (badge) {
+      badge.className = 'badge ' + (Run.running ? 'badge-blue' : t ? 'badge-green' : '');
+      badge.textContent = Run.running ? 'running · ' + Run.elapsed()
+        : t ? (t.verdict || 'done') + ' · ' + Run.elapsed()
+        : (Run.engineOpen ? 'engine open · sitting ' + (Run.sitting || '?') : 'no engine');
+    }
+    if (cancel) cancel.hidden = !Run.running;
+
+    if (!t) {
+      box.innerHTML = '<div class="empty-text">No run yet. Say something on Chat and the whole turn lands here.</div>';
+      return;
+    }
+    const rows = [`<div class="cev cev-obj">${escHtml(t.objective)}</div>`];
+    if (t.thinned) rows.push(`<div class="cev cev-fail"><b>the events were not kept</b> — this turn came back from storage without its record; the delivery below is whole, the step-by-step is not</div>`);
+    for (const ev of t.events) rows.push(this.runRow(ev));
+    if (t.refusal) rows.push(`<div class="cev cev-fail"><b>${escHtml((t.verdict || 'refused').toUpperCase())}</b> ${escHtml(t.refusal)}</div>`);
+    if (t.dropped) rows.push(`<div class="cev cev-fail"><b>${t.dropped} events were dropped</b> — this page did not see everything that ran</div>`);
+    box.innerHTML = rows.join('');
+    box.scrollTop = box.scrollHeight;
+  },
+
+  // One event, one row. An event this build has never heard of is shown
+  // verbatim rather than dropped: an unknown event is still something that
+  // happened, and on this page an omission looks like nothing happening.
+  runRow(d) {
+    const k = d._kind;
+    switch (k) {
+      case 'opened':
+        return `<div class="cev cev-meta"><b>opened</b> sitting ${escHtml(String(d.sitting ?? ''))} · session ${escHtml(d.session || '')}</div>`;
+      case 'run':
+        return `<div class="cev cev-meta"><b>run</b> pipeline <b>${escHtml(d.pipeline || '')}</b>` +
+          (d.review_only ? ' · review only' : '') +
+          (d.feed_chars ? ` · feed ${d.feed_chars} chars` : '') +
+          (d.transcript ? `<br><span class="muted">transcript <code>${escHtml(d.transcript)}</code></span>` : '') + `</div>`;
+      case 'report':
+        return `<div class="cev cev-report">${escHtml((d.text || '').trim())}</div>`;
+      case 'seat':
+        return `<div class="cev cev-seat"><b>${escHtml(d.seat || 'seat')}</b> <span class="muted">${escHtml(d.model || '')}` +
+          (d.timeout ? ` · timeout ${d.timeout}s` : '') + `</span></div>`;
+      case 'token':
+        return '';   // the seat's words are shown whole under its delivery
+      case 'tool':
+        return `<div class="cev cev-tool"><b>tool</b> ${escHtml(d.action || d.tool || d.name || '?')}` +
+          (d.args ? ` <code>${escHtml(JSON.stringify(d.args)).slice(0, 200)}</code>` : '') + `</div>`;
+      case 'tool_result':
+        return `<div class="cev ${d.failed ? 'cev-fail' : 'cev-ok'}"><b>${d.failed ? 'FAILED' : 'ok'}</b> ` +
+          escHtml(d.action || d.tool || d.name || '?') +
+          (d.error ? ` — ${escHtml(d.error)}` : '') +
+          (d.failed && d.text ? ` — ${escHtml(String(d.text).slice(0, 300))}` : '') + `</div>`;
+      case 'note':
+        return `<div class="cev cev-note"><b>note</b> ${escHtml(d.text || '')}</div>`;
+      case 'needs_answer':
+        return `<div class="cev cev-gate"><b>THE COUNCIL IS ASKING</b><div class="cev-prompt">${escHtml(d.prompt || '')}</div>` +
+          `<span class="muted">answered on Chat — the gate is the operator's (RULE 6)</span></div>`;
+      case 'delivery':
+        return this.runDelivery(d);
+      case 'refused': case 'aborted': case 'cancelled': case 'unreachable': case 'error':
+        return `<div class="cev cev-fail"><b>${escHtml(k.toUpperCase())}</b> ${escHtml(d.text || d.error || '')}</div>`;
+      case 'closed':
+        return `<div class="cev cev-meta"><b>closed</b> ${escHtml(d.text || 'the sitting is tolled')}</div>`;
+      default:
+        return `<div class="cev cev-other"><b>${escHtml(String(k))}</b> <code>${escHtml(JSON.stringify(d)).slice(0, 400)}</code></div>`;
+    }
+  },
+
+  runDelivery(d) {
+    const list = (a) => (a || []).map(f => escHtml(typeof f === 'string' ? f : JSON.stringify(f))).join('<br>');
+    let extra = '';
+    if ((d.failures || []).length) {
+      extra += `<div class="cev-notrun"><b>NOT EVERYTHING RAN</b><br>${list(d.failures)}
+        <br><span class="muted">machine-emitted from what happened, not a seat's account of it</span></div>`;
+    }
+    if ((d.out_of_time || []).length) extra += `<div class="cev-notrun"><b>OUT OF TIME</b><br>${list(d.out_of_time)}</div>`;
+    if ((d.notes || []).length) extra += `<div class="muted" style="margin-top:6px">${list(d.notes)}</div>`;
+    const steps = (d.steps || []).map(s =>
+      `<tr><td>${escHtml(String(s.seat || ''))}</td><td>${escHtml(String(s.elapsed ?? ''))}s</td>
+       <td>${escHtml(String(s.tools ?? ''))}</td>
+       <td>${s.skipped ? '<span class="badge badge-yellow">skipped</span>'
+              : s.error ? '<span class="badge badge-red">error</span>'
+                        : '<span class="badge badge-green">ran</span>'}</td></tr>`).join('');
+    return `<div class="cev cev-delivery"><b>DELIVERY</b> ${escHtml(d.pipeline || '')}` +
+      (d.elapsed != null ? ' · ' + escHtml(String(d.elapsed)) + 's' : '') +
+      `<div class="cev-text">${escHtml(d.text || '')}</div>${extra}` +
+      (steps ? `<table class="cev-steps"><thead><tr><th>seat</th><th>elapsed</th><th>tools</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : '') +
+      (d.transcript ? `<div class="muted" style="margin-top:6px">transcript <code>${escHtml(d.transcript)}</code></div>` : '') +
+      `</div>`;
   },
 
   // === MESSAGES (team bridge) ===

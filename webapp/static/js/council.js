@@ -1,356 +1,301 @@
-// ATLAS Council — the chat that reaches the ESTATE, not a voice.
+// Run — the client for one council turn, shared by the pages that show it.
 //
-// Chat (chat.js) sends a question to ONE MODEL: rack.Ask, one voice, one
-// answer. This sends an OBJECTIVE to the whole council: it goes into the
-// world's own Manjuel process, so the sealed law gate stamps it before any
-// model reads a word, the one Router executes the tools, the dedup refuses an
-// identical call, and the recompose puts every failure into the delivery.
+// A turn goes into the world's own Manjuel process, so the sealed law gate
+// stamps it before any model reads a word, the one Router executes the tools,
+// the dedup refuses a repeat, and the recompose puts every failure into the
+// delivery. This file owns the wire and the state; it draws nothing.
 //
-// EVERYTHING ON THIS PAGE IS THE ENGINE'S OWN EVENT. Nothing is inferred from a
-// seat's prose, nothing is summarised, nothing is invented while waiting. The
-// per-seat facts under a delivery (elapsed, skipped, failures) are read off the
-// engine's StepResults, never off what a seat said about itself (LAW 5).
+// TWO SURFACES READ IT, and the operator drew the line between them
+// (2026-09-09): "this looks like the evals loops. lets put it there, rebuild
+// the chat page clean."
+//
+//   Chat  (chat.js)  the conversation — his message, the answer, and one
+//                    honest line of what is happening while it streams.
+//   Evals (app.js)   the run itself — every seat, every tool, every result,
+//                    the per-seat table, the transcript. The inspection.
+//
+// Both read THIS object, so the two pages can never disagree about what ran.
 //
 // PROTOCOL 1's seventeen, verbatim from manjuel/serve.py:
 //   opened text run report seat token tool tool_result needs_answer
 //   delivery refused aborted cancelled unreachable error note closed
 //
 // They all arrive on ONE SSE frame (`event: engine`) with the kind inside, so
-// an event this file has never heard of still lands and is shown verbatim.
-// EventSource has no wildcard listener; naming frames per-kind would mean this
-// page silently loses anything the core adds later, and on a surface whose
-// whole claim is "this is what actually ran", a dropped event looks exactly
-// like nothing having happened.
-const Council = {
+// an event this file has never heard of still lands and is kept. EventSource
+// has no wildcard listener; naming frames per-kind would mean the glass
+// silently loses anything the core adds later, and on a surface whose whole
+// claim is "this is what actually ran", a dropped event looks exactly like
+// nothing having happened.
+const Run = {
   es: null,
   running: false,
   engineOpen: false,
-  seats: {},        // seat name -> the element its tokens stream into
+  sitting: '',
+  pending: '',
+  unreachable: false,
 
-  // ---- the page -----------------------------------------------------------
+  // The current (or most recent) turn. Evals reads this AFTER the fact, which
+  // is why it is never cleared when the stream closes.
+  turn: null,
+  subs: [],
 
-  // renderInto, not render: the council is not its own page. It is what
-  // /chat opens on (RULE 5 -- the operator named the chat page; a second
-  // page beside it was never asked for).
-  async renderInto(el, toVoice) {
-    // A LIVE STREAM MUST NOT SURVIVE THE PAGE THAT OWNED IT. Navigating away
-    // mid-turn and back used to leave the old EventSource reading into a log
-    // element that no longer exists, with `running` stuck true -- so the Run
-    // button stayed disabled forever and the feed showed nothing. The turn
-    // itself keeps going inside the engine, which is right: a closed glass
-    // does not cancel the council's work. Only the reader is dropped.
-    if (this.es) { try { this.es.close(); } catch {} }
-    this.es = null;
-    this.running = false;
-    this.seats = {};
-    el.innerHTML = `
-      <div class="page-header">
-        <div>
-          <div class="page-title">Chat</div>
-          <div class="page-subtitle">The whole estate — law gate, one Router, every tool, the recompose</div>
-        </div>
-        <div class="flex">
-          <span id="council-engine" class="badge">checking...</span>
-          <button class="btn btn-sm" id="council-voice" type="button">Voice</button>
-          <button class="btn btn-sm" id="council-refresh" type="button">Refresh</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Objective</div>
-        <form id="council-form" class="chat-form">
-          <input id="council-input" class="input" type="text" autocomplete="off"
-                 placeholder="Set the objective and watch the council work..." />
-          <button class="btn" type="submit" id="council-send">Run</button>
-          <button class="btn btn-sm" type="button" id="council-cancel">Cancel</button>
-        </form>
-        <div id="council-status" class="muted" style="margin-top:8px"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">What is actually happening</div>
-        <div id="council-log" class="chat-log council-log"></div>
-      </div>`;
-    document.getElementById('council-form').onsubmit = (e) => { e.preventDefault(); this.go(); };
-    document.getElementById('council-cancel').onclick = () => this.cancel();
-    document.getElementById('council-refresh').onclick = () => this.checkEngine();
-    const v = document.getElementById('council-voice');
-    if (v && toVoice) v.onclick = () => toVoice();
-    // Enter sends. The form's implicit submit is not reliable in every
-    // host, and a send box that ignores Enter reads as broken.
-    document.getElementById('council-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.go(); }
-    });
-    await this.checkEngine();
-  },
+  // ---- who is watching ----------------------------------------------------
 
-  // The send box is only honest if it says up front whether an engine is even
-  // standing. A disabled button with a reason is the same information as a
-  // failed turn, delivered before he spends one.
-  async checkEngine() {
-    const b = document.getElementById('council-engine');
-    if (!b) return;
+  on(fn) { if (this.subs.indexOf(fn) < 0) this.subs.push(fn); },
+  off(fn) { this.subs = this.subs.filter(f => f !== fn); },
+  emit(what) { for (const f of this.subs.slice()) { try { f(what, this); } catch {} } },
+
+  // ---- is there an engine standing ----------------------------------------
+
+  // Asked before a send box is offered, so a closed world is a disabled
+  // control with a reason rather than a turn that fails.
+  async check() {
+    this.restore();
     try {
       const r = await fetch(API.base + '/council/state').then(x => x.json());
       this.engineOpen = !!r.open;
-      if (r.open) {
-        b.className = 'badge badge-green';
-        b.textContent = 'engine open · sitting ' + (r.sitting || '?');
-        this.status(r.pending ? 'The council is waiting on an answer.' : '');
-        if (r.pending) this.askGate(r.pending);
-      } else {
-        b.className = 'badge badge-yellow';
-        b.textContent = 'no engine';
-        this.status('No engine is open on this world. The glass will not start one ' +
-                    'behind your back — that opens a sitting you never opened, and the ' +
-                    'sitting line is the lock. Open one with env_open.');
-      }
+      this.sitting = r.sitting || '';
+      this.pending = r.pending || '';
+      this.unreachable = false;
     } catch {
-      b.className = 'badge badge-red';
-      b.textContent = 'door unreachable';
       this.engineOpen = false;
-      this.status('The MCP door did not answer.');
+      this.sitting = '';
+      this.pending = '';
+      this.unreachable = true;
     }
-    const send = document.getElementById('council-send');
-    if (send) send.disabled = !this.engineOpen;
+    this.emit('state');
+    return this.engineOpen;
   },
 
-  status(s) {
-    const el = document.getElementById('council-status');
-    if (el) el.textContent = s;
-  },
-
-  log() { return document.getElementById('council-log'); },
-
-  row(cls, html) {
-    const log = this.log();
-    if (!log) return document.createElement('div');
-    const d = document.createElement('div');
-    d.className = 'cev ' + cls;
-    d.innerHTML = html;
-    log.appendChild(d);
-    log.scrollTop = log.scrollHeight;
-    return d;
-  },
-
-  // ---- firing -------------------------------------------------------------
-
-  go() {
-    const input = document.getElementById('council-input');
-    const objective = input.value.trim();
-    if (!objective || this.running) return;
-    input.value = '';
-    this.log().innerHTML = '';
-    this.seats = {};
-    this.row('cev-obj', escHtml(objective));
-    this.start({ objective });
-  },
-
-  answer(text) {
-    if (this.running) return;
-    this.row('cev-obj', escHtml(text));
-    this.start({ answer: text });
-  },
+  // ---- the wire -----------------------------------------------------------
 
   start(params) {
+    if (this.running) return;
+    // A new turn starts a new record. The old one is replaced, never merged:
+    // two turns in one trace would misreport what either run did.
+    this.turn = {
+      objective: params.objective || params.answer || '',
+      answering: !!params.answer,
+      events: [], seats: [], tools: [], notes: [],
+      answer: '', delivery: null, waiting: null,
+      started: Date.now(), ended: null, verdict: '', dropped: 0, refusal: '',
+      pipeline: '', transcript: ''
+    };
     this.running = true;
-    this.status('Running...');
-    const send = document.getElementById('council-send');
-    if (send) send.disabled = true;
-    const qs = new URLSearchParams(params).toString();
-    const es = new EventSource(API.base + '/council/stream?' + qs);
+    this.emit('start');
+
+    const es = new EventSource(API.base + '/council/stream?' + new URLSearchParams(params));
     es.addEventListener('engine', (e) => {
-      let d = {};
-      try { d = JSON.parse(e.data); } catch { return; }
-      this.on(d.event || 'unnamed', d);
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      this.absorb(d.event || 'unnamed', d);
     });
-    es.addEventListener('stream_open', () => this.status('Engine reached.'));
     es.addEventListener('stream_end', (e) => {
-      let d = {};
-      try { d = JSON.parse(e.data); } catch {}
-      if (d.dropped) this.row('cev-fail', `<b>${d.dropped} events were dropped</b> — this glass did not see everything that ran`);
-      if (this.running) this.finish(d.waiting ? 'Waiting on you' : 'Done');
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      if (this.turn) this.turn.dropped = d.dropped || 0;
+      this.finish(d.waiting ? 'waiting' : 'done');
     });
     es.addEventListener('stream_error', (e) => {
-      let d = {};
-      try { d = JSON.parse(e.data); } catch {}
-      this.row('cev-fail', `<b>REFUSED</b> ${escHtml(d.error || 'unknown')}`);
-      this.finish('Refused');
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      if (this.turn) this.turn.refusal = d.error || 'refused';
+      this.finish('refused');
     });
     es.onerror = () => {
       if (!this.running) return;
-      this.finish('The stream broke — the turn may still be running inside the engine');
+      if (this.turn) {
+        this.turn.refusal = 'the stream broke — the turn may still be running inside the engine';
+      }
+      this.finish('broke');
     };
     this.es = es;
   },
 
-  finish(msg) {
+  finish(verdict) {
     this.running = false;
     try { if (this.es) this.es.close(); } catch {}
     this.es = null;
-    this.status(msg);
-    const send = document.getElementById('council-send');
-    if (send) send.disabled = !this.engineOpen;
+    if (this.turn) {
+      this.turn.ended = Date.now();
+      if (!this.turn.verdict) this.turn.verdict = verdict;
+    }
+    this.keep();
+    this.emit('end');
+  },
+
+  // THE TURN OUTLIVES THE PAGE. Chat delivers, the operator walks to Evals
+  // to inspect, and the evidence has to still be there. Kept per tab, in
+  // this viewer's own browser, and sent nowhere.
+  KEY: 'atlas.run.last',
+
+  keep() {
+    if (!this.turn) return;
+    try {
+      sessionStorage.setItem(this.KEY, JSON.stringify(this.turn));
+    } catch {
+      // Over quota (a long run carries hundreds of events). Keep the turn
+      // WITHOUT its events and say so on its face -- a trace that quietly
+      // lost its record would read as a run that did almost nothing.
+      try {
+        const thin = Object.assign({}, this.turn, { events: [], thinned: true });
+        sessionStorage.setItem(this.KEY, JSON.stringify(thin));
+      } catch {}
+    }
+  },
+
+  restore() {
+    if (this.turn) return;
+    try {
+      const raw = sessionStorage.getItem(this.KEY);
+      if (raw) this.turn = JSON.parse(raw);
+    } catch {}
+  },
+
+  // Drops the READER, not the run. A closed glass does not cancel the
+  // council's work; only run_cancel does that.
+  drop() {
+    try { if (this.es) this.es.close(); } catch {}
+    this.es = null;
+    this.running = false;
   },
 
   async cancel() {
     if (!this.running) return;
     try { await API.callTool('run_cancel', {}); } catch {}
-    this.finish('Cancelled — the turn was interrupted; the sitting stands');
+    if (this.turn) this.turn.verdict = 'cancelled';
+    this.finish('cancelled');
   },
 
-  // ---- the estate at work -------------------------------------------------
+  // ---- reducing the wire into a turn --------------------------------------
 
-  // seatBox returns the element this seat's tokens stream into, making the row
-  // if the tokens arrived before (or without) the seat event.
-  seatBox(seat) {
-    seat = seat || 'the council';
-    if (!this.seats[seat]) {
-      const r = this.row('cev-seat',
-        `<b>${escHtml(seat)}</b> <span class="cev-mark cev-dots"></span><div class="cev-tok"></div>`);
-      this.seats[seat] = r.querySelector('.cev-tok');
-    }
-    return this.seats[seat];
-  },
+  // EVERY event is kept, whether or not this build knows what to do with it.
+  // The record of a run is the events; the fields below are a reading of them,
+  // never a replacement for them.
+  absorb(kind, d) {
+    const t = this.turn;
+    if (!t) return;
+    // `text` is the console copy of everything else — keeping it would double
+    // every line of the run.
+    if (kind !== 'text') t.events.push(Object.assign({ _kind: kind }, d));
 
-  on(kind, d) {
     switch (kind) {
-      // `text` is the console copy of everything below; showing it too would
-      // print the whole turn twice. The structured events are the record.
-      case 'text':
-        return;
-
-      case 'opened':
-        this.row('cev-meta', `<b>opened</b> sitting ${escHtml(String(d.sitting ?? ''))} · session ${escHtml(d.session || '')}`);
-        return;
-
       case 'run':
-        this.row('cev-meta',
-          `<b>run</b> pipeline <b>${escHtml(d.pipeline || '')}</b>` +
-          (d.review_only ? ' · <span class="badge badge-yellow">review only</span>' : '') +
-          (d.feed_chars ? ` · feed ${d.feed_chars} chars` : '') +
-          (d.transcript ? `<br><span class="muted">transcript <code>${escHtml(d.transcript)}</code></span>` : ''));
-        return;
+        t.pipeline = d.pipeline || '';
+        t.transcript = d.transcript || '';
+        break;
 
-      case 'report':
-        this.row('cev-report', escHtml((d.text || '').trim()));
-        return;
+      case 'seat':
+        t.seats.push({ seat: d.seat || 'seat', model: d.model || '',
+                       timeout: d.timeout, text: '', at: Date.now() });
+        break;
 
-      case 'seat': {
-        const seat = d.seat || 'seat';
-        const r = this.row('cev-seat',
-          `<b>${escHtml(seat)}</b> <span class="muted">${escHtml(d.model || '')}` +
-          (d.timeout ? ` · timeout ${d.timeout}s` : '') + `</span> ` +
-          `<span class="cev-mark cev-dots"></span><div class="cev-tok"></div>`);
-        this.seats[seat] = r.querySelector('.cev-tok');
-        return;
+      case 'token': {
+        // Tokens belong to the seat that is speaking, so it stays visible WHICH
+        // seat produced which words.
+        let s = t.seats.length ? t.seats[t.seats.length - 1] : null;
+        if (d.seat) {
+          for (let i = t.seats.length - 1; i >= 0; i--) {
+            if (t.seats[i].seat === d.seat) { s = t.seats[i]; break; }
+          }
+        }
+        if (s) s.text += (d.text || '');
+        t.answer += (d.text || '');
+        break;
       }
 
-      case 'token':
-        // Tokens stream into the seat that is speaking, so it is visible WHICH
-        // seat is producing which words.
-        this.seatBox(d.seat).textContent += (d.text || '');
-        this.log().scrollTop = this.log().scrollHeight;
-        return;
+      case 'report':
+        t.notes.push((d.text || '').trim());
+        break;
 
       case 'tool':
-        this.row('cev-tool', `<b>tool</b> ${escHtml(d.action || d.tool || d.name || '?')}` +
-          (d.args ? ` <code>${escHtml(JSON.stringify(d.args)).slice(0, 200)}</code>` : ''));
-        return;
+        t.tools.push({ name: d.action || d.tool || d.name || '?', args: d.args, done: false });
+        break;
 
-      case 'tool_result':
+      case 'tool_result': {
+        const name = d.action || d.tool || d.name || '?';
         // `failed` is the ENGINE's own field — the pipeline's test, not a
-        // reading of the words.
-        this.row(d.failed ? 'cev-fail' : 'cev-ok',
-          `<b>${d.failed ? 'FAILED' : 'ok'}</b> ${escHtml(d.action || d.tool || d.name || '?')}` +
-          (d.error ? ` — ${escHtml(d.error)}` : '') +
-          (d.text && d.failed ? ` — ${escHtml(String(d.text).slice(0, 300))}` : ''));
-        return;
-
-      case 'note':
-        this.row('cev-note', `<b>note</b> ${escHtml(d.text || JSON.stringify(d))}`);
-        return;
+        // reading of the words that came back.
+        let hit = null;
+        for (let i = t.tools.length - 1; i >= 0; i--) {
+          if (t.tools[i].name === name && !t.tools[i].done) { hit = t.tools[i]; break; }
+        }
+        if (!hit) { hit = { name, done: false }; t.tools.push(hit); }
+        hit.done = true;
+        hit.failed = !!d.failed;
+        hit.error = d.error || (d.failed ? String(d.text || '').slice(0, 300) : '');
+        break;
+      }
 
       case 'needs_answer':
-        this.finish('The council is asking. Nothing is assumed on your behalf.');
-        this.askGate(d.prompt || '');
-        return;
+        t.waiting = d.prompt || '';
+        t.verdict = 'waiting';
+        break;
 
       case 'delivery':
-        this.delivery(d);
-        this.finish('Delivered' + (d.elapsed != null ? ' · ' + d.elapsed + 's' : ''));
-        return;
+        t.delivery = d;
+        // The delivery's text is the recompose's, and it is what the operator
+        // is answered with — not the running token buffer above it.
+        t.answer = d.text || t.answer;
+        t.pipeline = d.pipeline || t.pipeline;
+        t.transcript = d.transcript || t.transcript;
+        t.verdict = 'delivered';
+        break;
 
-      case 'refused':
-      case 'aborted':
-      case 'cancelled':
-      case 'unreachable':
+      case 'refused': case 'aborted': case 'cancelled': case 'unreachable':
+        t.refusal = d.text || d.error || kind;
+        t.verdict = kind;
+        break;
+
       case 'error':
-        this.row('cev-fail', `<b>${escHtml(kind.toUpperCase())}</b> ${escHtml(d.text || d.error || '')}`);
-        // `error` is NOT terminal on this wire — serve.py emits it for a
-        // malformed command and keeps going — so it does not end the turn.
-        if (kind !== 'error') this.finish(kind);
-        return;
-
-      case 'closed':
-        this.row('cev-meta', `<b>closed</b> ${escHtml(d.text || 'the sitting is tolled')}`);
-        this.engineOpen = false;
-        this.checkEngine();
-        return;
-
-      default:
-        // An event this glass does not know is still something that happened.
-        this.row('cev-other', `<b>${escHtml(kind)}</b> <code>${escHtml(JSON.stringify(d)).slice(0, 400)}</code>`);
+        // NOT terminal on this wire: serve.py emits it for a malformed command
+        // and keeps going. It is recorded, and it does not end the turn.
+        break;
     }
+    this.emit('event');
   },
 
-  // The gate. A question from the council is answered by the operator in a form
-  // field — never a prompt(), never a default, never a guess (RULE 6).
-  askGate(prompt) {
-    const d = this.row('cev-gate',
-      `<b>THE COUNCIL IS ASKING</b><div class="cev-prompt">${escHtml(prompt)}</div>
-       <form class="chat-form" style="margin-top:8px">
-         <input class="input cev-answer" type="text" autocomplete="off"
-                placeholder="Your answer — nothing is assumed on your behalf" />
-         <button class="btn" type="submit">Answer</button>
-       </form>`);
-    const form = d.querySelector('form');
-    form.onsubmit = (e) => {
-      e.preventDefault();
-      const v = form.querySelector('.cev-answer').value;
-      if (!v.trim()) return;
-      form.remove();
-      this.answer(v);
-    };
-    const box = form.querySelector('.cev-answer');
-    if (box) box.focus();
+  // ---- the facts no surface may hide --------------------------------------
+
+  // Read off the delivery's OWN machine-emitted field, with the failed
+  // tool_results as the fallback. A page that shows an answer without showing
+  // these is lying by omission (LAW 5).
+  failures(t) {
+    t = t || this.turn;
+    if (!t) return [];
+    const d = t.delivery || {};
+    const out = (d.failures || []).map(f => typeof f === 'string' ? f : JSON.stringify(f));
+    if (out.length) return out;
+    return t.tools.filter(x => x.failed).map(x => x.name + (x.error ? ': ' + x.error : ''));
   },
 
-  // The delivery, with what ACTUALLY ran under it. The failure list is the
-  // engine's machine-emitted field, whatever the prose above it says.
-  delivery(d) {
-    const list = (arr) => arr.map(f =>
-      escHtml(typeof f === 'string' ? f : JSON.stringify(f))).join('<br>');
-    let extra = '';
-    if ((d.failures || []).length) {
-      extra += `<div class="cev-notrun"><b>NOT EVERYTHING RAN</b><br>${list(d.failures)}
-        <br><span class="muted">machine-emitted from what happened, not a seat's account of it</span></div>`;
+  outOfTime(t) {
+    t = t || this.turn;
+    const d = (t && t.delivery) || {};
+    return (d.out_of_time || []).map(f => typeof f === 'string' ? f : JSON.stringify(f));
+  },
+
+  steps(t) {
+    t = t || this.turn;
+    return ((t && t.delivery && t.delivery.steps) || []);
+  },
+
+  // What is happening RIGHT NOW, in one line. Chat shows this; the whole
+  // waterfall lives on Evals.
+  nowLine(t) {
+    t = t || this.turn;
+    if (!t) return '';
+    const pend = t.tools.filter(x => !x.done);
+    if (pend.length) return 'tool · ' + pend[pend.length - 1].name;
+    if (t.seats.length) {
+      const s = t.seats[t.seats.length - 1];
+      return s.seat + (s.model ? ' · ' + s.model : '');
     }
-    if ((d.out_of_time || []).length) {
-      extra += `<div class="cev-notrun"><b>OUT OF TIME</b><br>${list(d.out_of_time)}</div>`;
-    }
-    if ((d.notes || []).length) {
-      extra += `<div class="muted" style="margin-top:6px">${list(d.notes)}</div>`;
-    }
-    const steps = (d.steps || []).map(s =>
-      `<tr><td>${escHtml(String(s.seat || ''))}</td>
-           <td>${escHtml(String(s.elapsed ?? ''))}s</td>
-           <td>${escHtml(String(s.tools ?? ''))}</td>
-           <td>${s.skipped ? '<span class="badge badge-yellow">skipped</span>'
-                           : s.error ? '<span class="badge badge-red">error</span>'
-                                     : '<span class="badge badge-green">ran</span>'}</td></tr>`).join('');
-    this.row('cev-delivery',
-      `<b>DELIVERY</b> ${escHtml(d.pipeline || '')}${d.elapsed != null ? ' · ' + escHtml(String(d.elapsed)) + 's' : ''}
-       <div class="cev-text">${escHtml(d.text || '')}</div>${extra}
-       ${steps ? `<table class="cev-steps"><thead><tr><th>seat</th><th>elapsed</th><th>tools</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ''}
-       ${d.transcript ? `<div class="muted" style="margin-top:6px">transcript <code>${escHtml(d.transcript)}</code></div>` : ''}`);
+    return 'starting';
+  },
+
+  elapsed(t) {
+    t = t || this.turn;
+    if (!t) return '';
+    const d = t.delivery || {};
+    if (d.elapsed != null) return d.elapsed + 's';
+    return (((t.ended || Date.now()) - t.started) / 1000).toFixed(1) + 's';
   }
 };
