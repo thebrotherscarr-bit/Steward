@@ -290,19 +290,29 @@ type Result struct {
 	Waiting bool
 }
 
-func (e *Engine) pump(onToken func(seat, text string)) (Result, error) {
+// pump reads the turn. `sink`, if given, receives EVERY event the instant
+// it is read -- tokens, seat wakes, tool calls, tool results, guard
+// verdicts, notes -- so a glass can show the council working rather than a
+// spinner and then an answer. It is deliberately NOT bounded by KeptEvents:
+// that bound is on what a run REMEMBERS (Result.Events), and a stream that
+// silently stopped at event 400 would be a lie about what ran.
+//
+// A sink that panics or blocks is the caller's problem, not the wire's: it
+// runs on the pump goroutine, so a slow consumer slows the read. Every sink
+// in this build writes to an already-flushed SSE socket or a channel.
+func (e *Engine) pump(sink func(Event)) (Result, error) {
 	var r Result
 	for e.out.Scan() {
 		var ev Event
 		if json.Unmarshal(e.out.Bytes(), &ev) != nil {
 			continue
 		}
+		if sink != nil {
+			sink(ev)
+		}
 		switch ev.Kind() {
 		case "token":
 			r.Tokens++
-			if onToken != nil {
-				onToken(ev.Str("seat"), ev.Str("text"))
-			}
 			continue
 		case "text":
 			continue
@@ -332,7 +342,7 @@ func (e *Engine) pump(onToken func(seat, text string)) (Result, error) {
 
 // Run sends one objective and reads until the turn ends or the engine asks a
 // question. One run at a time per world.
-func (e *Engine) Run(objective, feed, method string, onToken func(seat, text string)) (Result, error) {
+func (e *Engine) Run(objective, feed, method string, sink func(Event)) (Result, error) {
 	e.runMu.Lock()
 	defer e.runMu.Unlock()
 	if e.closed.Load() {
@@ -353,12 +363,12 @@ func (e *Engine) Run(objective, feed, method string, onToken func(seat, text str
 	if err := e.send(row); err != nil {
 		return Result{}, err
 	}
-	return e.pump(onToken)
+	return e.pump(sink)
 }
 
 // Answer resumes a run stopped at a needs_answer. This is the operator's hand
 // crossing the wire; nothing here supplies a default.
-func (e *Engine) Answer(text string, onToken func(seat, text string)) (Result, error) {
+func (e *Engine) Answer(text string, sink func(Event)) (Result, error) {
 	e.runMu.Lock()
 	defer e.runMu.Unlock()
 	if e.Pending() == nil {
@@ -368,7 +378,7 @@ func (e *Engine) Answer(text string, onToken func(seat, text string)) (Result, e
 		return Result{}, err
 	}
 	e.setPending(nil)
-	return e.pump(onToken)
+	return e.pump(sink)
 }
 
 // Cancel is Ctrl-C. It must NOT take runMu -- the whole point is to reach a

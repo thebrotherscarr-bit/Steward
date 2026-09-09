@@ -553,3 +553,35 @@ td code {
 .chat-log { min-height: 220px; max-height: 52vh; overflow-y: auto; }
 .chat-form { margin-top: 12px; gap: 8px; }
 .chat-form .input { flex: 1; }
+
+/* ---- the council feed: every engine event, told apart at a glance ---- */
+.council-log { max-height: 60vh; gap: 6px; font-size: 12px; }
+.cev { border-left: 3px solid var(--border); padding: 6px 10px; border-radius: 0 6px 6px 0;
+       background: var(--surface, #12121a); align-self: stretch; max-width: 100%;
+       white-space: normal; word-break: break-word; }
+.cev code { font-size: 11px; }
+.cev-obj { border-left-color: var(--accent); background: rgba(137,180,250,0.10); font-weight: 600; }
+.cev-law { border-left-color: #cba6f7; }
+.cev-meta, .cev-note, .cev-other { border-left-color: var(--muted, #6c7086); color: var(--muted, #6c7086); }
+.cev-seat { border-left-color: #89dceb; }
+.cev-tool { border-left-color: var(--muted, #6c7086); }
+.cev-report { border-left-color: var(--muted, #6c7086); font-family: var(--mono, monospace); }
+.cev-mark { font-size: 11px; color: var(--muted, #6c7086); }
+.cev-ok { border-left-color: #a6e3a1; }
+.cev-fail { border-left-color: #f38ba8; background: rgba(243,139,168,0.08); }
+.cev-guard { border-left-color: #f9e2af; }
+.cev-tok { white-space: pre-wrap; margin-top: 4px; color: var(--text, #e0e0e0); }
+.cev-dots::after { content: '...'; animation: cevdots 1.2s steps(4, end) infinite; }
+@keyframes cevdots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+
+/* the gate: the one row that is waiting on the operator */
+.cev-gate { border-left-color: #f9e2af; background: rgba(249,226,175,0.10); }
+.cev-prompt { white-space: pre-wrap; margin-top: 6px; }
+
+/* the delivery, with what actually ran under it */
+.cev-delivery { border-left-color: #a6e3a1; background: rgba(166,227,161,0.06); }
+.cev-text { white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
+.cev-notrun { border: 1px solid #f38ba8; border-radius: 6px; padding: 6px 8px; margin: 8px 0;
+              background: rgba(243,139,168,0.08); }
+.cev-steps { width: 100%; margin-top: 8px; font-size: 11px; }
+.cev-steps td, .cev-steps th { padding: 2px 6px; text-align: left; }

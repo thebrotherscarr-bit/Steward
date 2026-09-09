@@ -23,10 +23,10 @@ type Auth struct {
 }
 
 type credential struct {
-	ok       bool
-	service  bool
-	tenants  []string
-	keyID    string
+	ok      bool
+	service bool
+	tenants []string
+	keyID   string
 }
 
 // metrics counts the door's traffic for /metrics.

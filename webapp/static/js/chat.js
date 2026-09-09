@@ -48,11 +48,24 @@ const Chat = {
     return this.ws;
   },
 
+  // THE CHAT REACHES THE COUNCIL BY DEFAULT. `chat_send` reaches ONE MODEL;
+  // the council reaches the estate -- the sealed law gate before any model
+  // reads a word, the one Router executing tools, the dedup, the recompose
+  // that puts every failure in the delivery. Aligning this page on the engine
+  // is what makes it a control plane rather than a chat box in front of a
+  // model. The voice path stays one click away and is unchanged: it is still
+  // the right tool for a quick question at a single seat.
+  mode: 'council',
+
   async render(el) {
+    this.el = el;
+    if (this.mode === 'council') return Council.renderInto(el, () => this.setMode('voice'));
     el.innerHTML = `
       <div class="page-header"><div><div class="page-title">Chat</div>
-      <div class="page-subtitle">Sessions with receipts — guard first, witnessed always</div></div>
-      <div class="flex"><button class="btn btn-sm" id="chat-new">New session</button></div></div>
+      <div class="page-subtitle">One voice, witnessed — a single seat, receipts kept</div></div>
+      <div class="flex">
+        <button class="btn btn-sm" id="chat-mode">Council</button>
+        <button class="btn btn-sm" id="chat-new">New session</button></div></div>
       <div class="grid-2">
         <div class="card"><div class="card-title">Sessions</div><div id="chat-sessions"><div class="loading">Loading...</div></div></div>
         <div class="card"><div class="card-title">Conversation</div>
@@ -65,11 +78,17 @@ const Chat = {
           <div id="chat-status" class="muted"></div>
         </div>
       </div>`;
+    document.getElementById('chat-mode').onclick = () => this.setMode('council');
     document.getElementById('chat-new').onclick = () => this.openSession();
     document.getElementById('chat-form').onsubmit = (e) => { e.preventDefault(); this.ask(); };
     document.getElementById('chat-cancel').onclick = () => this.cancel();
     await this.refreshSessions();
     this.ensureSocket((tok) => this.appendToken(tok));
+  },
+
+  setMode(m) {
+    this.mode = m;
+    this.render(this.el || document.getElementById('page'));
   },
 
   async refreshSessions() {

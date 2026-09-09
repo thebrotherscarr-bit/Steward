@@ -59,6 +59,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tools", s.handleTools)
 	mux.HandleFunc("POST /rpc", s.handleRPC)
 	mux.HandleFunc("GET /chat/stream", s.handleChatStream)
+	// The COUNCIL, not a voice: one Manjuel turn with every engine event as
+	// it happens. /chat/stream reaches a model; this reaches the estate.
+	mux.HandleFunc("GET /run/stream", s.handleRunStream)
+	mux.HandleFunc("GET /run/state", s.handleRunState)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	// Serve static files from embedded filesystem
@@ -76,7 +80,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		// API endpoints take priority
-		if path == "/health" || path == "/tools" || path == "/rpc" || path == "/chat/stream" || path == "/metrics" {
+		if path == "/health" || path == "/tools" || path == "/rpc" || path == "/chat/stream" ||
+			path == "/run/stream" || path == "/run/state" || path == "/metrics" {
 			http.NotFound(w, r)
 			return
 		}

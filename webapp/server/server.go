@@ -44,6 +44,9 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("POST /api/chat/start", s.handlers.StartSession)
 	mux.HandleFunc("POST /api/chat/send", s.handlers.SendChat)
 	mux.HandleFunc("GET /api/chat/stream", s.handlers.StreamChat)
+	// The council, not a voice: one Manjuel turn with every engine event live.
+	mux.HandleFunc("GET /api/council/stream", s.handlers.StreamCouncil)
+	mux.HandleFunc("GET /api/council/state", s.handlers.CouncilState)
 	mux.HandleFunc("GET /ws", s.handlers.WS)
 	mux.HandleFunc("GET /api/prompts", s.handlers.ListPrompts)
 	mux.HandleFunc("GET /api/prompts/get", s.handlers.GetPrompt)
