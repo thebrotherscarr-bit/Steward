@@ -690,3 +690,11 @@ td code {
 .cev-text { max-height: 32vh; overflow-y: auto; }
 .council-log { overflow-y: auto; }
 
+/* a named skill, and one that failed -- the engine's own field, not a reading */
+.tool-ok  { color: var(--text, #e0e0e0); font-family: var(--mono, monospace); }
+.tool-bad { color: #f38ba8; font-family: var(--mono, monospace);
+            text-decoration: underline dotted; cursor: help; }
+.cev-skills { margin-top: 8px; padding-top: 8px; font-size: 11px;
+              border-top: 1px solid var(--border); }
+.cev-steps th { color: var(--muted, #6c7086); font-weight: 500; }
+

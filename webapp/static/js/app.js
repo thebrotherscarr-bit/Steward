@@ -602,7 +602,8 @@ const App = {
       case 'token':
         return '';   // the seat's words are shown whole under its delivery
       case 'tool':
-        return `<div class="cev cev-tool"><b>tool</b> ${escHtml(d.action || d.tool || d.name || '?')}` +
+        return `<div class="cev cev-tool"><b>skill</b> ${escHtml(d.action || d.tool || d.name || '?')}` +
+          (d.seat ? ` <span class="muted">called by ${escHtml(d.seat)}</span>` : '') +
           (d.args ? ` <code>${escHtml(JSON.stringify(d.args)).slice(0, 200)}</code>` : '') + `</div>`;
       case 'tool_result':
         return `<div class="cev ${d.failed ? 'cev-fail' : 'cev-ok'}"><b>${d.failed ? 'FAILED' : 'ok'}</b> ` +
@@ -634,16 +635,50 @@ const App = {
     }
     if ((d.out_of_time || []).length) extra += `<div class="cev-notrun"><b>OUT OF TIME</b><br>${list(d.out_of_time)}</div>`;
     if ((d.notes || []).length) extra += `<div class="muted" style="margin-top:6px">${list(d.notes)}</div>`;
+    // Which calls FAILED, off the engine's own tool_result field -- never a
+    // reading of the words that came back.
+    const failed = {};
+    for (const x of (Run.turn && Run.turn.tools) || []) {
+      if (x.failed) failed[x.name] = x.error || 'failed';
+    }
+    const named = (list) => {
+      const names = (list || []).filter(Boolean);
+      if (!names.length) return '<span class="muted">—</span>';
+      return names.map(n => failed[n]
+        ? `<span class="tool-bad" title="${escHtml(failed[n])}">${escHtml(n)}</span>`
+        : `<span class="tool-ok">${escHtml(n)}</span>`).join(' ');
+    };
     const steps = (d.steps || []).map(s =>
-      `<tr><td>${escHtml(String(s.seat || ''))}</td><td>${escHtml(String(s.elapsed ?? ''))}s</td>
-       <td>${escHtml(String(s.tools ?? ''))}</td>
+      `<tr><td>${escHtml(String(s.seat || ''))}</td>
+       <td class="muted">${escHtml(String(s.model || ''))}</td>
+       <td>${escHtml(String(s.elapsed ?? ''))}s</td>
+       <td>${named(s.tools)}</td>
+       <td>${s.drift == null ? '<span class="muted" title="not scored this run">—</span>'
+              : '<span class="' + (s.drifted ? 'tool-bad' : '') + '">' + escHtml(Number(s.drift).toFixed(2)) + '</span>'}</td>
        <td>${s.skipped ? '<span class="badge badge-yellow">skipped</span>'
               : s.error ? '<span class="badge badge-red">error</span>'
                         : '<span class="badge badge-green">ran</span>'}</td></tr>`).join('');
+
+    // THE ROLL-UP. The per-seat rows answer "who called what"; this answers
+    // "what did this run touch", which is the question an eval asks. A skill
+    // and a tool are the same thing in this estate -- the 37 skills ARE the
+    // tool surface -- so it is said once here rather than implied as two lists.
+    const used = [];
+    for (const s of (d.steps || [])) for (const n of (s.tools || [])) {
+      if (n && used.indexOf(n) < 0) used.push(n);
+    }
+    for (const x of (Run.turn && Run.turn.tools) || []) {
+      if (x.name && used.indexOf(x.name) < 0) used.push(x.name);
+    }
+    const roll = used.length
+      ? `<div class="cev-skills"><b>skills used</b> ${named(used)}
+         <span class="muted">· a skill and a tool are one thing here; the estate's skills are its tool surface</span></div>`
+      : `<div class="cev-skills"><b>skills used</b> <span class="muted">none — the seats answered from what they were handed</span></div>`;
+
     return `<div class="cev cev-delivery"><b>DELIVERY</b> ${escHtml(d.pipeline || '')}` +
       (d.elapsed != null ? ' · ' + escHtml(String(d.elapsed)) + 's' : '') +
-      `<div class="cev-text">${escHtml(d.text || '')}</div>${extra}` +
-      (steps ? `<table class="cev-steps"><thead><tr><th>seat</th><th>elapsed</th><th>tools</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : '') +
+      `<div class="cev-text">${escHtml(d.text || '')}</div>${extra}` + roll +
+      (steps ? `<table class="cev-steps"><thead><tr><th>seat</th><th>model</th><th>elapsed</th><th>tools</th><th>drift</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : '') +
       (d.transcript ? `<div class="muted" style="margin-top:6px">transcript <code>${escHtml(d.transcript)}</code></div>` : '') +
       `</div>`;
   },
