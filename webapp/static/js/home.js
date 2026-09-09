@@ -26,8 +26,11 @@ const Home = {
   brief: null,
   recent: [],
 
+  bound: false,
+
   async render(el) {
     this.el = el;
+    if (!this.bound) { Run.on((w) => this.onRun(w)); this.bound = true; }
     el.innerHTML = `
       <div class="page-header">
         <div>
@@ -44,6 +47,7 @@ const Home = {
           <button class="btn btn-primary" type="submit" id="home-go">Run</button>
         </form>
         <div id="home-block" class="home-block" hidden></div>
+        <div id="home-out" class="home-out" hidden></div>
       </div>
 
       <div id="home-brief" class="card home-brief"></div>
@@ -80,17 +84,74 @@ const Home = {
 
   // He types here and lands in the conversation. The turn starts from Home so
   // the launchpad is not a door he passes through empty-handed.
+  // HE STAYS WHERE HE TYPED. Being thrown to another page mid-thought is the
+  // opposite of the loop he asked for. The turn runs here, the answer lands
+  // under the box, and the whole trace still goes to Evals for inspecting.
+  // Chat keeps the conversation, and this turn joins it there too, so the two
+  // pages never hold different histories.
   go() {
     const input = document.getElementById('home-input');
     const q = input.value.trim();
     if (!q) return;
     if (!Run.engineOpen) { toast('No engine is open on this world', 'error'); return; }
+    if (Run.running) { toast('A turn is already running', 'error'); return; }
     input.value = '';
     Chat.thread.push({ who: 'him', text: q });
     Chat.thread.push({ who: 'council', text: '', live: true });
+    this.out('', false);
     Run.start({ objective: q });
-    history.pushState(null, '', '/chat');
-    App.router();
+  },
+
+  out(text, show) {
+    const el = document.getElementById('home-out');
+    if (!el) return;
+    el.hidden = show === false ? true : !text;
+    el.textContent = text || '';
+    el.scrollTop = el.scrollHeight;
+  },
+
+  // The dashboard's half of a turn: the answer as it streams, one line of what
+  // is happening, and -- when it lands -- anything that FAILED, because an
+  // answer that ran on a broken tool says so wherever it is shown (LAW 5).
+  onRun(what) {
+    if (!document.getElementById('home-out')) return;   // not the live page
+    if (what === 'state') { this.paintEngine(); this.paint(); return; }
+    if (what === 'start') {
+      this.block('starting...');
+      this.tick(true);
+      return;
+    }
+    if (what === 'event') {
+      this.out(Run.turn.answer || '', true);
+      this.block(Run.nowLine() + ' \u00b7 ' + Run.elapsed());
+      return;
+    }
+    if (what === 'end') {
+      this.tick(false);
+      const t = Run.turn;
+      let tail = t.answer || t.refusal || '';
+      const fails = Run.failures(t);
+      if (fails.length) {
+        tail += '\n\nNOT EVERYTHING RAN\n' + fails.join('\n') +
+                '\n(machine-emitted from what happened, not a seat\'s account of it)';
+      }
+      this.out(tail, true);
+      this.block((t.pipeline || 'default') + ' \u00b7 ' + Run.elapsed() +
+                 ' \u00b7 the whole run is on Evals');
+      this.paintRecent();
+    }
+  },
+
+  // The clock keeps moving while a seat thinks. Thinking is withheld from the
+  // wire on purpose, so without this a working engine reads as a hung one.
+  tick(on) {
+    clearInterval(this._tick);
+    this._tick = null;
+    if (!on) return;
+    this._tick = setInterval(() => {
+      if (!Run.running || !document.getElementById('home-out')) { this.tick(false); return; }
+      this.block(Run.nowLine() + ' \u00b7 ' + Run.elapsed());
+    }, 1000);
   },
 
   // Speak, and the words land IN THE BOX. He reads them, fixes whatever

@@ -679,3 +679,14 @@ td code {
              white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border);
              border-radius: var(--radius, 6px); padding: 10px; line-height: 1.5; }
 
+/* the dashboard answers where he typed; the whole run is on Evals */
+.home-out { margin-top: 12px; padding: 12px 14px; white-space: pre-wrap;
+            max-height: 46vh; overflow-y: auto; font-size: 13px; line-height: 1.55;
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: var(--radius, 6px); }
+
+/* A long delivery must not own the Evals page. It scrolls inside its own row;
+   the transcript named beneath it is the whole thing. */
+.cev-text { max-height: 32vh; overflow-y: auto; }
+.council-log { overflow-y: auto; }
+

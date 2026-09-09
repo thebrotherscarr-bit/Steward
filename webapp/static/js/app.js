@@ -518,7 +518,7 @@ const App = {
         </div>
         <div class="card">
           <div class="card-title">The run</div>
-          <div id="ev-run" class="council-log"></div>
+          <div id="ev-run" class="chat-log council-log"></div>
         </div>
         <div class="stats">
           <div class="stat"><div class="stat-label">Total</div><div class="stat-value">${evals.length}</div></div>
