@@ -1474,21 +1474,77 @@ func toolFlowList(t tenant.Tenant, _ map[string]any) (string, error) {
 	return b.String(), nil
 }
 
+// flowInputs reads `inputs` in either shape a caller can honestly send: an
+// object (a client building arguments as a map) or a JSON string (a shell).
+// Anything else is REFUSED BY NAME rather than quietly becoming {} -- a flow
+// that drops its inputs fails on a missing var and blames the spec.
 func flowInputs(args map[string]any) (map[string]string, error) {
-	raw, _ := args["inputs"].(string)
-	if strings.TrimSpace(raw) == "" {
+	v, present := args["inputs"]
+	if !present || v == nil {
 		return map[string]string{}, nil
 	}
 	var doc map[string]any
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return nil, fmt.Errorf("flow inputs must be a JSON object: %s", err)
+	switch t := v.(type) {
+	case map[string]any:
+		doc = t
+	case string:
+		if strings.TrimSpace(t) == "" {
+			return map[string]string{}, nil
+		}
+		if err := json.Unmarshal([]byte(t), &doc); err != nil {
+			return nil, fmt.Errorf("flow inputs must be a JSON object: %s", err)
+		}
+	default:
+		return nil, fmt.Errorf("flow inputs must be a JSON object or a JSON "+
+			"object as a string; got %T -- refused rather than run with none", v)
 	}
 	out := map[string]string{}
-	for k, v := range doc {
-		out[k] = fmt.Sprintf("%v", v)
+	for k, val := range doc {
+		if sv, ok := val.(string); ok {
+			out[k] = sv
+			continue
+		}
+		out[k] = fmt.Sprintf("%v", val)
 	}
 	return out, nil
 }
+
+// councilEngine is flow's Engine with a real Turn: a `run` node puts its
+// objective through the world's own Manjuel process, so a workflow gets the
+// law gate, the Router and the recompose rather than a bare voice.
+type councilEngine struct {
+	flow.Engine
+	home string
+}
+
+func (c councilEngine) Turn(ctx context.Context, objective, feed, method string) (string, error) {
+	e, ok := engines.Get(c.home)
+	if !ok {
+		return "", fmt.Errorf("no engine is open on this world -- env_open first, " +
+			"then fire the flow. A `run` node will not start one behind your back")
+	}
+	res, err := e.Run(objective, feed, method, nil)
+	if err != nil {
+		return "", err
+	}
+	if res.Waiting {
+		return "", fmt.Errorf("the turn stopped on a question: %q. A flow cannot "+
+			"answer it -- the gate is yours (RULE 6). Answer with run_answer, then "+
+			"resume the flow", res.Final.Str("prompt"))
+	}
+	f := res.Final
+	out := f.Str("text")
+	// The core recomposes its own failure list into the delivery. Append only
+	// when it did not -- the news must reach the gate exactly once (LAW 5:
+	// what ran is reported from events, and reported once).
+	if fails, ok := f["failures"].([]any); ok && len(fails) > 0 &&
+		!strings.Contains(out, "NOT EVERYTHING RAN") {
+		out += fmt.Sprintf("\n\nNOT EVERYTHING RAN: %v", fails)
+	}
+	return out, nil
+}
+
+func council(home string) flow.Engine { return councilEngine{flow.Production(home), home} }
 
 func toolFlowRun(t tenant.Tenant, args map[string]any) (string, error) {
 	name, _ := args["name"].(string)
@@ -1502,7 +1558,7 @@ func toolFlowRun(t tenant.Tenant, args map[string]any) (string, error) {
 	}
 	askLock.Lock()
 	defer askLock.Unlock()
-	res, err := flow.Run(t.Home, flow.Production(t.Home), s, inputs)
+	res, err := flow.Run(t.Home, council(t.Home), s, inputs)
 	if err != nil {
 		return "", err
 	}
@@ -1522,7 +1578,7 @@ func toolFlowResume(t tenant.Tenant, args map[string]any) (string, error) {
 	}
 	askLock.Lock()
 	defer askLock.Unlock()
-	res, err := flow.Resume(t.Home, flow.Production(t.Home), strings.TrimSpace(run), strings.TrimSpace(decision))
+	res, err := flow.Resume(t.Home, council(t.Home), strings.TrimSpace(run), strings.TrimSpace(decision))
 	if err != nil {
 		return "", err
 	}
@@ -1561,7 +1617,7 @@ func toolFlowReplay(t tenant.Tenant, args map[string]any) (string, error) {
 	}
 	askLock.Lock()
 	defer askLock.Unlock()
-	res, err := flow.Replay(t.Home, flow.Production(t.Home), strings.TrimSpace(run))
+	res, err := flow.Replay(t.Home, council(t.Home), strings.TrimSpace(run))
 	if err != nil {
 		return "", err
 	}

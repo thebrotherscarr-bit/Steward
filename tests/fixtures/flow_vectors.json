@@ -51,7 +51,8 @@
     "seat",
     "memory",
     "eval",
-    "gate"
+    "gate",
+    "run"
   ],
   "name_re": "^[a-z0-9][a-z0-9_-]{0,63}$",
   "receipt_example": {
@@ -192,6 +193,18 @@
         ]
       },
       "why": "edge refs unknown"
+    },
+    {
+      "why": "run node with no objective",
+      "spec": {
+        "edges": [],
+        "nodes": [
+          {
+            "kind": "run",
+            "name": "a"
+          }
+        ]
+      }
     }
   ],
   "run_re": "^f-\\d{8}-\\d{6}-[0-9a-f]{8}$",

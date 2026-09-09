@@ -3,7 +3,8 @@
 //
 // Specs live in <home>/flows/<name>.json — {name, version, budget_s,
 // nodes, edges}; history folds as <name>.v<k>.json, never rewritten.
-// Node kinds are a closed set: ask | prompt | seat | memory | eval | gate.
+// Node kinds are a closed set: ask | prompt | seat | memory | eval | gate |
+// run -- `run` drives a whole Manjuel turn (the council), the others one voice.
 // Branches declare parallelism but run sequentially in topo order — one
 // rack queue, no interleaved output, the queue visible in the waterfall.
 // There is no verb here that finishes a task, lands a memory, or closes a
@@ -35,6 +36,11 @@ var RunRe = regexp.MustCompile(`^f-\d{8}-\d{6}-[0-9a-f]{8}$`)
 var Kinds = map[string]bool{
 	"ask": true, "prompt": true, "seat": true,
 	"memory": true, "eval": true, "gate": true,
+	// `run` is the whole council, not one voice: the objective goes through
+	// Manjuel, so the law gate stamps it, the Router runs the tools, the dedup
+	// refuses a repeat and the recompose puts every failure in the answer. An
+	// `ask` node reaches a bare model; a `run` node reaches the estate.
+	"run": true,
 }
 
 // Verdicts. COMPLETE means every reached node came back ok; the rest name
@@ -132,6 +138,9 @@ func Validate(s Spec) ([]string, error) {
 		}
 		if !Kinds[n.Kind] {
 			return nil, fmt.Errorf("refused: node %q carries unknown kind %q", n.Name, n.Kind)
+		}
+		if n.Kind == "run" && strings.TrimSpace(n.Question) == "" {
+			return nil, fmt.Errorf("refused: run node %q has no objective", n.Name)
 		}
 		if n.Kind == "eval" && strings.TrimSpace(n.Ref) == "" {
 			return nil, fmt.Errorf("refused: eval node %q names no node to check", n.Name)

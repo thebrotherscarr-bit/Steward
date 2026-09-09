@@ -34,6 +34,11 @@ func (s *stubEngine) SeatAsk(seat, question, _, _ string) (play.Run, error) {
 	return play.Run{Output: "stub-seat:" + seat + ":" + question}, nil
 }
 
+func (s *stubEngine) Turn(_ context.Context, objective, feed, method string) (string, error) {
+	s.calls = append(s.calls, "run:"+objective)
+	return "stub-run:" + objective, nil
+}
+
 func (s *stubEngine) Recall(_, question string) (string, error) {
 	s.calls = append(s.calls, "memory:"+question)
 	return "stub-memory", nil

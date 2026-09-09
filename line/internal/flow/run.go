@@ -22,6 +22,11 @@ import (
 // Engine carries out single measurements. Production wires rack + play;
 // tests stub it with canned answers.
 type Engine interface {
+	// Turn puts one objective through Manjuel itself -- the council, the law
+	// gate, the one Router. THE LINE supplies this; the bare prodEngine below
+	// refuses it, because a flow that silently downgraded a `run` to an `ask`
+	// would be answering with a model where the estate was asked.
+	Turn(ctx context.Context, objective, feed, method string) (string, error)
 	Ask(ctx context.Context, question, voice string) (string, error)
 	RunPrompt(name string, version int, vars map[string]string, voice string) (play.Run, error)
 	SeatAsk(seat, question, voice, method string) (play.Run, error)
@@ -30,6 +35,15 @@ type Engine interface {
 
 // prodEngine is the live wire: guard, route, ask and witness via play.
 type prodEngine struct{ home string }
+
+// Turn refuses on the bare engine. THE LINE overrides it with one that
+// reaches the world's Manjuel process; without that override a `run` node has
+// no council to reach and must say so rather than answer anyway.
+func (p prodEngine) Turn(ctx context.Context, objective, feed, method string) (string, error) {
+	return "", fmt.Errorf("refused: this flow has no engine wired, so a `run` " +
+		"node has no council to put its objective through. Fire the flow through " +
+		"THE LINE (flow_run), with atlas-mcp started with --manjuel")
+}
 
 func (p prodEngine) Ask(ctx context.Context, question, voice string) (string, error) {
 	ans, _, _, err := play.Measure(ctx, p.home, question, voice)
@@ -182,6 +196,7 @@ func runFrom(home string, eng Engine, s Spec, order []string, inputs map[string]
 			continue
 		}
 		nd := byName[name]
+		vars := buildVars(inputs, outText)
 		if nd.Kind == "gate" {
 			if resumeGate == name {
 				// Resumed: the hand said continue. The gate stands
@@ -191,16 +206,25 @@ func runFrom(home string, eng Engine, s Spec, order []string, inputs map[string]
 				outText[name] = "continue"
 				continue
 			}
+			// The title is RENDERED. A gate the operator walks back to hours
+			// later must be able to quote what the run actually produced --
+			// "{{work}}" -- or he is deciding blind on a static string.
+			// A bad reference does not lose the pause; it shows itself.
+			title := nd.Title
+			if t, err := play.Render(title, vars); err == nil {
+				title = t
+			} else {
+				title = title + "  [title unrendered: " + err.Error() + "]"
+			}
 			appendLog(home, map[string]any{
 				"run": run, "ts": nowUTC(), "kind": "node",
 				"node": name, "nkind": "gate", "status": "paused",
-				"title": nd.Title,
+				"title": title,
 			})
 			r := finishRun(run, VerdictPaused, total, outputs, outText)
 			r.PausedNode = name
 			return r, nil
 		}
-		vars := buildVars(inputs, outText)
 		start := time.Now()
 		outcome, pok, status, rerr := execNode(ctx, eng, nd, vars)
 		ms := time.Since(start).Milliseconds()
@@ -287,6 +311,16 @@ func hasFailEdge(edges []Edge, from string) bool {
 // scored. Gate nodes never reach here (they pause in the loop).
 func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) (string, bool, string, error) {
 	switch nd.Kind {
+	case "run":
+		obj, err := play.Render(nd.Question, vars)
+		if err != nil {
+			return "", false, "fail", err
+		}
+		out, err := eng.Turn(ctx, obj, "", nd.Method)
+		if err != nil {
+			return "", false, "fail", err
+		}
+		return out, true, "ok", nil
 	case "ask":
 		q, err := play.Render(nd.Question, vars)
 		if err != nil {
@@ -571,6 +605,21 @@ func Status(home, run string) (string, error) {
 				extra = " · receipt " + r[:16]
 			}
 			fmt.Fprintf(&b, "  %-14s %-8s %6dms%s\n", node, status, ms, extra)
+			// The WHY, not just the word. A waterfall that says "fail" and
+			// keeps the reason in the JSONL costs the operator a shell and a
+			// grep to learn the engine simply was not open.
+			if e, _ := l["error"].(string); e != "" {
+				fmt.Fprintf(&b, "      why: %s\n", e)
+			}
+			// A gate is the whole point of walking away. Coming back, the
+			// question has to be ON the waterfall -- whole, untruncated, with
+			// the exact command that answers it. It is what he is deciding on.
+			if t, _ := l["title"].(string); t != "" {
+				for _, ln := range strings.Split(strings.TrimRight(t, "\n"), "\n") {
+					fmt.Fprintf(&b, "      %s\n", ln)
+				}
+				fmt.Fprintf(&b, "      -> flow_resume run=%s decision=continue|stop\n", run)
+			}
 		case "stopped":
 			verdict, _ = l["verdict"].(string)
 		}

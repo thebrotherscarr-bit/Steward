@@ -47,7 +47,7 @@ const App = {
     const el = document.getElementById('content');
     switch (this.currentPage) {
       case 'dashboard': await this.renderDashboard(el); break;
-      case 'chain': await this.renderChain(el); break;
+      case 'manjuel': await this.renderChain(el); break;
       case 'agents': await this.renderAgents(el); break;
       case 'rbac': await this.renderRBAC(el); break;
       case 'trust': await this.renderTrust(el); break;
