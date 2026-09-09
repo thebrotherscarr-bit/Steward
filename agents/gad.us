@@ -1,0 +1,30 @@
+# gad - declared seat
+
+Troop. Adversarial testing - overcome-at-the-last: red-team runs LAST, after every other tribe has passed.
+
+Source: LAW_002_THE_TWELVE.md shard-office table. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "gad",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "MANJUEL/Gad",
+  "permission": {
+    "bash": {
+      "atlas-target/**": "ask"
+    },
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "Troop. Adversarial testing - overcome-at-the-last: red-team runs LAST, after every other tribe has passed.",
+  "source": "LAW_002_THE_TWELVE.md shard-office table",
+  "us": 1
+}
+```

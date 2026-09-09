@@ -1,0 +1,8 @@
+[package]
+name = "atlas"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+atlas-core = { path = "../../core" }
+atlas-store = { path = "../../store" }

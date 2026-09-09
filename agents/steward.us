@@ -1,0 +1,30 @@
+# steward - declared seat
+
+plans, specs, keeps THE_ROAD; proposes, never disposes
+
+Source: SPEC_US named seats; doctrine STEWARD.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "steward",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "STEWARD",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "plans, specs, keeps THE_ROAD; proposes, never disposes",
+  "source": "SPEC_US named seats; doctrine STEWARD.md",
+  "us": 1
+}
+```

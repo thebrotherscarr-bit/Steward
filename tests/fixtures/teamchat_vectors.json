@@ -1,0 +1,66 @@
+{
+  "bad_channels": [
+    "",
+    "UPPER",
+    "has space",
+    "../escape",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "channel_re": "^[a-z0-9][a-z0-9_-]{0,63}$",
+  "dedupe": {
+    "first": "stored",
+    "second": "duplicate"
+  },
+  "good_channels": [
+    "general",
+    "ops-alerts",
+    "a",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "hmac_example": {
+    "body": "{\"event_id\":\"E1\",\"text\":\"hello atlas\"}",
+    "secret_hint": "prove-only (never the live secret)",
+    "signature": "sha256=c206db11719fd6d3ffe9b90a59f503dc6c5b4c8289d59a2023927dc5d92f9200"
+  },
+  "payload_shapes": [
+    {
+      "payload": {
+        "content": "hi",
+        "username": "atlas"
+      },
+      "platform": "discord",
+      "text": "hi"
+    },
+    {
+      "payload": {
+        "text": "hi"
+      },
+      "platform": "slack",
+      "text": "hi"
+    },
+    {
+      "payload": {
+        "messaging_product": "whatsapp",
+        "text": {
+          "body": "hi"
+        }
+      },
+      "platform": "whatsapp",
+      "text": "hi"
+    }
+  ],
+  "platforms": [
+    "discord",
+    "slack",
+    "whatsapp"
+  ],
+  "receipt_example": {
+    "agent": "manjuel",
+    "channel": "general",
+    "content": "the beat walks",
+    "direction": "outbound",
+    "platform": "discord",
+    "receipt": "e8f95bbaaf8992683488d407d8163463e504a95cce8e84cb43c7ea48726c435b",
+    "ts": "2026-09-09T12:00:00Z"
+  }
+}

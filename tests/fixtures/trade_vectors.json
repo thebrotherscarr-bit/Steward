@@ -1,0 +1,135 @@
+{
+  "spec": "D2 Trade parity (golden-master shapes + cross-verify books)",
+  "oracles": {
+    "property": "25132dcdac24f885f4e4b26cd1f06df3fd0cf6055a0240adbaf1e84c56414e8d",
+    "workorder": "c936e45c8316de46bf24364b266d53e5eee3975e6f631d4ba30087567aa0f90e",
+    "inspect": "d9bf8a52418d19980cdf2ae031823805ab06b4baef63577ab93b17ba1ffdfa52",
+    "report": "036485f3a4b6be9e5bdbe518435339bdc6c8adf6d66c4f9e8ec24c1b7e08fc21"
+  },
+  "normalize": "TS-><TS>, DATE-><DATE>, CLOCK-><CLOCK>, TMPDIR-><TMP>, 12..64hex-><HASH>",
+  "outputs": [
+    {
+      "skill": "property",
+      "cmd": "enroll Red Rock Loop | 55 Red Rock Loop Rd, Sedona",
+      "raw": "enrolled Red Rock Loop — in his care as of 2026-09-03. entry sealed at 5e1ba32f540a",
+      "norm": "enrolled Red Rock Loop — in his care as of <DATE>. entry sealed at <HASH>"
+    },
+    {
+      "skill": "property",
+      "cmd": "enroll Juniper Ridge casita | key in the lockbox",
+      "raw": "enrolled Juniper Ridge casita — in his care as of 2026-09-03. entry sealed at 81e50e71ccef",
+      "norm": "enrolled Juniper Ridge casita — in his care as of <DATE>. entry sealed at <HASH>"
+    },
+    {
+      "skill": "property",
+      "cmd": "list",
+      "raw": "Red Rock Loop — since 2026-09-03 · 55 Red Rock Loop Rd, Sedona  [5e1ba32f540a]\nJuniper Ridge casita — since 2026-09-03 · key in the lockbox  [81e50e71ccef]",
+      "norm": "Red Rock Loop — since <DATE> · 55 Red Rock Loop Rd, Sedona  [<HASH>]\nJuniper Ridge casita — since <DATE> · key in the lockbox  [<HASH>]"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "add Juniper Ridge casita | swamp cooler pads worn | Dale",
+      "raw": "opened work order #1: Juniper Ridge casita — swamp cooler pads worn (vendor: Dale)",
+      "norm": "opened work order #1: Juniper Ridge casita — swamp cooler pads worn (vendor: Dale)"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "add Red Rock Loop | gate hinge javelina damage | Marco",
+      "raw": "opened work order #2: Red Rock Loop — gate hinge javelina damage (vendor: Marco)",
+      "norm": "opened work order #2: Red Rock Loop — gate hinge javelina damage (vendor: Marco)"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "assign 2 | Marco",
+      "raw": "work order #2 assigned to Marco",
+      "norm": "work order #2 assigned to Marco"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "done 1 | 300",
+      "raw": "work order #1 closed at $300.00",
+      "norm": "work order #1 closed at $300.00"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "list open",
+      "raw": "#2 [open] Red Rock Loop — gate hinge javelina damage (vendor: Marco, $0.00)",
+      "norm": "#2 [open] Red Rock Loop — gate hinge javelina damage (vendor: Marco, $0.00)"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "list done",
+      "raw": "#1 [done] Juniper Ridge casita — swamp cooler pads worn (vendor: Dale, $300.00)",
+      "norm": "#1 [done] Juniper Ridge casita — swamp cooler pads worn (vendor: Dale, $300.00)"
+    },
+    {
+      "skill": "workorder",
+      "cmd": "list all",
+      "raw": "#1 [done] Juniper Ridge casita — swamp cooler pads worn (vendor: Dale, $300.00)\n#2 [open] Red Rock Loop — gate hinge javelina damage (vendor: Marco, $0.00)",
+      "norm": "#1 [done] Juniper Ridge casita — swamp cooler pads worn (vendor: Dale, $300.00)\n#2 [open] Red Rock Loop — gate hinge javelina damage (vendor: Marco, $0.00)"
+    },
+    {
+      "skill": "inspect",
+      "cmd": "log Red Rock Loop | water heater=pass ; drip zone 3=fail | javelina bent the gate",
+      "raw": "inspection logged for Red Rock Loop — 2 item(s), 1 FAILED: drip zone 3. entry sealed at 45a7bc825985",
+      "norm": "inspection logged for Red Rock Loop — 2 item(s), 1 FAILED: drip zone 3. entry sealed at <HASH>"
+    },
+    {
+      "skill": "inspect",
+      "cmd": "log Juniper Ridge casita | swamp cooler=pass",
+      "raw": "inspection logged for Juniper Ridge casita — 1 item(s), all pass. entry sealed at a7465faf9154",
+      "norm": "inspection logged for Juniper Ridge casita — 1 item(s), all pass. entry sealed at <HASH>"
+    },
+    {
+      "skill": "inspect",
+      "cmd": "report red rock",
+      "raw": "2026-09-03T16:46:41  Red Rock Loop — water heater: pass, drip zone 3: fail · javelina bent the gate  [45a7bc825985]",
+      "norm": "<TS>  Red Rock Loop — water heater: pass, drip zone 3: fail · javelina bent the gate  [<HASH>]"
+    },
+    {
+      "skill": "report",
+      "cmd": "Red Rock Loop",
+      "raw": "# OWNER REPORT — Red Rock Loop\n*Prepared 2026-09-03 · covering the whole record · Red Rock Loop — enrolled 2026-09-03 · 55 Red Rock Loop Rd, Sedona*\n\n## THE VISITS — 1 inspection(s)\n- 2026-09-03 16:46 — water heater: pass, drip zone 3: fail — **1 FAILED: drip zone 3** · javelina bent the gate  · receipt 45a7bc825985\n\n## THE WORK — 1 work order(s)\n- #2 [open] — gate hinge javelina damage (vendor: Marco) · opened 2026-09-03  · receipt 58af2d13bd7b\n- work billed in this span: $0.00\n\n## THE VERDICT\n**This record proves whole.** All three chains rewalk clean — the roster, the work-order audit, and the inspection log. Not one line above could have been altered without breaking the chain that seals it.\n- property roster intact (2 entries)\n- audit chain intact (4 entries)\n- inspection chain intact (2 entries)\n\n(written to C:\\Users\\novad\\AppData\\Local\\Temp\\trade_vectors_blde679y\\reports\\red_rock_loop_2026-09-03.md)",
+      "norm": "# OWNER REPORT — Red Rock Loop\n*Prepared <DATE> · covering the whole record · Red Rock Loop — enrolled <DATE> · 55 Red Rock Loop Rd, Sedona*\n\n## THE VISITS — 1 inspection(s)\n- <DATE> <CLOCK> — water heater: pass, drip zone 3: fail — **1 FAILED: drip zone 3** · javelina bent the gate  · receipt <HASH>\n\n## THE WORK — 1 work order(s)\n- #2 [open] — gate hinge javelina damage (vendor: Marco) · opened <DATE>  · receipt <HASH>\n- work billed in this span: $0.00\n\n## THE VERDICT\n**This record proves whole.** All three chains rewalk clean — the roster, the work-order audit, and the inspection log. Not one line above could have been altered without breaking the chain that seals it.\n- property roster intact (2 entries)\n- audit chain intact (4 entries)\n- inspection chain intact (2 entries)\n\n(written to <TMP>\\reports\\red_rock_loop_<DATE>.md)"
+    },
+    {
+      "skill": "report",
+      "cmd": "Oak Creek",
+      "raw": "no record of that property: Oak Creek. The report does not invent; enroll it first (:skill property enroll <name> | <notes>).",
+      "norm": "no record of that property: Oak Creek. The report does not invent; enroll it first (:skill property enroll <name> | <notes>)."
+    }
+  ],
+  "verifications": [
+    {
+      "skill": "property",
+      "out": "property roster intact (2 entries)"
+    },
+    {
+      "skill": "workorder",
+      "out": "audit chain intact (4 entries)"
+    },
+    {
+      "skill": "inspect",
+      "out": "inspection chain intact (2 entries)"
+    }
+  ],
+  "chain_stats": {
+    "properties.jsonl": {
+      "lines": 2,
+      "bytes": 494
+    },
+    "workorders.db": {
+      "lines": null,
+      "bytes": 8192
+    },
+    "workorders_audit.jsonl": {
+      "lines": 4,
+      "bytes": 1078
+    },
+    "inspections.jsonl": {
+      "lines": 2,
+      "bytes": 574
+    }
+  },
+  "books_note": "tests/fixtures/trade_books/ holds these same bytes"
+}

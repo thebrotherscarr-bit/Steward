@@ -1,0 +1,61 @@
+{
+  "audit_shape": {
+    "actions": [
+      "create",
+      "revoke"
+    ],
+    "fields": [
+      "ts",
+      "action",
+      "key_id",
+      "tenant",
+      "by"
+    ]
+  },
+  "domain": "atlas-auth-v1",
+  "iters": 210000,
+  "kdf_example": {
+    "hash": "32eb098ff16fc1c8b48b12a51b28d40b726e2efaee2058995f3d57eb3dafb435",
+    "key": "atl_abababababababababababababababab",
+    "salt": "00000000000000000000000000000000"
+  },
+  "key_re": "^atl_[0-9a-f]{32}$",
+  "kid_re": "^k-[0-9a-f]{8}$",
+  "scope_matrix": [
+    {
+      "allow": true,
+      "request": "atlas",
+      "tenants": [
+        "atlas"
+      ]
+    },
+    {
+      "allow": false,
+      "request": "manjuel",
+      "tenants": [
+        "atlas"
+      ]
+    },
+    {
+      "allow": true,
+      "request": "manjuel",
+      "tenants": [
+        "atlas",
+        "manjuel"
+      ]
+    },
+    {
+      "allow": true,
+      "request": "stranger-tenant",
+      "tenants": [
+        "*"
+      ]
+    },
+    {
+      "allow": false,
+      "request": "atlas",
+      "tenants": []
+    }
+  ],
+  "session_hours": 12
+}

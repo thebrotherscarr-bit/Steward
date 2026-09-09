@@ -1,0 +1,1 @@
+{"ts": "2026-08-07T18:23:35", "actor": "operator", "tool": "help", "args": "", "tier": "read", "verdict": "allow", "trust": 0.95, "reasons": ["help chartered read - trust 0.95 clears the read floor (0.00)"], "prev": "ef4e7cbd834787baf5d897db1634a71f12add1a1663d60da9174ac5c56ad10ee", "hash": "9235c0ee4300175c263b786638c1f13e0f081302e10c244d832e673f7b411068"}

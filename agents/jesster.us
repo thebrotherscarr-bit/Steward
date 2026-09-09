@@ -1,0 +1,30 @@
+# jesster - declared seat
+
+verifies, refutes, returns stones to Neiro
+
+Source: SPEC_US named seats; doctrine JESSTER.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "jesster",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "JESSTER",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "verifies, refutes, returns stones to Neiro",
+  "source": "SPEC_US named seats; doctrine JESSTER.md",
+  "us": 1
+}
+```

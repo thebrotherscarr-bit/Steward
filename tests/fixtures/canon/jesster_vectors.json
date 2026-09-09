@@ -1,0 +1,157 @@
+{
+  "certify": [
+    {
+      "body_hex": "4a4553535445527c73657373696f6e7c76317cdfdbe08cb812b7c92aa3aec649e01c32c29beef7723c3e3d2393f6d678a6107e56384afddaac7c1e9ed2147cdbae76300b2071daa0d1de5a8fde97065751289a7c1f8a566c205633d029094747d2e18f44e05993dda7a5f88f496078205f656e59d2403ec0d3f55660b64477acbb7f84bb9a14914c177df864dccba0ac1937ef40",
+      "identity_pub_hex": "dfdbe08cb812b7c92aa3aec649e01c32c29beef7723c3e3d2393f6d678a6107e56384afddaac7c1e9ed2147cdbae76300b2071daa0d1de5a8fde97065751289a",
+      "session_priv_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "session_pub_hex": "1f8a566c205633d029094747d2e18f44e05993dda7a5f88f496078205f656e59d2403ec0d3f55660b64477acbb7f84bb9a14914c177df864dccba0ac1937ef40"
+    }
+  ],
+  "domains": {
+    "D1_scrypt_salt": {
+      "form": "JESSTER|<OFFICE-UPPER>|v<EPOCH>",
+      "samples": {
+        "JESSTER": "4a4553535445527c4a4553535445527c7631",
+        "MANJUEL": "4a4553535445527c4d414e4a55454c7c7631",
+        "NEIRO": "4a4553535445527c4e4549524f7c7631"
+      },
+      "scrypt_input": "covenant_utf8 + b'|' + secret"
+    },
+    "D2_nonce": {
+      "form": "b'JESSTER|nonce|' + priv32 + b'|' + msg",
+      "note": "separator before msg only; none after the prefix",
+      "prefix_hex": "4a4553535445527c6e6f6e63657c"
+    },
+    "D3_challenge": {
+      "form": "b'JESSTER|chal|' + R64 + P64 + msg",
+      "note": "no separators anywhere",
+      "prefix_hex": "4a4553535445527c6368616c7c"
+    },
+    "D4_certify_body": {
+      "actual_len": 148,
+      "expected_len": 148,
+      "form": "b'JESSTER|session|v<EPOCH>|' + ipub64 + b'|' + spub64",
+      "percent_s_inserts": "raw bytes (PEP 461), NOT a repr -- measured"
+    }
+  },
+  "identities": [
+    {
+      "covenant": "1512741580b7239b",
+      "epoch": 1,
+      "mark": "be2c1b524c501e27",
+      "office": "MANJUEL",
+      "priv_hex": "08083cf266514e4c35e3b203a7e6b24a0190eda4421e82ae0d1233edf64d1d4e",
+      "pub_hex": "dfdbe08cb812b7c92aa3aec649e01c32c29beef7723c3e3d2393f6d678a6107e56384afddaac7c1e9ed2147cdbae76300b2071daa0d1de5a8fde97065751289a",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "covenant": "1512741580b7239b",
+      "epoch": 1,
+      "mark": "33daa24b91a6159d",
+      "office": "NEIRO",
+      "priv_hex": "5db96d88a7d8fb8070922831943b52c8f5882c8ea7b3a27ad6221a919560050f",
+      "pub_hex": "65660d315e1fb5c4fb06383ebcfd96891cb97590b05d2f4d1e708de1500435b5cfeb39d350ab10ab0a9046cc5cce318c008bafe2d4a2a061972469762f4b558d",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "covenant": "1512741580b7239b",
+      "epoch": 1,
+      "mark": "f3c9243977839680",
+      "office": "JESSTER",
+      "priv_hex": "a3c681f2ba49bf25bf80a0a43d9a49255e10b73af32425b3a3b7adbab3e28b9e",
+      "pub_hex": "027ac06bd6ddc6041ce13686e3a7cb1b3d0e355ebfa38244eccced3cfbc8498e998d22034f36867357296909b1b6a2a01092ac7babdc137729065973ce3ae35f",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "covenant": "65118a147dd49ed9",
+      "epoch": 1,
+      "mark": "f392969388ad3a38",
+      "office": "MANJUEL",
+      "priv_hex": "4249e211483ad7167d3529c59efeb44422a87b51ef8c09b01cb2891b6050d81c",
+      "pub_hex": "bf797fa264b312c85b6b99fae97b29727d91fd43a8cac81216983a708b3d15ea419af74c3a7c8b35e047a53f0a015118e5436bfde47cde078168f2224ae62d82",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "covenant": "65118a147dd49ed9",
+      "epoch": 1,
+      "mark": "b246222da545b17d",
+      "office": "NEIRO",
+      "priv_hex": "8048f373a542c7e32474973aff7f5798b7771cb32ad8ac447c3073f333e682cf",
+      "pub_hex": "a0c287b7391da735f6aab551d2cea670404a34171b2f488b3419140cc5dc0c3d9f1fe6a809214e8efce5dde975d4fe6250826ee3061e541ad6baa64c9ed873ad",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "covenant": "65118a147dd49ed9",
+      "epoch": 1,
+      "mark": "0297990969d20b55",
+      "office": "JESSTER",
+      "priv_hex": "9580e8ec47efeb342d41a715257f5b186bc137d9ead637b307ed0e9dd8d2c9f5",
+      "pub_hex": "2c87ccc2b2fb641647987274d78bccc45ea82e0eb468ff0ea093cfa95fa001b4eda9d4f6b30522188bde9fe9bd91892de50ef81a4cd7d47d2927e07f83bda013",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    }
+  ],
+  "keymaker": {
+    "path": "estate/forge/links/jesster.py",
+    "sha256": "6b551aaabd66834d39377d7fcfc27b5352d44f19287f253b8fc93766cc3707f4"
+  },
+  "ordering_note": "B2: the keymaker's domain strings pinned from the Python original BEFORE any Go Schnorr exists",
+  "params": {
+    "curve": "secp256k1",
+    "epoch": 1,
+    "mark": "sha256(pub)[:16] hex over the 64-byte uncompressed pub",
+    "nonce_zero_rule": "k = int(H) % N or 1",
+    "pub_encoding": "uncompressed x||y, 64 bytes, no SEC1 prefix",
+    "scrypt": {
+      "dklen": 32,
+      "maxmem": 67108864,
+      "n": 16384,
+      "p": 1,
+      "r": 8
+    },
+    "sig_encoding": "R(64) || s(32), 96 bytes"
+  },
+  "signatures": [
+    {
+      "R_hex": "bc89919377dd6e2cd353682e259950d49fb9b6d6b69213dd99c1e06b7436fd88ad731642242fdd6d108b1f22dd58dde9cc15b5321190b7c172c2a5cb70cef4fb",
+      "msg_hex": "",
+      "msg_len": 0,
+      "priv_hex": "08083cf266514e4c35e3b203a7e6b24a0190eda4421e82ae0d1233edf64d1d4e",
+      "s_hex": "ba46b33f562d03651cc18141c5ea25170dc15933e668a8d8348bc866d7e88436",
+      "sig_hex": "bc89919377dd6e2cd353682e259950d49fb9b6d6b69213dd99c1e06b7436fd88ad731642242fdd6d108b1f22dd58dde9cc15b5321190b7c172c2a5cb70cef4fbba46b33f562d03651cc18141c5ea25170dc15933e668a8d8348bc866d7e88436",
+      "verifies": true
+    },
+    {
+      "R_hex": "c4c6c129da0bf962b449d441095b0916563adcc491fdf752104514592ef8af66a5bba026ff1978ba80da5d1eb9b2074e5652fad2a32e1de47375a2de420374c0",
+      "msg_hex": "746865206573746174652072656d656d62657273",
+      "msg_len": 20,
+      "priv_hex": "08083cf266514e4c35e3b203a7e6b24a0190eda4421e82ae0d1233edf64d1d4e",
+      "s_hex": "9459163399b3e29aa6680fe8aff6fb73090e4ae90b5a4e897279f7d4b05f21c9",
+      "sig_hex": "c4c6c129da0bf962b449d441095b0916563adcc491fdf752104514592ef8af66a5bba026ff1978ba80da5d1eb9b2074e5652fad2a32e1de47375a2de420374c09459163399b3e29aa6680fe8aff6fb73090e4ae90b5a4e897279f7d4b05f21c9",
+      "verifies": true
+    },
+    {
+      "R_hex": "2d6b4d882e1f77d66948d9f62924fc3e4d797eb17dab4a9d92c321a71bc5a14341cd489896b57f32a19acb616dd2204723f89f2936f8bcd81700c79eaefbd671",
+      "msg_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "msg_len": 256,
+      "priv_hex": "08083cf266514e4c35e3b203a7e6b24a0190eda4421e82ae0d1233edf64d1d4e",
+      "s_hex": "20e768bc3a57c147d9f104001f55dee07fd38c3a8cf88d4076a2d190c5226590",
+      "sig_hex": "2d6b4d882e1f77d66948d9f62924fc3e4d797eb17dab4a9d92c321a71bc5a14341cd489896b57f32a19acb616dd2204723f89f2936f8bcd81700c79eaefbd67120e768bc3a57c147d9f104001f55dee07fd38c3a8cf88d4076a2d190c5226590",
+      "verifies": true
+    },
+    {
+      "R_hex": "fee32db9653c01ef0e0edde80db7bdd540caa7f88c1b1f0c7f8626c4ae488927f76a8e805e1d9dbbc718911bdcb817c1954defbef70299cdd21c8efb6bc1cadf",
+      "msg_hex": "636166c3a920e28094206e6f6e2d6173636969",
+      "msg_len": 19,
+      "priv_hex": "08083cf266514e4c35e3b203a7e6b24a0190eda4421e82ae0d1233edf64d1d4e",
+      "s_hex": "b83c899e71d0b08de5db4e64cc32d87e83879d083023388b9dbfdd2afe740773",
+      "sig_hex": "fee32db9653c01ef0e0edde80db7bdd540caa7f88c1b1f0c7f8626c4ae488927f76a8e805e1d9dbbc718911bdcb817c1954defbef70299cdd21c8efb6bc1cadfb83c899e71d0b08de5db4e64cc32d87e83879d083023388b9dbfdd2afe740773",
+      "verifies": true
+    }
+  ],
+  "tally": {
+    "domains": 4,
+    "identities": 6,
+    "signatures": 4
+  },
+  "tool": "tools/cut_jesster_vectors.py"
+}

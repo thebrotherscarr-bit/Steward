@@ -1,0 +1,29 @@
+# GATE - household map
+
+Operator and working seat; invariant 6 holds for every row ever enrolled.
+
+```json
+{
+  "body_v": 3,
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "generation": 1,
+  "id": "gate",
+  "kind": "module",
+  "ledger": "data/master.db",
+  "office": "GATE",
+  "reports_to": "gate",
+  "rows": [
+    "operator",
+    "seat"
+  ],
+  "source": "SPEC_US structural law",
+  "us": 1,
+  "verbs": [
+    "rule",
+    "enroll",
+    "review"
+  ],
+  "wall": "."
+}
+```

@@ -1,0 +1,34 @@
+# courier - declared seat
+
+moves files, archives deliverables, and checkpoints phases to the shelf - a citizen of the Estate
+
+Source: Archive\Agents\courier.md frontmatter and description; dispatcher named in its own prose. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "courier",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "ARCHIVIST",
+  "permission": {
+    "bash": {
+      "*": "ask"
+    },
+    "edit": {
+      "*": "deny",
+      "scripts/**": "allow",
+      "shelf/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "archivist",
+  "role": "moves files, archives deliverables, and checkpoints phases to the shelf - a citizen of the Estate",
+  "source": "Archive\\Agents\\courier.md frontmatter and description; dispatcher named in its own prose",
+  "us": 1
+}
+```

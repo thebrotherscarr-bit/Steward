@@ -1,0 +1,28 @@
+# dan - declared seat
+
+Judge. Schema rulings and path-walking: boundary checks, injection strikes on the path itself.
+
+Source: LAW_002_THE_TWELVE.md shard-office table. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "dan",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "MANJUEL/Dan",
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "Judge. Schema rulings and path-walking: boundary checks, injection strikes on the path itself.",
+  "source": "LAW_002_THE_TWELVE.md shard-office table",
+  "us": 1
+}
+```

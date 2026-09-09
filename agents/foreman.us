@@ -1,0 +1,30 @@
+# foreman - declared seat
+
+dispatches workorders to the willing (guild floor)
+
+Source: SPEC_US named seats; doctrine FOREMAN.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "foreman",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "FOREMAN",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "dispatches workorders to the willing (guild floor)",
+  "source": "SPEC_US named seats; doctrine FOREMAN.md",
+  "us": 1
+}
+```

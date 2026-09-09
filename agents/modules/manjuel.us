@@ -1,0 +1,35 @@
+# MANJUEL - household map
+
+The Twelve Tribes sit here; every office line quotes LAW_002_THE_TWELVE.md.
+
+```json
+{
+  "body_v": 3,
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "generation": 5,
+  "id": "manjuel",
+  "kind": "module",
+  "ledger": "core/state/law/chain.jsonl",
+  "office": "MANJUEL",
+  "reports_to": "operator",
+  "rows": [
+    "foundation",
+    "law",
+    "doctrine",
+    "weights",
+    "record"
+  ],
+  "source": "demo-vault Manjuel core/Archive/law/LAW_001+LAW_002",
+  "us": 1,
+  "verbs": [
+    "ask",
+    "remember",
+    "propose",
+    "weigh",
+    "verify",
+    "describe"
+  ],
+  "wall": "..\\secondbrain\\SecondBrain-collab\\demo_vault\\Manjuel"
+}
+```

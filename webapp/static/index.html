@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATLAS — Sovereign Agent Harness</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar" id="sidebar">
+      <div class="logo">
+        <h1>ATLAS</h1>
+        <span id="version">loading...</span>
+      </div>
+      <div class="nav" id="nav">
+        <a href="/" class="nav-link active" data-page="dashboard" data-icon="&#9632;">Dashboard</a>
+        <a href="/agents" class="nav-link" data-page="agents" data-icon="&#9673;">Agents</a>
+        <a href="/traces" class="nav-link" data-page="traces" data-icon="&#9656;">Traces</a>
+        <a href="/tools" class="nav-link" data-page="tools" data-icon="&#9881;">Tools</a>
+        <a href="/evals" class="nav-link" data-page="evals" data-icon="&#10003;">Evals</a>
+        <a href="/chat" class="nav-link" data-page="chat" data-icon="&#9998;">Chat</a>
+        <a href="/playground" class="nav-link" data-page="playground" data-icon="&#9874;">Playground</a>
+        <a href="/flows" class="nav-link" data-page="flows" data-icon="&#9783;">Flows</a>
+        <a href="/messages" class="nav-link" data-page="messages" data-icon="&#9993;">Messages</a>
+        <a href="/settings" class="nav-link" data-page="settings" data-icon="&#9883;">Settings</a>
+      </div>
+      <div class="sidebar-footer">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="operator-status">connecting...</span>
+        <div class="covenant">covenant: 1512741580b7239b</div>
+      </div>
+    </nav>
+    <main class="main" id="content">
+      <div class="loading">Loading...</div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-backdrop" onclick="App.closeModal()"></div>
+    <div class="modal-content" id="modal-content"></div>
+  </div>
+  <script src="/js/api.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/prompts.js"></script>
+  <script src="/js/flows.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

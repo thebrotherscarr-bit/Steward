@@ -1,0 +1,28 @@
+# wren - declared seat
+
+counsel persona (wren); weighs packets, proposes rulings
+
+Source: demo-vault Manjuel personas/ directory. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "wren",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "COUNCIL",
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "council",
+  "role": "counsel persona (wren); weighs packets, proposes rulings",
+  "source": "demo-vault Manjuel personas/ directory",
+  "us": 1
+}
+```

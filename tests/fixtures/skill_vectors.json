@@ -1,0 +1,72 @@
+{
+  "spec": "F1-03 skill lint (rules R1..R5)",
+  "rules": [
+    "R1 frontmatter block",
+    "R2 name present, shaped, == dirname",
+    "R3 description 10..500 chars",
+    "R4 headed non-empty body",
+    "R5 no duplicate keys"
+  ],
+  "cases": [
+    {
+      "dir": "valid",
+      "expect": []
+    },
+    {
+      "dir": "nofront",
+      "expect": [
+        "R1",
+        "R2",
+        "R3"
+      ]
+    },
+    {
+      "dir": "noname",
+      "expect": [
+        "R2"
+      ]
+    },
+    {
+      "dir": "badname",
+      "expect": [
+        "R2"
+      ]
+    },
+    {
+      "dir": "mismatch",
+      "expect": [
+        "R2"
+      ]
+    },
+    {
+      "dir": "nodesc",
+      "expect": [
+        "R3"
+      ]
+    },
+    {
+      "dir": "shortdesc",
+      "expect": [
+        "R3"
+      ]
+    },
+    {
+      "dir": "emptybody",
+      "expect": [
+        "R4"
+      ]
+    },
+    {
+      "dir": "noheading",
+      "expect": [
+        "R4"
+      ]
+    },
+    {
+      "dir": "dupkey",
+      "expect": [
+        "R5"
+      ]
+    }
+  ]
+}

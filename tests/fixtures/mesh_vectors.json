@@ -1,0 +1,62 @@
+{
+  "spec": "SPEC_US_MESH",
+  "oracle": "..\\tests\\fixtures\\chains\\forge_links_chain.jsonl",
+  "vectors": [
+    {
+      "id": "chain-intact",
+      "kind": "integrity",
+      "expect": "INTACT",
+      "ok": true,
+      "detail": "fixture 9 entries; verdict=INTACT; mismatched_hashes=0"
+    },
+    {
+      "id": "flip",
+      "kind": "integrity",
+      "expect": "FLIP",
+      "ok": true,
+      "detail": "recomputed_hash != stored_hash (True) and weld(prev) holds"
+    },
+    {
+      "id": "tamper",
+      "kind": "integrity",
+      "expect": "TAMPER",
+      "ok": true,
+      "detail": "after dropping entry 3: verdict=TAMPER at 3"
+    },
+    {
+      "id": "mark-welded",
+      "kind": "identity",
+      "expect": "mark==sha256(pub)[:16]",
+      "ok": true,
+      "detail": "3 signed entries checked; all marks weld to their pub"
+    },
+    {
+      "id": "confidentiality",
+      "kind": "confidentiality",
+      "expect": "ct!=plaintext; key held by estate, not in repo",
+      "ok": true,
+      "detail": "ct=E2ibmM/zb/uSqNScCm52...; plaintext absent at rest; decipher key = sovereign (.env/paper), not in repo"
+    },
+    {
+      "id": "auth-refuse",
+      "kind": "auth",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "actor 'stranger' not in enrolled set ['aurora', 'claude', 'kyler', 'manjuel', 'steward'] -> refused by name"
+    },
+    {
+      "id": "wall-refuse",
+      "kind": "wall",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "chan 'estate-steward' != caller project 'atlas' -> refused by name"
+    },
+    {
+      "id": "egress-refuse",
+      "kind": "egress",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "destination 'https://example.com/mesh' is not loopback/estate -> refused outright"
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "prompt": "Say the word 'witnessed' and nothing else.",
+  "default_route": "llama3.2:latest",
+  "embedder": "nomic-embed-text-v2-moe:latest",
+  "shows": {
+    "llama3.2:latest": {
+      "model": "llama3.2:latest",
+      "capabilities": [
+        "completion",
+        "tools"
+      ]
+    },
+    "nomic-embed-text-v2-moe:latest": {
+      "model": "nomic-embed-text-v2-moe:latest",
+      "capabilities": [
+        "embedding"
+      ]
+    },
+    "phi4-mini:latest": {
+      "model": "phi4-mini:latest",
+      "capabilities": [
+        "completion",
+        "tools"
+      ]
+    },
+    "deepseek-r1:8b": {
+      "model": "deepseek-r1:8b",
+      "capabilities": [
+        "tools",
+        "thinking",
+        "completion"
+      ]
+    },
+    "qwen2.5-coder:7b": {
+      "model": "qwen2.5-coder:7b",
+      "capabilities": [
+        "completion",
+        "tools",
+        "insert"
+      ]
+    },
+    "qwen3-vl:8b": {
+      "model": "qwen3-vl:8b",
+      "capabilities": [
+        "completion",
+        "vision",
+        "tools",
+        "thinking"
+      ]
+    },
+    "qwen3.5:4b": {
+      "model": "qwen3.5:4b",
+      "capabilities": [
+        "completion",
+        "vision",
+        "tools",
+        "thinking"
+      ]
+    },
+    "qwen3.5:9b": {
+      "model": "qwen3.5:9b",
+      "capabilities": [
+        "completion",
+        "vision",
+        "tools",
+        "thinking"
+      ]
+    },
+    "qwen2.5-coder:14b": {
+      "model": "qwen2.5-coder:14b",
+      "capabilities": [
+        "completion",
+        "tools",
+        "insert"
+      ]
+    }
+  },
+  "answer": {
+    "model": "llama3.2:latest",
+    "created_at": "2026-09-04T04:02:43.3330235Z",
+    "response": "witnessed",
+    "done": true,
+    "done_reason": "stop",
+    "context": [
+      128006,
+      9125,
+      128007,
+      271,
+      38766,
+      1303,
+      33025,
+      2696,
+      25,
+      6790,
+      220,
+      2366,
+      18,
+      271,
+      128009,
+      128006,
+      882,
+      128007,
+      271,
+      46864,
+      279,
+      3492,
+      364,
+      86,
+      8251,
+      291,
+      6,
+      323,
+      4400,
+      775,
+      13,
+      128009,
+      128006,
+      78191,
+      128007,
+      271,
+      86,
+      8251,
+      291
+    ],
+    "total_duration": 230762600,
+    "load_duration": 7497400,
+    "prompt_eval_count": 37,
+    "prompt_eval_duration": 42268000,
+    "eval_count": 4,
+    "eval_duration": 178398000
+  },
+  "ladder": [
+    "llama3.2:latest",
+    "nomic-embed-text-v2-moe:latest",
+    "phi4-mini:latest",
+    "deepseek-r1:8b",
+    "qwen2.5-coder:7b",
+    "qwen3-vl:8b",
+    "qwen3.5:4b",
+    "qwen3.5:9b",
+    "qwen2.5-coder:14b"
+  ]
+}

@@ -1,0 +1,1 @@
+{"ts": "2026-08-03T12:56:56", "actor": "coder", "tool": "glob", "args": "skills/*", "tier": "read", "verdict": "allow", "trust": 0.35, "reasons": ["read - not subject to the gate"], "prev": "93866bb7456694a5bb43b4218c96fd8151d2b4c8f2270717c1cd93d10f167c91", "hash": "b5077680621d2ef072bf2753a3c7e86f17ab1ec8275a8514c9b2a993de4c2dd4"}

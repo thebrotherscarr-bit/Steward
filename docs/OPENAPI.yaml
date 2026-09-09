@@ -1,0 +1,215 @@
+openapi: "3.1.0"
+info:
+  title: Atlas MCP HTTP API
+  version: "0.1.0+f1"
+  description: |
+    HTTP interface to the Atlas MCP server. Exposes the same tool surface
+    as the stdio MCP protocol over HTTP/JSON-RPC 2.0.
+
+    ## Authentication
+    Loopback by default (127.0.0.1). No auth required for loopback.
+    Wider bind requires the operator's explicit call (`--http :8090`).
+
+    ## Rate Limiting
+    One request at a time per tool call (the ask lock serializes writes).
+
+servers:
+  - url: http://127.0.0.1:8090
+    description: Default loopback
+
+paths:
+  /:
+    get:
+      summary: Server info
+      operationId: serverInfo
+      tags: [meta]
+      responses:
+        "200":
+          description: Server metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: atlas-mcp
+                  version:
+                    type: string
+                    example: "0.1.0+f1"
+                  endpoints:
+                    type: array
+                    items:
+                      type: string
+
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      tags: [meta]
+      responses:
+        "200":
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  server:
+                    type: string
+                    example: atlas-mcp
+                  version:
+                    type: string
+                    example: "0.1.0+f1"
+
+  /tools:
+    get:
+      summary: List available tools
+      operationId: listTools
+      tags: [tools]
+      description: |
+        Returns the full tool surface with JSON Schema input definitions.
+        Equivalent to `tools/list` in the MCP protocol.
+      responses:
+        "200":
+          description: Tool list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        inputSchema:
+                          type: object
+
+  /rpc:
+    post:
+      summary: JSON-RPC 2.0 endpoint
+      operationId: rpc
+      tags: [rpc]
+      description: |
+        Accepts newline-delimited JSON-RPC 2.0 requests. Supports:
+        - `initialize` — handshake
+        - `tools/list` — list available tools
+        - `tools/call` — invoke a tool
+
+        Each request is a single JSON object on its own line. Responses are
+        newline-delimited JSON-RPC 2.0 objects.
+
+        ## Example: Initialize
+        ```json
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+        ```
+
+        ## Example: List tools
+        ```json
+        {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+        ```
+
+        ## Example: Call a tool
+        ```json
+        {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_in_line","arguments":{"project":"atlas"}}}
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/InitializeRequest"
+                - $ref: "#/components/schemas/ToolsListRequest"
+                - $ref: "#/components/schemas/ToolsCallRequest"
+      responses:
+        "200":
+          description: JSON-RPC 2.0 response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcResponse"
+
+components:
+  schemas:
+    InitializeRequest:
+      type: object
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          type: integer
+        method:
+          type: string
+          const: initialize
+        params:
+          type: object
+
+    ToolsListRequest:
+      type: object
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          type: integer
+        method:
+          type: string
+          const: tools/list
+        params:
+          type: object
+
+    ToolsCallRequest:
+      type: object
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          type: integer
+        method:
+          type: string
+          const: tools/call
+        params:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+              description: Tool name
+            arguments:
+              type: object
+              description: Tool arguments (project is optional for all tools)
+
+    JsonRpcResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          example: "2.0"
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+            - type: "null"
+        result:
+          type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string

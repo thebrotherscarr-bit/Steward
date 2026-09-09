@@ -1,0 +1,15 @@
+# ATLAS — line endings are LAW. Fixtures must keep whatever they have
+# (SPEC_CONTROL_CENTER §9 Q6; sitting-15 CRLF lesson). Git must never
+# smear them on clone/checkout.
+* -text
+*.go -text
+*.rs -text
+*.md -text
+*.json -text
+*.jsonl -text
+*.us -text
+*.ts -text
+*.js -text
+*.html -text
+*.css -text
+*.py -text

@@ -1,0 +1,170 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:atlas-0.1.0+f1",
+  "metadata": {
+    "timestamp": "2026-09-07T00:00:00Z",
+    "tools": [
+      {
+        "vendor": "Atlas",
+        "name": "atlas-sbom",
+        "version": "0.1.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "atlas",
+      "version": "0.1.0+f1",
+      "description": "Sovereign agent harnessing system — make agents that won't wreck your stuff.",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "atlas-core",
+      "version": "0.1.0+f1",
+      "description": "Rust provenance core: SHA-256, canonical JSON, BIP-340 Schnorr, chain verification, .us parser, SQLite store",
+      "language": "rust",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "core"},
+        {"name": "atlas:dependencies", "value": "zero-external"}
+      ]
+    },
+    {
+      "type": "library",
+      "name": "atlas-store",
+      "version": "0.1.0+f1",
+      "description": "Rust SQLite store: FFI to system winsqlite3.dll, migrations, import/export, enrollment, trade, link",
+      "language": "rust",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "core"},
+        {"name": "atlas:dependencies", "value": "zero-external"}
+      ]
+    },
+    {
+      "type": "application",
+      "name": "atlas",
+      "version": "0.1.0+f1",
+      "description": "Rust CLI binary: chain verify/recognize, db init/import/export, agent enroll, orient, trade, link",
+      "language": "rust",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "core"},
+        {"name": "atlas:binary", "value": "true"}
+      ]
+    },
+    {
+      "type": "application",
+      "name": "atlas-mcp",
+      "version": "0.1.0+f1",
+      "description": "Go MCP server: multi-tenant, stdio JSON-RPC 2.0 + HTTP API, 20+ tools",
+      "language": "go",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "service"},
+        {"name": "atlas:binary", "value": "true"},
+        {"name": "atlas:protocol", "value": "mcp-2025-06-18"}
+      ]
+    },
+    {
+      "type": "application",
+      "name": "atlas-town",
+      "version": "0.1.0+f1",
+      "description": "Go town server: beat, flow, story, look — REVIEW-gated trade tasks",
+      "language": "go",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "service"},
+        {"name": "atlas:binary", "value": "true"}
+      ]
+    },
+    {
+      "type": "application",
+      "name": "atlas-door",
+      "version": "0.1.0+f1",
+      "description": "Go HTTP door: trade search, badge verification, :8080 loopback",
+      "language": "go",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "service"},
+        {"name": "atlas:binary", "value": "true"}
+      ]
+    },
+    {
+      "type": "library",
+      "name": "libppmi",
+      "version": "0.1.0+f1",
+      "description": "C++ PPMI kernel: socket-free CLI filter, zero network surface",
+      "language": "c++",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "kernel"},
+        {"name": "atlas:socket-free", "value": "true"}
+      ]
+    },
+    {
+      "type": "library",
+      "name": "libdigest",
+      "version": "0.1.0+f1",
+      "description": "C++ digest kernel: meal folding, meal/prune/link operations",
+      "language": "c++",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "kernel"},
+        {"name": "atlas:socket-free", "value": "true"}
+      ]
+    },
+    {
+      "type": "library",
+      "name": "libpredictor",
+      "version": "0.1.0+f1",
+      "description": "C++ predictor kernel: consultation benchmark",
+      "language": "c++",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "kernel"},
+        {"name": "atlas:socket-free", "value": "true"}
+      ]
+    },
+    {
+      "type": "application",
+      "name": "atl",
+      "version": "0.1.0+f1",
+      "description": "TypeScript toolchain: faces, bridge, skill lint, golden-master harness",
+      "language": "typescript",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "application"},
+        {"name": "atlas:dependencies", "value": "zero-external"}
+      ]
+    },
+    {
+      "type": "library",
+      "name": ".us",
+      "version": "1",
+      "description": "Agent declaration format: prose + fenced JSON, can_approve:false structural gate",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [
+        {"name": "atlas:layer", "value": "declaration"},
+        {"name": "atlas:format", "value": "prose+json"}
+      ]
+    }
+  ],
+  "dependencies": [],
+  "externalReferences": [
+    {
+      "type": "website",
+      "url": "https://github.com/atlas-dev/atlas"
+    }
+  ]
+}

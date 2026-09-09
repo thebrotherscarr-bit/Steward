@@ -1,0 +1,15 @@
+{
+  "engine": "Manjuel",
+  "version": "3.2.0",
+  "covenant": "1512741580b7239b80c53e2456b46aa9ec43586788d569da0895718dccf15bbb",
+  "mark": "1512741580b7239b",
+  "ancestor": null,
+  "docs": {
+    "01_MYTHOS.md": "88e7cca1980d1e599a99438cbf7c2b5c85fd7ca13425405d8c056bf1f4494d4a",
+    "02_CONSTITUTION.md": "dc7c572181131ae10f4fec888693528de4b99dd8a3c409a6708a855fd906e517",
+    "03_CREED.md": "27fd52b959375f47970340245918ec4b8317598ed8f13a6b7615f70dd5b8b4b1",
+    "04_NEURO_CORE.md": "69b58eedcc85033b6559d46ce1782fab28200e0d490806eec715139203ef6001",
+    "05_THE_LAW.md": "8e569a8be3435d1ec9e5bf3f2cb974dcdebcd1e69b63689da5433820e5fa4474"
+  },
+  "epoch_sealed": "2026-08-24T09:29:18-0700"
+}

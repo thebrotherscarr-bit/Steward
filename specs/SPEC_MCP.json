@@ -1,0 +1,43 @@
+{
+  "atlas_mcp_spec": {
+    "version": 1,
+    "protocol": "2025-06-18",
+    "transport": "stdio",
+    "server": "atlas-mcp",
+    "selection": "--home <module-dir> drives any declared module; default home = atlas itself",
+    "initialize": {
+      "instructions": "parity prose handed over at initialize so a cold model reaches parity with no tool call",
+      "truncation_chars": 60000
+    },
+    "tools": [
+      {"name": "get_in_line",     "writes": false, "desc": "the standing law + wake sequence + pointers"},
+      {"name": "read_handoffs",   "writes": false, "desc": "SEAT_LOG.md whole, sha256 receipt"},
+      {"name": "list_doctrine",   "writes": false, "desc": "carried doctrine by name, read-only"},
+      {"name": "read_doctrine",   "writes": false, "desc": "one document whole with sha256 receipt; absent name denied honestly"},
+      {"name": "check_the_wall",  "writes": false, "args": ["path"], "desc": "judge a path before acting; quote the law on refusal"},
+      {"name": "state_matrix",    "writes": false, "desc": "state = fold(record) index of the home module"},
+      {"name": "ask_steward",     "writes": true,  "desc": "the weighed ruling with receipts, never raw model output; one-shot runner under the ask lock"},
+      {"name": "rack_list",       "writes": false, "desc": "the live tier ladder of lawful local voices"},
+      {"name": "rack_ask",        "writes": true,  "desc": "routed ask: classified depth/tier, witnessed to the ledger"},
+      {"name": "rack_open",       "writes": false, "desc": "expanded context bundle for a query at a depth; nothing answered"},
+      {"name": "verify_chain",    "writes": false, "args": ["path"], "desc": "chain verdict via Rust core: EMPTY|INTACT|FLIP|TAMPER + flips/broke_at"},
+      {"name": "read_plan",       "writes": false, "args": ["which"], "desc": "HLD/LLD/road documents by name"},
+      {"name": "remember",        "writes": true,  "desc": "sole write tool; testimony stamped generated; staged for operator ascend"},
+      {"name": "muster",          "writes": false, "desc": "declared modules roll call"}
+    ],
+    "forbidden_tools_absent_by_construction": [
+      "approve", "ascend", "merge", "commit", "push",
+      "delete", "reject", "promote"
+    ],
+    "notes": [
+      "Union surface reconciles seat_mcp.py (10 tools incl. router trio) and us_mcp.py (verify_chain, read_plan, remember, muster).",
+      "All provenance math delegates to the Rust core via SPEC_SEAM.",
+      "Writes serialize under one ask lock: two asks never write the one hash chain at once."
+    ],
+    "prove": {
+      "command": "atlas-mcp --prove",
+      "strokes_minimum": 12,
+      "includes": ["handshake", "every tool", "receipts checked against disk", "engine stubbed never woken on prove"]
+    }
+  }
+}

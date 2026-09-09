@@ -1,0 +1,28 @@
+# arithmetic - declared seat
+
+observed calculation voice
+
+Source: estate chain actor-field census (sitting 8). can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "arithmetic",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "LINEAGE",
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "lineage",
+  "role": "observed calculation voice",
+  "source": "estate chain actor-field census (sitting 8)",
+  "us": 1
+}
+```

@@ -1,0 +1,82 @@
+{
+  "bad_names": [
+    "",
+    "UPPER",
+    "has space",
+    "semi;colon",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "../escape",
+    ".hidden"
+  ],
+  "eval_pairs": [
+    {
+      "expected": "witnessed",
+      "got": "witnessed",
+      "pass": true
+    },
+    {
+      "expected": "Witnessed ",
+      "got": " witnessed",
+      "pass": true
+    },
+    {
+      "expected": "something else",
+      "got": "witnessed",
+      "pass": false
+    },
+    {
+      "expected": "",
+      "got": "witnessed",
+      "pass": false
+    }
+  ],
+  "good_names": [
+    "hello",
+    "sum",
+    "a",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "with-dash_under0"
+  ],
+  "name_re": "^[a-z0-9][a-z0-9_-]{0,63}$",
+  "receipt_example": {
+    "input": "name=Ada",
+    "kind": "prompt_run",
+    "output": "Hello Ada",
+    "prompt": "hello",
+    "receipt": "57e689db981d22822b0d7cc65b2056a1512eb269bde35ca82b44dda512ca96bb",
+    "ts": "2026-09-09T12:00:00Z",
+    "version": 3
+  },
+  "render": {
+    "body": "Hello {{name}}, you are {{role}}.",
+    "vars": {
+      "name": " Ada ",
+      "role": "the sentry"
+    },
+    "want": "Hello  Ada , you are the sentry."
+  },
+  "render_missing_refuses": [
+    "role"
+  ],
+  "seat_shape": {
+    "cases": [
+      {
+        "question": "what holds",
+        "raw": "@manjuel what holds",
+        "seat": "manjuel"
+      },
+      {
+        "question": "survey the ground floor",
+        "raw": "@scout   survey the ground floor",
+        "seat": "scout"
+      }
+    ],
+    "re": "^@([A-Za-z0-9_-]+)\\s+([\\s\\S]+)$",
+    "refused": [
+      "no seat here",
+      "@",
+      "@  ",
+      ""
+    ]
+  }
+}

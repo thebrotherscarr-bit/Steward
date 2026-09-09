@@ -1,0 +1,188 @@
+{
+  "spec": "SPEC_US_MESH B2-07",
+  "oracle": {
+    "file": "estate/forge/links/jesster.py",
+    "sha256": "6b551aaabd66834d39377d7fcfc27b5352d44f19287f253b8fc93766cc3707f4"
+  },
+  "domain": "JESSTER|nonce| / JESSTER|chal| deterministic Schnorr, secp256k1",
+  "vectors": [
+    {
+      "id": "determinism",
+      "expect": "sign deterministic",
+      "ok": true,
+      "detail": "sign(1, 'hello mesh') twice -> identical",
+      "priv": 1,
+      "msg": "68656c6c6f206d657368",
+      "sig": "d4113fa1b04e7f132d11adf9d7694e5a0feda9181ea15e040e6e48fb0e02ca5e3a147745026435f7acee8641031a537c3c4dd21c4ede2dec3b0ef968dea8815bfca975dd57f6ba05cb7c3834b0d6ea92b6152acc394ff9ac8436feb0c0612dc3"
+    },
+    {
+      "id": "verify-accept",
+      "expect": "all verify true",
+      "ok": true,
+      "detail": "16/16 key x message pairs verify",
+      "cases": [
+        {
+          "priv": 1,
+          "pub": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+          "msg": "",
+          "sig": "b3a7b36d6c8bdf0c2ac2f353a7ebde0dabab6d9c9099d426d0a9b55bbd109577e4a8c4c499ab339c4f400175a46b0f155b587e470ee86aa81fa27f9ad26ac689c0e7a48a25528149eb26daa02e7a58a75813ef3c1b13b6dee552389ddbd2cc11",
+          "verified": true
+        },
+        {
+          "priv": 1,
+          "pub": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+          "msg": "68656c6c6f206d657368",
+          "sig": "d4113fa1b04e7f132d11adf9d7694e5a0feda9181ea15e040e6e48fb0e02ca5e3a147745026435f7acee8641031a537c3c4dd21c4ede2dec3b0ef968dea8815bfca975dd57f6ba05cb7c3834b0d6ea92b6152acc394ff9ac8436feb0c0612dc3",
+          "verified": true
+        },
+        {
+          "priv": 1,
+          "pub": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+          "msg": "184708e3e11ea897bd505e29a1daeac3f229a3ab26604770ac35bce5bd21c97f",
+          "sig": "1d6afce238e6ff58fce6252f428b548a0a08e8d9db596593a1756fc45e15ed24f697f700c432e82037f8f116d0ef3ce0b0d45efe6ff25640c96417e022e1abc329bcf4eef7937ccab86c39bfe9ad1c0d4bafd304593b14a4d128abcb61f49ad4",
+          "verified": true
+        },
+        {
+          "priv": 1,
+          "pub": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+          "msg": "4a4553535445527c73657373696f6e7c76317c587c59",
+          "sig": "f1e65589bb0c14f61855a9966d5446808aebb37fcdca4492199fcd060a0811e96141649335a4a2783a2826194a9d1898f469a04508b7a308b30be0eb366a90351e291feba02b34c997b6dccf800f161ca13dc555331d2f368751b7fca368e285",
+          "verified": true
+        },
+        {
+          "priv": 2,
+          "pub": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee51ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a",
+          "msg": "",
+          "sig": "d65b3d3434fa863a8835bb0deb127196d6e077e492892a8e3e0a7acf36274cbf78329cd35f9f2060f4cbcf828bf75561c69f62488bd3347faa90f538634943b912b1f6777e7534f7d91eeed093eec78005d8615f01d9960a2711760e396215e5",
+          "verified": true
+        },
+        {
+          "priv": 2,
+          "pub": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee51ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a",
+          "msg": "68656c6c6f206d657368",
+          "sig": "0704eff58f88d80429a2cdb88f0094e0fff495f1d29cf939b196b9439a8aae5cc56bdba1f092c95c849cc76d862ff72e7a41920aa5cae17b763722d2a6b90d03bd9be12628cf93e93c42b8370a23141847a7624739ef9fb4b0f470e04d2db0e6",
+          "verified": true
+        },
+        {
+          "priv": 2,
+          "pub": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee51ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a",
+          "msg": "184708e3e11ea897bd505e29a1daeac3f229a3ab26604770ac35bce5bd21c97f",
+          "sig": "2dfcb612f492a5565a1ec7563672a763330ad8591068bb3d1d34787f1058a980174e665018583a229fa4169bfa3bb1033772b5d96a01fb4ed263d93ade5f3824909f0a8fed3f0ead9cd28b05f2277afa1d051a8c9322a22a3545a5c47d010523",
+          "verified": true
+        },
+        {
+          "priv": 2,
+          "pub": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee51ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a",
+          "msg": "4a4553535445527c73657373696f6e7c76317c587c59",
+          "sig": "ff3c64abb2ea3136996cb3436fd1b8dda0f272b54466ec46d3c8be0244cbf90aa7ef48122677b651de8a4c3092673d24ca785349953af2afafd75ee50d37cb75e7d965e267383ff3f6e8ddc44b876ee7efcdfc38df9e9c6ca6271d95091a3ba1",
+          "verified": true
+        },
+        {
+          "priv": 123456789,
+          "pub": "08f4f37e2d8f74e18c1b8fde2374d5f28402fb8ab7fd1cc5b786aa40851a70cbc2eca87b8bd2c0be52698e9d5ee19840c4d40ca696e16159134769fa1ae85b2e",
+          "msg": "",
+          "sig": "8287b4d7da5b74211f5d891928be466026f4ba0ae92739de49e1d5b67440d9a06bad2bc9bfa354e5bfe5b6001767dd50a31ff1b434d6d337f34a24799bcda43fa4bf7769641073a97a69c1f05d6ef00e8b62b23281868b15efd0467771be1743",
+          "verified": true
+        },
+        {
+          "priv": 123456789,
+          "pub": "08f4f37e2d8f74e18c1b8fde2374d5f28402fb8ab7fd1cc5b786aa40851a70cbc2eca87b8bd2c0be52698e9d5ee19840c4d40ca696e16159134769fa1ae85b2e",
+          "msg": "68656c6c6f206d657368",
+          "sig": "bc61b3d8f754811d72a7d81e2bfea6f3ea5c962d474a359a8e8fe0431ccef90fb6d9a5319f26f6dee1a24f693044f0b765f911d70fc2cd03256b795cd91874370709d273001c3e750af366985e0ed0a242292d12dbcd202ce8ef4b8b6f695ec2",
+          "verified": true
+        },
+        {
+          "priv": 123456789,
+          "pub": "08f4f37e2d8f74e18c1b8fde2374d5f28402fb8ab7fd1cc5b786aa40851a70cbc2eca87b8bd2c0be52698e9d5ee19840c4d40ca696e16159134769fa1ae85b2e",
+          "msg": "184708e3e11ea897bd505e29a1daeac3f229a3ab26604770ac35bce5bd21c97f",
+          "sig": "0c1a73f49732d5dee9930ab761d4fe6d54fea713e34c261b13d0e25caf4e280be8d0debb2f1fec0aea21796e89f946607d33052a57d1b4dfa819238815a75162d0c61c0a53dadbd1e8b6da19d78793cfdcd2584a0af5669f5688d2a561f56350",
+          "verified": true
+        },
+        {
+          "priv": 123456789,
+          "pub": "08f4f37e2d8f74e18c1b8fde2374d5f28402fb8ab7fd1cc5b786aa40851a70cbc2eca87b8bd2c0be52698e9d5ee19840c4d40ca696e16159134769fa1ae85b2e",
+          "msg": "4a4553535445527c73657373696f6e7c76317c587c59",
+          "sig": "b36fce9b4c1927b97cecfd743120b3f2050373306385f12bdcef7718edd89a864d3e7299d29277f44be9776740cb84894814edcc7c1b8f6416b6dafd84a8c860ab2b06d6345395f7b152663ab01e45f426ae30a74982fbd3826a8f2b14fb7338",
+          "verified": true
+        },
+        {
+          "priv": 244837814094590,
+          "pub": "14f36e2d6a4788341ff218a3d777940ed9d7d2618d92595f2fd5d156cf98d1a3bfe084b5b3a3c7822bab9b7a0c0337cc0cf752209bd6e7fc6d40765204ae4474",
+          "msg": "",
+          "sig": "715ce097dc58a47b06dd1adba5fb19892757799434da14f5f134b1c07a8071fb8094a4204529e1539ccc1c5cd139e7bdac943b2ab7043044688bfc72222096f4dc9517fc2631adb454901576fd6b7711d976a9a7cb14f066c826caeae82448e6",
+          "verified": true
+        },
+        {
+          "priv": 244837814094590,
+          "pub": "14f36e2d6a4788341ff218a3d777940ed9d7d2618d92595f2fd5d156cf98d1a3bfe084b5b3a3c7822bab9b7a0c0337cc0cf752209bd6e7fc6d40765204ae4474",
+          "msg": "68656c6c6f206d657368",
+          "sig": "6d35e50909b1bb9461b7b59d1607838a029f578cc9528a6a533ad037f33df663782de9b78b370b946f4e8957f5d73f18e9abacfec742a245fd99d2b5552a4cd804431dcc7c6fa9ead4f40c1687e5a61c03c191d80532f3710c6db0afa65c0d75",
+          "verified": true
+        },
+        {
+          "priv": 244837814094590,
+          "pub": "14f36e2d6a4788341ff218a3d777940ed9d7d2618d92595f2fd5d156cf98d1a3bfe084b5b3a3c7822bab9b7a0c0337cc0cf752209bd6e7fc6d40765204ae4474",
+          "msg": "184708e3e11ea897bd505e29a1daeac3f229a3ab26604770ac35bce5bd21c97f",
+          "sig": "a9775eaa142ae86786a29830c00a08de82ff69ec02d6664090489e74765c3c9328a70bc90e521f8d166d36c1c43846c6df71b777fd6c52bb8673fb3881159a48e9b108486c0b65acf0a45518a78d074b58da899d042ae96f6c76fedb54e18c84",
+          "verified": true
+        },
+        {
+          "priv": 244837814094590,
+          "pub": "14f36e2d6a4788341ff218a3d777940ed9d7d2618d92595f2fd5d156cf98d1a3bfe084b5b3a3c7822bab9b7a0c0337cc0cf752209bd6e7fc6d40765204ae4474",
+          "msg": "4a4553535445527c73657373696f6e7c76317c587c59",
+          "sig": "5a342db316d18d448e7e1933b9759c5c2589c832145ff989bca364daf8d45da161400b3c3feb87774fd3c8ac8a2cf49703a6327c20c1fcd36a1df10d13f27df4f92414d7ca7d8e1e1fad2db10a3713851c9adc8bbaaef8f3b8bd84f75761713e",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "wrong-message",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "valid sig over another message does not verify"
+    },
+    {
+      "id": "flipped-sig",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "one flipped sig byte breaks the equation"
+    },
+    {
+      "id": "s-gte-n",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "s == N refused by the range check"
+    },
+    {
+      "id": "bad-length",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "95-byte sig is not 96 bytes"
+    },
+    {
+      "id": "infinity-pub",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "zero pub (infinity) is not on the curve"
+    },
+    {
+      "id": "off-curve-pub",
+      "expect": "REFUSED",
+      "ok": true,
+      "detail": "(1,1) off curve and refused as a key"
+    },
+    {
+      "id": "certify",
+      "expect": "round-trip true, tampered false",
+      "ok": true,
+      "detail": "identity vouches for the session; edited session_pub fails",
+      "cert": {
+        "office": "TEST",
+        "epoch": 1,
+        "identity_pub": "5cbdf0646e5db4eaa398f365f2ea7a0e3d419b7e0330e39ce92bddedcac4f9bc6aebca40ba255960a3178d6d861a54dba813d0b813fde7b5a5082628087264da",
+        "session_pub": "774ae7f858a9411e5ef4246b70c65aac5649980be5c17891bbec17895da008cbd984a032eb6b5e190243dd56d7b7b365372db1e2dff9d6a8301d74c9c953c61b",
+        "sig": "491b699250f8bde13a5c22f26de1a62d06bca842c19cc76e1f55d404e299cf13e47065c25c05468c45fb34cf22f5f8431aaa598e2616bb651df458642a67e227c704057aee62540bbeb34b14de0cf1019b89f0aae8281488fad2a57f234f2e40"
+      }
+    }
+  ]
+}

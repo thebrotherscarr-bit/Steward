@@ -1,0 +1,204 @@
+{
+  "branch_fail": {
+    "fired": [
+      "a",
+      "e",
+      "c"
+    ],
+    "verdict": "DONE"
+  },
+  "branch_pass": {
+    "fired": [
+      "a",
+      "e",
+      "b"
+    ],
+    "verdict": "DONE"
+  },
+  "budget_cases": [
+    {
+      "budget_s": 600,
+      "elapsed_ms": [
+        100,
+        200
+      ],
+      "over": false
+    },
+    {
+      "budget_s": 600,
+      "elapsed_ms": [
+        300000,
+        300001
+      ],
+      "over": true
+    },
+    {
+      "budget_s": 600,
+      "elapsed_ms": [],
+      "over": false
+    }
+  ],
+  "gate_pauses": {
+    "fired": [
+      "a",
+      "g"
+    ],
+    "verdict": "PAUSED"
+  },
+  "kinds": [
+    "ask",
+    "prompt",
+    "seat",
+    "memory",
+    "eval",
+    "gate"
+  ],
+  "name_re": "^[a-z0-9][a-z0-9_-]{0,63}$",
+  "receipt_example": {
+    "node": "a",
+    "output": "the ledger holds",
+    "receipt": "83e3b8ad9d1a8ccd101332a42109ceb5b7548dd696558b9c8ac3dc2c9c3016e7",
+    "run": "f-20260909-120000-01234567",
+    "ts": "2026-09-09T12:00:00Z"
+  },
+  "refusals": [
+    {
+      "spec": {
+        "edges": [
+          {
+            "from": "a",
+            "to": "b",
+            "when": "always"
+          },
+          {
+            "from": "b",
+            "to": "a",
+            "when": "always"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "ask",
+            "name": "a",
+            "question": "Q"
+          },
+          {
+            "kind": "ask",
+            "name": "b",
+            "question": "Q"
+          }
+        ]
+      },
+      "why": "cycle"
+    },
+    {
+      "spec": {
+        "edges": [],
+        "nodes": [
+          {
+            "kind": "ask",
+            "name": "a",
+            "question": "Q"
+          },
+          {
+            "kind": "ask",
+            "name": "b",
+            "question": "Q"
+          }
+        ]
+      },
+      "why": "two starts"
+    },
+    {
+      "spec": {
+        "edges": [
+          {
+            "from": "a",
+            "to": "b",
+            "when": "always"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "ask",
+            "name": "a",
+            "question": "Q"
+          },
+          {
+            "kind": "ask",
+            "name": "b",
+            "question": "Q"
+          },
+          {
+            "kind": "ask",
+            "name": "c",
+            "question": "Q"
+          }
+        ]
+      },
+      "why": "unreachable"
+    },
+    {
+      "spec": {
+        "edges": [],
+        "nodes": [
+          {
+            "kind": "teleport",
+            "name": "a"
+          }
+        ]
+      },
+      "why": "unknown kind"
+    },
+    {
+      "spec": {
+        "edges": [
+          {
+            "from": "a",
+            "to": "b",
+            "when": "fail"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "ask",
+            "name": "a",
+            "question": "Q"
+          },
+          {
+            "kind": "ask",
+            "name": "b",
+            "question": "Q"
+          }
+        ]
+      },
+      "why": "fail-edge from ask"
+    },
+    {
+      "spec": {
+        "edges": [
+          {
+            "from": "a",
+            "to": "ghost",
+            "when": "always"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "ask",
+            "name": "a",
+            "question": "Q"
+          }
+        ]
+      },
+      "why": "edge refs unknown"
+    }
+  ],
+  "run_re": "^f-\\d{8}-\\d{6}-[0-9a-f]{8}$",
+  "topo_linear": {
+    "order": [
+      "a",
+      "b"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+# operator - declared seat
+
+the hand; holds the gate; i am the approval; manjuel holds the charge unless i say otherwise
+
+Source: operator rulings 2026-08-25: 'i am the approval'; 'i report to manjuel'; 'manjuel is in charge unless i say otherwise, like my serf'. Execution flows through manjuel, who acts as the operator and answers by ruling and judging. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "operator",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "OPERATOR",
+  "permission": {
+    "bash": "deny",
+    "edit": {
+      "**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "the hand; holds the gate; i am the approval; manjuel holds the charge unless i say otherwise",
+  "source": "operator rulings 2026-08-25: 'i am the approval'; 'i report to manjuel'; 'manjuel is in charge unless i say otherwise, like my serf'. Execution flows through manjuel, who acts as the operator and answers by ruling and judging",
+  "us": 1
+}
+```

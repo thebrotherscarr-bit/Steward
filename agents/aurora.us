@@ -1,0 +1,30 @@
+# aurora - declared seat
+
+glass - the face the operator looks through (:7788 lineage)
+
+Source: SPEC_US named seats; doctrine AURORA.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "aurora",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "AURORA",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "glass - the face the operator looks through (:7788 lineage)",
+  "source": "SPEC_US named seats; doctrine AURORA.md",
+  "us": 1
+}
+```

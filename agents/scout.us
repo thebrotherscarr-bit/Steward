@@ -1,0 +1,27 @@
+# scout - declared seat
+
+surveys, reads, researches, and maps; moves nothing, changes nothing - a citizen of the Estate
+
+Source: Archive\Agents\scout.md frontmatter and description; dispatcher named in its own prose. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "scout",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "STEWARD",
+  "permission": {
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "steward",
+  "role": "surveys, reads, researches, and maps; moves nothing, changes nothing - a citizen of the Estate",
+  "source": "Archive\\Agents\\scout.md frontmatter and description; dispatcher named in its own prose",
+  "us": 1
+}
+```

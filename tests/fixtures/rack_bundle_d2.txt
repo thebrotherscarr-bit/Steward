@@ -1,0 +1,24 @@
+CONTEXT BUNDLE — llama3.2:latest at depth 2 (atlas)
+
+VOICE llama3.2:latest
+  tier: scout · size: 2.0GB · family: llama
+  capabilities: completion, tools
+LADDER
+
+THE RACK — lawful local voices (9), loopback only
+  scout (≤3GB):
+    - llama3.2:latest · 2.0GB · llama
+    - nomic-embed-text-v2-moe:latest · 1.0GB · nomic-bert-moe
+    - phi4-mini:latest · 2.5GB · phi3
+  voice (≤8GB):
+    - deepseek-r1:8b · 5.2GB · qwen3
+    - qwen2.5-coder:7b · 4.7GB · qwen2
+    - qwen3-vl:8b · 6.1GB · qwen3vl
+    - qwen3.5:4b · 3.4GB · qwen35
+    - qwen3.5:9b · 6.6GB · qwen35
+  mind (>8GB):
+    - qwen2.5-coder:14b · 9.0GB · qwen2
+MEMORY (last 5)
+  [2026-01-01T00:00:00Z] llama3.2:latest :: say the word => witnessed
+  [2026-01-02T00:00:00Z] phi4-mini:latest :: name the gate => the gate is the operator's, always and only, held by no seat and no registry
+  [2026-01-03T00:00:00Z] llama3.2:latest :: tell me everything => LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… (+100 more)

@@ -1,0 +1,29 @@
+{
+  "chains": {
+    "alice": {
+      "entries": 2,
+      "head": "991144cfafe8f724fdd5b4f4a085384e51f5e51f258951410207e652b1a29d29"
+    },
+    "bob": {
+      "entries": 1,
+      "head": "3c781962aac2ab6f04e1092ba6a9bc347cc1091a8b66ca00d5721fd70460216b"
+    }
+  },
+  "ground": "faces-golden",
+  "head": {
+    "entries": 3,
+    "head": "ee1e3963c1e9f890ba641497048952161e3d20a7caf693a36c14464cfa386e97"
+  },
+  "members": [
+    {
+      "actor": "alice",
+      "entries": 2,
+      "mark": "1a5eb50046bb7d7f"
+    },
+    {
+      "actor": "bob",
+      "entries": 1,
+      "mark": "e495d802fdbaed63"
+    }
+  ]
+}

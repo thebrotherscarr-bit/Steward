@@ -1,0 +1,122 @@
+{
+  "spec": "D1 Town (trade_tasks candidates)",
+  "oracle": {
+    "file": "estate/Steward 1.0/trade_tasks.py",
+    "sha256": "0821ebcda8853c75cc59af348dbc1b76f69b6fab2dea83480f96f68250c19e76"
+  },
+  "now": "2026-09-15T12:00:00 local",
+  "inputs": {
+    "workorders": [
+      [
+        1,
+        "Alpha House",
+        "leaking valve",
+        "Dale",
+        "open"
+      ],
+      [
+        2,
+        "Alpha House",
+        "finished job",
+        "Dale",
+        "done"
+      ]
+    ],
+    "properties": [
+      "Alpha House",
+      "Beta House"
+    ],
+    "inspections": [
+      {
+        "ts": "2026-01-15T10:00:00",
+        "property": "Alpha House"
+      }
+    ],
+    "mirror": {
+      "workorders": [
+        {
+          "id": 1,
+          "property": "Alpha House",
+          "issue": "leaking valve",
+          "vendor": "Dale",
+          "status": "open"
+        },
+        {
+          "id": 2,
+          "property": "Alpha House",
+          "issue": "finished job",
+          "vendor": "Dale",
+          "status": "done"
+        }
+      ],
+      "properties": [
+        {
+          "name": "Alpha House"
+        },
+        {
+          "name": "Beta House"
+        }
+      ],
+      "inspections": [
+        {
+          "ts": "2026-01-15T10:00:00",
+          "property": "Alpha House"
+        }
+      ]
+    }
+  },
+  "vectors": [
+    {
+      "id": "draft",
+      "expect": "open WO + overdue patrols decided",
+      "ok": true,
+      "detail": "trade:wo:1; trade:patrol:alpha-house:2026-09; trade:patrol:beta-house:2026-09",
+      "decisions": [
+        [
+          "trade:wo:1",
+          "work order #1: Alpha House — leaking valve (vendor: Dale)"
+        ],
+        [
+          "trade:patrol:alpha-house:2026-09",
+          "inspection due: Alpha House (last visit: 2026-01-15)"
+        ],
+        [
+          "trade:patrol:beta-house:2026-09",
+          "inspection due: Beta House (last visit: never)"
+        ]
+      ]
+    },
+    {
+      "id": "dedup",
+      "expect": "history silences re-draft",
+      "ok": true,
+      "detail": "0 re-drafted"
+    },
+    {
+      "id": "recur",
+      "expect": "next month re-keys patrols only",
+      "ok": true,
+      "detail": "trade:wo:1; trade:patrol:alpha-house:2026-10; trade:patrol:beta-house:2026-10",
+      "decisions": [
+        [
+          "trade:wo:1",
+          "work order #1: Alpha House — leaking valve (vendor: Dale)"
+        ],
+        [
+          "trade:patrol:alpha-house:2026-10",
+          "inspection due: Alpha House (last visit: 2026-01-15)"
+        ],
+        [
+          "trade:patrol:beta-house:2026-10",
+          "inspection due: Beta House (last visit: never)"
+        ]
+      ]
+    },
+    {
+      "id": "closed",
+      "expect": "quiet ground drafts nothing",
+      "ok": true,
+      "detail": "0 drafted"
+    }
+  ]
+}

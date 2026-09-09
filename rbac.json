@@ -1,0 +1,54 @@
+{
+  "roles": {
+    "agent": {
+      "name": "agent",
+      "description": "a declared seat with limited scope",
+      "permissions": {
+        "bash": "deny",
+        "edit": "deny",
+        "net": "deny",
+        "read": "allow",
+        "tools": "allow"
+      }
+    },
+    "guest": {
+      "name": "guest",
+      "description": "unauthenticated; deny all",
+      "permissions": {
+        "bash": "deny",
+        "edit": "deny",
+        "net": "deny",
+        "read": "deny",
+        "tools": "deny"
+      }
+    },
+    "operator": {
+      "name": "operator",
+      "description": "the hand; holds the gate",
+      "permissions": {
+        "bash": "deny",
+        "edit": "allow",
+        "net": "deny",
+        "read": "allow",
+        "tools": "allow"
+      }
+    },
+    "steward": {
+      "name": "steward",
+      "description": "plans, specs, keeps THE_ROAD",
+      "permissions": {
+        "bash": "deny",
+        "edit": "allow",
+        "net": "deny",
+        "read": "allow",
+        "tools": "allow"
+      },
+      "implies": [
+        "agent"
+      ]
+    }
+  },
+  "assign": {
+    "5 carried projects": "agent"
+  }
+}

@@ -1,0 +1,28 @@
+# lineage - declared seat
+
+registrar of estate actors - keeps history's names enrolled
+
+Source: estate chain actor census 2026-08-25. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "lineage",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "LINEAGE",
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "archivist",
+  "role": "registrar of estate actors - keeps history's names enrolled",
+  "source": "estate chain actor census 2026-08-25",
+  "us": 1
+}
+```

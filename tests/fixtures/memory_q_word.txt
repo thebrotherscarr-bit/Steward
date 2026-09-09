@@ -1,0 +1,4 @@
+ENVELOPE — "say the word" (1 cited)
+  text: witnessed
+  citations:
+    - [2026-01-01T00:00:00Z] llama3.2:latest :: say the word

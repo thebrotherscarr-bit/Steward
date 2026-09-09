@@ -1,0 +1,30 @@
+# neiro - declared seat
+
+proposes, aligns, files; raises stones and packets; the MCP door
+
+Source: SPEC_US named seats; doctrine NEIRO.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "neiro",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "NEIRO",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "proposes, aligns, files; raises stones and packets; the MCP door",
+  "source": "SPEC_US named seats; doctrine NEIRO.md",
+  "us": 1
+}
+```

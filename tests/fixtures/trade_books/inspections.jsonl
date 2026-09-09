@@ -1,0 +1,2 @@
+{"ts": "2026-09-03T16:46:41", "property": "Red Rock Loop", "checks": {"water heater": "pass", "drip zone 3": "fail"}, "notes": "javelina bent the gate", "prev": "0000000000000000000000000000000000000000000000000000000000000000", "hash": "45a7bc82598595bd7d97c67fb9b4c06a028158e6f3189e295d44835e0d3c117e"}
+{"ts": "2026-09-03T16:46:41", "property": "Juniper Ridge casita", "checks": {"swamp cooler": "pass"}, "notes": "", "prev": "45a7bc82598595bd7d97c67fb9b4c06a028158e6f3189e295d44835e0d3c117e", "hash": "a7465faf9154eeedb6b82ee91bc137fc14cbcfe53039cc2ffc7cb4489a689386"}

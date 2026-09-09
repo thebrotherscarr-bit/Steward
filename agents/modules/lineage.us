@@ -1,0 +1,29 @@
+# LINEAGE - household map
+
+Ten observed actors; the census is the source.
+
+```json
+{
+  "body_v": 3,
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "generation": 1,
+  "id": "lineage",
+  "kind": "module",
+  "ledger": "data/ledger.db",
+  "office": "LINEAGE",
+  "reports_to": "lineage",
+  "rows": [
+    "actors",
+    "census"
+  ],
+  "source": "estate chain actor census 2026-08-25",
+  "us": 1,
+  "verbs": [
+    "name",
+    "count",
+    "attest"
+  ],
+  "wall": "..\\estate"
+}
+```

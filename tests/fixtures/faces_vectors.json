@@ -1,0 +1,37 @@
+{
+  "spec": "C1 Faces",
+  "vectors": [
+    {
+      "id": "face-bytes",
+      "expect": "vendored console.html byte-identical",
+      "ok": true,
+      "detail": {
+        "file": "estate/Aurora/aurora/console.html",
+        "sha256": "1306985a6cab3847b2de9f9577e69406ff0cedc737448d255c83f4fbebcd4388",
+        "bytes": 43852
+      }
+    },
+    {
+      "id": "sprites-bytes",
+      "expect": "vendored sprites.js byte-identical",
+      "ok": true,
+      "detail": {
+        "file": "estate/Aurora/game/sprites.js",
+        "sha256": "169f3ad8d706bf769bef8ae3b32bb6297476ea1b4a2ba32a56a6fa124a8bde1c",
+        "bytes": 6580
+      }
+    },
+    {
+      "id": "face-singularity",
+      "expect": "one entry point (STOP law: no second face)",
+      "ok": true,
+      "detail": {
+        "entry_points": [
+          "console.html"
+        ]
+      }
+    }
+  ],
+  "snapshot": "faces_snapshot.json",
+  "ground": "faces_ground/"
+}

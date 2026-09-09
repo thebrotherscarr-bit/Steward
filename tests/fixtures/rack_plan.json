@@ -1,0 +1,206 @@
+{
+  "constants": {
+    "ctx_default": 4096,
+    "graph_overhead": 1500000000,
+    "kv_per_token": {
+      "mind": 1000000,
+      "scout": 200000,
+      "voice": 500000
+    },
+    "vram_budget": 15000000000
+  },
+  "vectors": [
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "llama3.2:latest",
+          "size": 2000000000
+        }
+      ],
+      "name": "single-scout-fits",
+      "total": 4319200000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "llama3.2:latest",
+          "size": 2000000000
+        },
+        {
+          "name": "phi4-mini:latest",
+          "size": 2500000000
+        }
+      ],
+      "name": "two-scout-fit",
+      "total": 9138400000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "qwen3.5:4b",
+          "size": 3400000000
+        }
+      ],
+      "name": "voice-fits",
+      "total": 6948000000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [
+        "qwen3.5:9b"
+      ],
+      "models": [
+        {
+          "name": "qwen3.5:4b",
+          "size": 3400000000
+        },
+        {
+          "name": "qwen3.5:9b",
+          "size": 6600000000
+        }
+      ],
+      "name": "voice-pair-fits",
+      "total": 17096000000,
+      "verdict": "OVER"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "gemma4:12b",
+          "size": 7600000000
+        }
+      ],
+      "name": "mind-single-fits",
+      "total": 11148000000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [
+        "gemma4:12b",
+        "qwen3.5:9b"
+      ],
+      "models": [
+        {
+          "name": "qwen3.5:9b",
+          "size": 6600000000
+        },
+        {
+          "name": "gemma4:12b",
+          "size": 7600000000
+        },
+        {
+          "name": "deepseek-r1:8b",
+          "size": 5200000000
+        }
+      ],
+      "name": "court-over",
+      "total": 30044000000,
+      "verdict": "OVER"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [
+        "gemma4:e4b"
+      ],
+      "models": [
+        {
+          "name": "gemma4:e4b",
+          "size": 9600000000
+        },
+        {
+          "name": "qwen2.5-coder:14b",
+          "size": 9000000000
+        }
+      ],
+      "name": "heavy-pair-over",
+      "total": 29792000000,
+      "verdict": "OVER"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [],
+      "name": "empty-fits",
+      "total": 0,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "qwen2.5-coder:7b",
+          "size": 4700000000
+        }
+      ],
+      "name": "coder-tier",
+      "total": 8248000000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "nomic-embed-text-v2-moe",
+          "size": 958000000
+        }
+      ],
+      "name": "embedder-scout",
+      "total": 3277200000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [],
+      "models": [
+        {
+          "name": "qwen3-vl:8b",
+          "size": 6100000000
+        }
+      ],
+      "name": "vl-voice",
+      "total": 9648000000,
+      "verdict": "FITS"
+    },
+    {
+      "budget": 15000000000,
+      "evict": [
+        "a"
+      ],
+      "models": [
+        {
+          "name": "a",
+          "size": 2000000000
+        },
+        {
+          "name": "b",
+          "size": 2000000000
+        },
+        {
+          "name": "c",
+          "size": 2000000000
+        },
+        {
+          "name": "d",
+          "size": 2000000000
+        }
+      ],
+      "name": "four-scout-over",
+      "total": 17276800000,
+      "verdict": "OVER"
+    }
+  ]
+}

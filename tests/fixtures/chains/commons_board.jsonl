@@ -1,0 +1,20 @@
+{"ts": "2026-07-29T11:49:27", "action": "post", "id": "T0001", "title": "run the 'verify' rite the estate is due for", "who": "estate", "source": "estate", "seed_key": "rite:verify"}
+{"ts": "2026-07-29T11:49:27", "action": "post", "id": "T0002", "title": "run the 'tidy' rite the estate is due for", "who": "estate", "source": "estate", "seed_key": "rite:tidy"}
+{"ts": "2026-07-29T11:49:27", "action": "post", "id": "T0003", "title": "run the 'fold' rite the estate is due for", "who": "estate", "source": "estate", "seed_key": "rite:fold"}
+{"ts": "2026-07-29T11:49:27", "action": "post", "id": "T0004", "title": "run the 'harvest' rite the estate is due for", "who": "estate", "source": "estate", "seed_key": "rite:harvest"}
+{"ts": "2026-07-29T11:49:27", "action": "claim", "id": "T0001", "who": "fern, of the garden"}
+{"ts": "2026-07-29T11:49:28", "action": "build", "id": "T0001", "who": "fern, of the garden", "note": "verify rite done — the body does NOT match its seal; changed: manjuel.py, neiro/console.py, neiro/warden.py, steward/agent.py, steward/scale.py [observed]. re-sealing is the operator's hand."}
+{"ts": "2026-07-29T11:49:28", "action": "submit", "id": "T0001", "who": "fern, of the garden", "note": "return filed by the chancery — done"}
+{"ts": "2026-07-29T11:49:28", "action": "claim", "id": "T0002", "who": "ivy, of the garden"}
+{"ts": "2026-07-29T11:49:28", "action": "build", "id": "T0002", "who": "ivy, of the garden", "note": "tidy rite inspected (preview) — would scrap 3 junk, move 0 orphan(s) to the shelf, quarantine 0 spent, and leave 23 thing(s) it doesn't recognise [observed]. applying any move is the operator's hand."}
+{"ts": "2026-07-29T11:49:28", "action": "submit", "id": "T0002", "who": "ivy, of the garden", "note": "return filed by the chancery — done"}
+{"ts": "2026-07-29T11:49:28", "action": "claim", "id": "T0003", "who": "moss, of the garden"}
+{"ts": "2026-07-29T11:49:28", "action": "build", "id": "T0003", "who": "moss, of the garden", "note": "fold rite visited — nothing weighty enough in the window to fold; it rests light [observed]"}
+{"ts": "2026-07-29T11:49:28", "action": "submit", "id": "T0003", "who": "moss, of the garden", "note": "return filed by the chancery — done"}
+{"ts": "2026-07-29T11:49:28", "action": "claim", "id": "T0004", "who": "fern, of the garden"}
+{"ts": "2026-07-29T11:49:28", "action": "build", "id": "T0004", "who": "fern, of the garden", "note": "held — the harvest reaches the network; a sprout never does. held for the operator's machine and word"}
+{"ts": "2026-07-29T11:49:28", "action": "submit", "id": "T0004", "who": "fern, of the garden", "note": "return filed by the chancery — held"}
+{"ts": "2026-07-30T20:36:29", "action": "post", "id": "T0005", "title": "run the 'consolidate' rite the estate is due for", "who": "estate", "source": "estate", "seed_key": "rite:consolidate"}
+{"ts": "2026-07-30T20:36:30", "action": "claim", "id": "T0005", "who": "fern, of the garden"}
+{"ts": "2026-07-30T20:36:30", "action": "build", "id": "T0005", "who": "fern, of the garden", "note": "consolidate rite visited — nothing weighty enough in the window to fold; it rests light [observed]"}
+{"ts": "2026-07-30T20:36:30", "action": "submit", "id": "T0005", "who": "fern, of the garden", "note": "return filed by the chancery — done"}

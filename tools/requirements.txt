@@ -1,0 +1,4 @@
+# atlas Python tooling pins (CHARTER section 6: venv when possible).
+# P0: stdlib only -- sqlite3, json, hashlib, argparse. Nothing external yet.
+# A1 golden masters will pin here before first use; every addition carries
+# a version pin and a one-line reason.

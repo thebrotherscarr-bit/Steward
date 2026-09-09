@@ -1,0 +1,29 @@
+# COUNCIL - household map
+
+Four personas weigh; none dispose.
+
+```json
+{
+  "body_v": 3,
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "generation": 1,
+  "id": "council",
+  "kind": "module",
+  "ledger": "core/state/law/chain.jsonl",
+  "office": "COUNCIL",
+  "reports_to": "council",
+  "rows": [
+    "personas",
+    "counsel"
+  ],
+  "source": "demo-vault Manjuel personas/",
+  "us": 1,
+  "verbs": [
+    "weigh",
+    "advise",
+    "dissent"
+  ],
+  "wall": "personas/"
+}
+```

@@ -1,0 +1,28 @@
+# joseph - declared seat
+
+Shepherd-Stone. Provenance and memory: the witness stone under every claim, full-history walks, cross-chain citations.
+
+Source: LAW_002_THE_TWELVE.md shard-office table. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "joseph",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "MANJUEL/Joseph",
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "Shepherd-Stone. Provenance and memory: the witness stone under every claim, full-history walks, cross-chain citations.",
+  "source": "LAW_002_THE_TWELVE.md shard-office table",
+  "us": 1
+}
+```

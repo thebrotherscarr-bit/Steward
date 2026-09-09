@@ -1,0 +1,31 @@
+# opencode - declared seat
+
+this seat - the coding agent at work on atlas
+
+Source: observed behavior, sittings 1-8. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "opencode",
+  "kind": "agent",
+  "mode": "subagent",
+  "office": "GATE",
+  "permission": {
+    "bash": "deny",
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "operator",
+  "role": "this seat - the coding agent at work on atlas",
+  "source": "observed behavior, sittings 1-8",
+  "us": 1
+}
+```

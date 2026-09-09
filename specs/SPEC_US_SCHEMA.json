@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.dev/schemas/us-v1.json",
+  "title": "Atlas .us Declaration",
+  "description": "JSON Schema for Atlas .us declaration blocks. A .us document is prose carrying fenced JSON blocks; this schema validates the JSON blocks only.",
+  "type": "object",
+  "required": ["us", "id", "kind", "can_approve", "covenant", "reports_to", "office"],
+  "properties": {
+    "us": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Must be 1."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Lowercase identifier (snake_case). Must match the filename stem for module blocks."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["module", "agent", "tool", "skill"],
+      "description": "Block kind. Exactly one module block per document."
+    },
+    "can_approve": {
+      "type": "boolean",
+      "const": false,
+      "description": "Structural safety gate. MUST be explicitly false. Absence is a refusal, never a default."
+    },
+    "covenant": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$",
+      "description": "16-char hex covenant hash (prefix of sha256 of foundation documents)."
+    },
+    "reports_to": {
+      "type": "string",
+      "description": "Agent this seat reports to. Must resolve to another declared agent."
+    },
+    "office": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "description": "UPPERCASE office name."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["primary", "subagent"],
+      "description": "Agent mode. Required for kind=agent."
+    },
+    "role": {
+      "type": "string",
+      "description": "Human-readable role description."
+    },
+    "source": {
+      "type": "string",
+      "description": "Citation of where this declaration's content originates."
+    },
+    "permission": {
+      "type": "object",
+      "description": "Permission map. Required for kind=agent. Keys are tool names; values are 'allow'/'deny' or glob maps.",
+      "patternProperties": {
+        "^[a-z*]+$": {
+          "oneOf": [
+            { "type": "string", "enum": ["allow", "deny"] },
+            {
+              "type": "object",
+              "patternProperties": {
+                "^[*./a-z0-9]+$": { "type": "string", "enum": ["allow", "deny"] }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "body_v": {
+      "type": "integer",
+      "enum": [1, 2, 3],
+      "description": "Body format version. Required for kind=module."
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Generation number. Required for kind=module."
+    },
+    "ledger": {
+      "type": "string",
+      "description": "Path to the chain ledger file. Required for kind=module."
+    },
+    "rows": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Non-empty list of module row names. Required for kind=module."
+    },
+    "verbs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Non-empty list of verbs this module offers. Required for kind=module."
+    },
+    "wall": {
+      "type": "string",
+      "description": "Wall (ground) path for this module."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "module" } } },
+      "then": {
+        "required": ["body_v", "generation", "ledger", "rows", "verbs"]
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "agent" } } },
+      "then": {
+        "required": ["mode", "permission"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

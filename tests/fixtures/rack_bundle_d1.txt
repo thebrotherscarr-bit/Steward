@@ -1,0 +1,5 @@
+CONTEXT BUNDLE — llama3.2:latest at depth 1 (atlas)
+
+VOICE llama3.2:latest
+  tier: scout · size: 2.0GB · family: llama
+  capabilities: completion, tools

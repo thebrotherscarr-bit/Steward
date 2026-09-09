@@ -1,0 +1,50 @@
+﻿
+  ATL gm -- golden-master prove (hermetic)
+
+  [PASS]  A1 ΓÇö Spine (8 strokes)
+        PASS  cut_canon_vectors.py --verify  CANON VECTORS VERIFY OK -- vectors.json byte-identical to a fresh cut (279549 bytes)
+        PASS  cut_chain_verdicts.py --verify  CHAIN VERDICTS VERIFY OK -- chain_verdicts.json byte-identical to a fresh cut (42486 bytes)
+        PASS  cut_us_vectors.py --verify  US VECTORS VERIFY OK -- us_vectors.json byte-identical to a fresh cut (54134 bytes)
+        PASS  cargo test -p atlas-core canon  running 7 tests
+        PASS  cargo test -p atlas-core chain  running 8 tests
+        PASS  cargo test -p atlas-core us_parity  running 0 tests
+        PASS  cargo test -p atlas-core covenant_golden  running 0 tests
+        PASS  cargo test -p atlas-store import_export  running 3 tests
+  [PASS]  B1 ΓÇö THE LINE (1 strokes)
+        PASS  go test ./...  ok  	atlas/line/cmd/atlas-door	(cached)
+  [PASS]  C1 ΓÇö Faces (2 strokes)
+        PASS  cut_faces_vectors.py --verify  FACES -- golden vectors (C1, hermetic, local oracle)
+        PASS  atl\cli.ts self-test  ATL -- self-test (hermetic; temp grounds only)
+  [PASS]  D1 ΓÇö Town (3 strokes)
+        PASS  cut_town_vectors.py --verify  TOWN -- golden vectors (D1, hermetic, local oracle)
+        PASS  go test ./internal/town/...  ok  	atlas/line/internal/town	(cached)
+        PASS  go test ./cmd/atlas-town/...  ok  	atlas/line/cmd/atlas-town	(cached)
+  [PASS]  D2 ΓÇö Trade+Door (3 strokes)
+        PASS  cut_trade_vectors.py --verify  TRADE -- golden masters (D2, hermetic, local oracle)
+        PASS  cargo test -p atlas-store trade_parity  running 0 tests
+        PASS  go test ./cmd/atlas-door/...  ok  	atlas/line/cmd/atlas-door	(cached)
+  [PASS]  E1 ΓÇö Kernels (3 strokes)
+        PASS  cut_ppmi_vectors.py --verify  PPMI -- golden vectors (E1-01, hermetic, local oracle)
+        PASS  cut_digest_vectors.py --verify  DIGEST -- golden vectors (E1-02, hermetic, local oracle)
+        PASS  cut_predict_vectors.py --verify  PREDICT -- golden vectors (E1-03, hermetic, local oracle)
+  [PASS]  F1 ΓÇö Harvest (8 strokes)
+        PASS  cut_rack_vectors.py --verify  RACK -- golden ladder (F1 step 1, folded oracle)
+        PASS  cut_rack_ask_vectors.py --verify  RACK ASK -- goldens (F1 step 2, folded oracle)
+        PASS  cut_rack_open_vectors.py --verify  RACK OPEN -- goldens (F1 step 3, fixture ground)
+        PASS  cut_memory_vectors.py --verify  MEMORY -- envelope goldens (F1-01, fixture ledger)
+        PASS  cut_guard_vectors.py --verify  GUARD -- goldens (F1-02, oracle pokes + specified classes)
+        PASS  cut_skill_vectors.py --verify  SKILL LINT -- goldens (F1-03, rule fixtures)
+        PASS  go test ./...  ok  	atlas/line/cmd/atlas-door	(cached)
+        PASS  atl\cli.ts self-test  ATL -- self-test (hermetic; temp grounds only)
+
+  PROVEN. 28/28 strokes green across 7 stone(s).
+
+node : (node:27560) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to 
+security vulnerabilities, as the arguments are not escaped, only concatenated.
+At line:1 char:1
++ node --experimental-strip-types "C:\Users\novad\Desktop\Archive\atlas ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:27560) [D...y concatenated.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-deprecation ...` to show where the warning was created)

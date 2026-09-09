@@ -1,0 +1,30 @@
+# archivist - declared seat
+
+keeps the record findable; folds, never deletes
+
+Source: SPEC_US named seats; doctrine ARCHIVIST.md. can_approve is false because the structural law admits no other reading.
+
+```json
+{
+  "can_approve": false,
+  "covenant": "1512741580b7239b",
+  "id": "archivist",
+  "kind": "agent",
+  "mode": "primary",
+  "office": "ARCHIVIST",
+  "permission": {
+    "edit": {
+      "*": "deny",
+      "atlas/**": "allow"
+    },
+    "net": "deny",
+    "read": {
+      "**": "allow"
+    }
+  },
+  "reports_to": "manjuel",
+  "role": "keeps the record findable; folds, never deletes",
+  "source": "SPEC_US named seats; doctrine ARCHIVIST.md",
+  "us": 1
+}
+```
