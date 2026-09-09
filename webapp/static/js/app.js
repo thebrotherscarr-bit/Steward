@@ -520,15 +520,11 @@ const App = {
           <div class="card-title">The run</div>
           <div id="ev-run" class="chat-log council-log"></div>
         </div>
-        <div class="stats">
-          <div class="stat"><div class="stat-label">Total</div><div class="stat-value">${evals.length}</div></div>
-          <div class="stat"><div class="stat-label">Passed</div><div class="stat-value green">${passed}</div></div>
-          <div class="stat"><div class="stat-label">Failed</div><div class="stat-value red">${failed}</div></div>
-          <div class="stat"><div class="stat-label">Pass Rate</div><div class="stat-value ${evals.length > 0 && passed/evals.length >= 0.8 ? 'green' : 'yellow'}">${evals.length > 0 ? Math.round((passed/evals.length)*100) : 0}%</div></div>
-        </div>
+        <div id="ev-proof"></div>
         <div class="card">
+          <div class="card-title">Scored evals <span class="muted">— written by the Add-an-eval flow, not by the suites</span></div>
           ${evals.length === 0
-            ? '<div class="empty"><div class="empty-icon">&#10003;</div><div class="empty-text">No evals yet. Add an eval from a trace detail page.</div></div>'
+            ? '<div class="empty-text">None scored yet. The suites and standups above are read from the record; this table is what someone scored by hand from a trace.</div>'
             : '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Trace</th><th>Score</th><th>Passed</th><th>Detail</th><th>Time</th></tr></thead><tbody>' +
               evals.map(e => `
                 <tr>
@@ -544,6 +540,7 @@ const App = {
       `;
       const c = document.getElementById('ev-run-cancel');
       if (c) c.onclick = () => Run.cancel();
+      this.paintProof();
       this.paintRun();
       Run.check();
     } catch (e) {
@@ -681,6 +678,128 @@ const App = {
       (steps ? `<table class="cev-steps"><thead><tr><th>seat</th><th>model</th><th>elapsed</th><th>tools</th><th>drift</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : '') +
       (d.transcript ? `<div class="muted" style="margin-top:6px">transcript <code>${escHtml(d.transcript)}</code></div>` : '') +
       `</div>`;
+  },
+
+
+  // WHAT THIS WORLD HAS PROVED, read from its own record and nowhere else.
+  // Every card names the file it came from; a world that never ran a suite
+  // says so rather than rendering as a zero, because "zero passed" and "never
+  // run" are opposite claims.
+  async paintProof() {
+    const box = document.getElementById('ev-proof');
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Reading the record...</div>';
+    let p;
+    try {
+      p = JSON.parse(await this.tool('proofs', {}));
+    } catch (e) {
+      box.innerHTML = `<div class="card"><div class="eng-row eng-bad">
+        The record could not be read: ${escHtml(e.message || 'refused')}
+        <span class="brief-src">proofs</span></div></div>`;
+      return;
+    }
+
+    const cards = [];
+    const card = (label, value, tone, note, src) => cards.push(
+      `<div class="stat"><div class="stat-label">${escHtml(label)}</div>
+       <div class="stat-value ${tone || ''}">${value}</div>
+       ${note ? `<div class="stat-note">${note}</div>` : ''}
+       <div class="brief-src">${escHtml(src)}</div></div>`);
+
+    // ---- the suites, as they stamped themselves ----------------------
+    const su = p.suites || {};
+    for (const name of ['strokes', 'smoke']) {
+      const r = su[name];
+      if (!r) {
+        card(name, '<span class="muted">never run</span>', '', p.suites_error || 'no stamp in this world', 'tests/last_run.json');
+        continue;
+      }
+      card(name, `${r.passed}<span class="muted">/${r.total}</span>`,
+           r.green ? 'green' : 'red',
+           r.green ? 'green · ' + when(r.at) : 'RED · ' + ((r.failures || []).join(', ') || 'see the run'),
+           'tests/last_run.json');
+    }
+
+    // ---- the live standups -------------------------------------------
+    const runs = p.standups || [];
+    if (!runs.length) {
+      card('standup', '<span class="muted">never run live</span>', '',
+           p.standups_error || 'a dry run does not count', 'tests/run_history.jsonl');
+    } else {
+      const last = runs[runs.length - 1];
+      const greens = runs.filter(r => r.green).length;
+      card('standup', `${last.passed}<span class="muted">/${last.total}</span>`,
+           last.green ? 'green' : 'red',
+           (last.green ? 'green' : 'RED — ' + ((last.failed || []).join(', ') || '?')) +
+           ' · ' + when(last.at), 'tests/run_history.jsonl');
+      card('standups run', `${greens}<span class="muted">/${runs.length}</span>`,
+           greens === runs.length ? 'green' : 'yellow',
+           'green of all live runs on record', 'tests/run_history.jsonl');
+    }
+
+    // ---- parity -------------------------------------------------------
+    const par = p.parity || [];
+    if (!par.length) {
+      card('parity', '<span class="muted">never run</span>', '',
+           p.parity_error || 'chain vs bare calls, per case', 'sessions/parity_history.jsonl');
+    } else {
+      const lp = par[par.length - 1];
+      card('parity', String(lp.mean ?? '—'), 'blue',
+           `${lp.scored ?? '?'} of ${lp.cases ?? '?'} cases scored · ${when(lp.at)}`,
+           'sessions/parity_history.jsonl');
+    }
+
+    // ---- the estate's own state, before its scores -------------------
+    // The sittings ARE the prior record. Read exactly from sessions.jsonl,
+    // where a closing line supersedes its opening one.
+    const rc = p.record || {};
+    let estate = '';
+    if (rc.error) {
+      estate = `<div class="card"><div class="eng-row eng-bad">The record could not be read:
+        ${escHtml(rc.error)}<span class="brief-src">sessions/sessions.jsonl</span></div></div>`;
+    } else if (rc.sittings != null) {
+      const rows = (rc.recent || []).slice().reverse().map(r => `<tr>
+        <td>${escHtml(String(r.n))}</td>
+        <td>${escHtml(String(r.started || '').replace('T', ' '))}</td>
+        <td>${r.ended ? escHtml(String(r.ended).slice(11)) : '<span class="tool-bad">still open</span>'}</td>
+        <td>${escHtml(String(r.runs))}</td>
+        <td>${r.toll_paid ? '<span class="badge badge-green">tolled</span>'
+                          : '<span class="badge badge-yellow">no toll</span>'}</td></tr>`).join('');
+      estate = `<div class="card">
+        <div class="card-title">The estate <span class="muted">— read from the record, not counted here</span></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-label">sittings</div>
+            <div class="stat-value">${rc.sittings}</div>
+            <div class="stat-note">${rc.still_open ? '<span class="tool-bad">' + rc.still_open + ' still open</span>' : 'all closed'}</div>
+            <div class="brief-src">sessions/sessions.jsonl</div></div>
+          <div class="stat"><div class="stat-label">tolled</div>
+            <div class="stat-value ${rc.tolled === rc.sittings ? 'green' : 'yellow'}">${rc.tolled}<span class="muted">/${rc.sittings}</span></div>
+            <div class="stat-note">${rc.seat_log_tolls != null ? rc.seat_log_tolls + ' written into SEAT_LOG' : 'SEAT_LOG unreadable'}</div>
+            <div class="brief-src">sessions/sessions.jsonl · SEAT_LOG.md</div></div>
+          <div class="stat"><div class="stat-label">runs recorded</div>
+            <div class="stat-value blue">${rc.runs}</div>
+            <div class="stat-note">objectives the council actually ran</div>
+            <div class="brief-src">sessions/sessions.jsonl</div></div>
+        </div>
+        ${rows ? `<div class="table-wrap"><table><thead><tr><th>sitting</th><th>opened</th><th>closed</th><th>runs</th><th>toll</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+        <div class="stat-note" style="margin-top:10px">
+          ${escHtml((rc.counted_by_the_engine || []).join(' and '))} are counted by the core's own rules
+          (memory.py's entry pattern; a SELECT against index/vectors.db) and are shown whole in the
+          boot report on the Dashboard. They are not recounted here: a second definition of "an entry"
+          would drift from the core's the first time it changed.
+        </div></div>`;
+    }
+
+    box.innerHTML = estate + `<div class="stats">${cards.join('')}</div>` +
+      (runs.length ? `<div class="card"><div class="card-title">Live standups
+        <span class="muted">— every run on record, oldest first</span></div>
+        <div class="table-wrap"><table><thead><tr><th>when</th><th>score</th><th>failed</th><th>report</th></tr></thead><tbody>` +
+        runs.map(r => `<tr>
+          <td>${escHtml(when(r.at))}</td>
+          <td><span class="badge ${r.green ? 'badge-green' : 'badge-red'}">${r.passed}/${r.total}</span></td>
+          <td>${(r.failed || []).length ? escHtml((r.failed || []).join(', ')) : '<span class="muted">—</span>'}</td>
+          <td><code>${escHtml(r.report || '')}</code></td></tr>`).join('') +
+        `</tbody></table></div></div>` : '');
   },
 
   // === MESSAGES (team bridge) ===

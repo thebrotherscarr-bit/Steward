@@ -225,6 +225,13 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
+		Name: "proofs", Writes: false,
+		Description: "what this world has PROVED, from its own record: the suites' stamp, every live standup, the parity history",
+		Args:        []string{"project?"},
+		Fn:          toolProofs,
+	})
+
+	r.add(Tool{
 		Name: "state_matrix", Writes: false,
 		Description: "state = fold(record) index of the named project",
 		Args:        []string{"project?"},

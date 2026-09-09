@@ -114,6 +114,18 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+// Epoch SECONDS -- what the suites and the standup stamp -- into something a
+// human reads. Milliseconds are accepted too, because timeAgo below takes
+// those, and mixing the two silently would date a live run to 1970.
+function when(at) {
+  if (at == null) return 'unknown';
+  const n = Number(at);
+  if (!isFinite(n)) return String(at);
+  const d = new Date(n > 1e12 ? n : n * 1000);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric',
+                                       hour: '2-digit', minute: '2-digit' });
+}
+
 function timeAgo(d) {
   const s = Math.floor((Date.now() - new Date(d)) / 1000);
   if (s < 60) return s + 's ago';
