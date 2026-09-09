@@ -42,7 +42,7 @@ SQLite state and the JSONL journals are one system, bound by this order:
 2. **Sync pointer.** Each DB carries a `journal_sync` table:
    `(chain_path TEXT PRIMARY KEY, last_applied_n INTEGER, applied_hash TEXT)`.
    A commit updates the pointer in the same transaction.
-3. **Replay on open.** At service start: verify the chain (must be INTACT),
+3. **Replay on open.** At service start: verify Manjuel (must be INTACT),
    read the sync pointer, replay every entry past `last_applied_n` into the
    derived tables idempotently (keyed by entry `n`), advance the pointer.
    State is always re-derivable: state = fold(record).
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS journal_sync (
 
 Every imported chain keeps its export view; `atlas db export <chain>` must
 regenerate byte-identical JSONL (golden-master asserted). SQLite is derived;
-the record remains the chain.
+the record remains Manjuel.
 
 ## Prove requirements
 

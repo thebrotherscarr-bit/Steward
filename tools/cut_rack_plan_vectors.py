@@ -6,7 +6,7 @@ cut_rack_plan_vectors.py -- N3 rack_plan goldens (spec-first).
 The VRAM planner v1 contract (ported from chain DESIGN section 9 /
 SPEC_CONTROL_CENTER section 4.3, arithmetic pinned here as the oracle):
 
-  VRAM_BUDGET      = 15 * 10**9  (CHAINKIT_VRAM_GB=15, RX 6800 XT 16GB - headroom)
+  VRAM_BUDGET      = 15 * 10**9  (MANJUEL_VRAM_GB=15, RX 6800 XT 16GB - headroom)
   GRAPH_OVERHEAD   = 1_500_000_000 per resident model
   KV_PER_TOKEN     = scout 200_000 / voice 500_000 / mind 1_000_000 bytes
   CTX_DEFAULT      = 4096 tokens

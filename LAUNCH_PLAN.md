@@ -6,16 +6,16 @@ research/worlds/atlas … write me up a full launch plan." Placed in
 `worlds\atlas\` — the world he named for atlas's pull, read-only by
 position, never an index root, source only.*
 
-*What was read whole today: chain's `CLAUDE.md`, every file in `law/`,
+*What was read whole today: Manjuel's `CLAUDE.md`, every file in `law/`,
 `SPEC.md`, `SEAT_LOG.md` (every toll), `HANDOFF.md` (every block),
 `memory.md`, DAYBOOK's last entry, CHANGELOG's Unreleased, TASKS' open
 lines, `README`, `QUICKSTART`, `rack.md`, `agents.md`, `pipelines.md`,
-`DESIGN.md`, `REFUSALS.md`, `BUILDPATH.md`, every module in `chainkit/`;
+`DESIGN.md`, `REFUSALS.md`, `BUILDPATH.md`, every module in `manjuel/`;
 atlas's `CLAUDE.md`, `AGENTS.md`, `CHARTER.md`, `THE_ROAD.md`,
 `DELIVERABLE.md`, `CHANGELOG.md`, `HANDOFF.md`, the tails of `SEAT_LOG.md`
 and `STATE_OF_BUILD.md`, `SPEC_COMMANDS`, the GUI gap analysis and the GUI
 plan, `atlas-tui/main.go`, `webapp/db/db.go`; all of `worlds\TBC` outside
-the vendored repos. NOT read whole: chain's `DAYBOOK.md`, `CHANGELOG.md`
+the vendored repos. NOT read whole: Manjuel's `DAYBOOK.md`, `CHANGELOG.md`
 and `TASKS.md` beyond the parts named; atlas's `SEAT_LOG.md` and
 `STATE_OF_BUILD.md` beyond their tails; `worlds\manjuel`, `worlds\sewder`.
 Nothing asserted below rests on the unread parts.*
@@ -26,9 +26,9 @@ Nothing asserted below rests on the unread parts.*
 
 | thing | state | proof |
 |---|---|---|
-| chain engine | 0.1.6 built, unsealed; **1,854 strokes / 60 smoke on the mirror**; `chainkit/serve.py` (the headless door) landed 14:30 | `CHANGELOG.md` Unreleased; `sessions/hands.jsonl` H…142045 |
-| chain's own stamp | **`tests/last_run.json` says 1697** — the mirror runs never stamp the ground; the boot report reads back a number 157 behind | `tests/last_run.json` 08:18; `run_history.jsonl` |
-| version strings | `chainkit/__init__.py` and `pyproject.toml` still **0.1.4** while 0.1.5 and 0.1.6 are built | both files |
+| Manjuel engine | 0.1.6 built, unsealed; **1,854 strokes / 60 smoke on the mirror**; `manjuel/serve.py` (the headless door) landed 14:30 | `CHANGELOG.md` Unreleased; `sessions/hands.jsonl` H…142045 |
+| Manjuel's own stamp | **`tests/last_run.json` says 1697** — the mirror runs never stamp the ground; the boot report reads back a number 157 behind | `tests/last_run.json` 08:18; `run_history.jsonl` |
+| version strings | `manjuel/__init__.py` and `pyproject.toml` still **0.1.4** while 0.1.5 and 0.1.6 are built | both files |
 | sittings | 98, closed; **12 numbering gaps now** (98 opened the twelfth; `SPEC.md:177` says 11); 5 unmarked duplicates (22, 26, 40, 42, 57), 5 `(re-tolled)` | `SEAT_LOG.md` |
 | hands ledger | 9 hands today; **one orphan open: `H20260908-130404`** (his own, never closed) → the release gate refuses until it is closed by `--id` | `sessions/hands.jsonl` |
 | HANDOFF.md | newest block 2026-09-08 (L673); **`START AT` pointer (L17) still says 2026-09-07**; module count says 26 (disk: 27 + `__init__`); "Archive/atlas … untouched" is no longer true | `HANDOFF.md` |
@@ -70,16 +70,18 @@ These are not builds; they are the lines a hand cannot land without his
 word, and the release gate will refuse the first tag until the first one
 is done.
 
-1. `python -m chainkit.seatlog hand-close --id H20260908-130404` — the
-   orphan hand from 13:04.
-2. `python tests\test_chainkit.py` and `python tests\smoke_cli.py` **on
+1. ~~close the orphan hand from 13:04~~ — **MOOT.** The hands ledger was
+   removed 2026-09-09 at the operator's word ("we didnt have it 3 days
+   ago"); `seatlog`'s CLI went with it, so there is no line to close.
+   `sessions/hands.jsonl` stays on disk, unwritten (LAW 1).
+2. `python tests\test_manjuel.py` and `python tests\smoke_cli.py` **on
    his terminal** — the ground's stamp is 157 strokes stale; the mirror is
    the hand's check, his terminal is the proof.
 3. `HANDOFF.md:17` `START AT` → `2026-09-08`; one block for the afternoon
    (the door, the specs, the scrub, TBC to worlds) — or order a hand to
    write it with the sitting closed.
 4. `SPEC.md:177` "11 gaps" → 12 (sitting 97 was never tolled).
-5. `chainkit/__init__.py` + `pyproject.toml` → `0.1.6` when he tags;
+5. `manjuel/__init__.py` + `pyproject.toml` → `0.1.6` when he tags;
    `tests\release.py --check v0.1.5` first, as DAYBOOK's next-session line
    says.
 6. In `Archive\atlas`: `.gitattributes` with `* -text` before anyone
@@ -106,12 +108,12 @@ is done.
 
 Every piece: read what it touches whole → build on a mirror (no `.git`,
 no `logs/`, no `index/`) → strokes green → one CHANGELOG entry →
-"restart required" when `chainkit/` moved → stop. He says **go** per
+"restart required" when `manjuel/` moved → stop. He says **go** per
 piece, or **run the list** once and reads each entry before the next.
 
 | day | piece A | piece B | needs |
 |---|---|---|---|
-| **Tue 9** | **`--ground <path>`** on `chain.py` (REPL and `--headless`); `cli.ROOT` stops being the package's parent; a temp world opens its own sitting and writes only its own record | **R1** — the second-pass scrub, inside `worlds\TBC` | §2.1–2; R1 |
+| **Tue 9** | **`--ground <path>`** on `manjuel.py` (REPL and `--headless`); `cli.ROOT` stops being the package's parent; a temp world opens its own sitting and writes only its own record | **R1** — the second-pass scrub, inside `worlds\TBC` | §2.1–2; R1 |
 | **Wed 10** | **T1** `worlds\TBC` becomes a world: `agents/`, `skills/` (the `tbc_estimate` verbs wrapped; `intake`, `visit`, `invoice`, `packet`), `pipelines.md`, `ROUTES.md`, `law/` copied + sealed, `index_roots.txt` = itself; stroke: the origin's roots resolve nothing under it | **T2** the counter is the only issuer (`AUTO` only; hand-numbered documents imported with a ledger line; uniqueness stroked) | R4 |
 | **Thu 11** | **T3** the client ledger `clients\<id>\ledger.jsonl` + the fold (open items, next due, balance); the four visits and two estimates imported as the first hashed lines; the fold reproduces `seat_log.md`'s NEXT from the lines alone | **T5** access codes → `clients\<id>\access.env`; the packet prints "on file"; stroke: no export, index or transcript carries a code | — |
 | **Fri 12** | **T4** the drop: SMB share per world, `drop_ingest` (hash via `atlas` when pulled, sha256 in the meantime), EXIF/XMP stripped on arrival, whisper.cpp transcript → draft `visit` → `needs_answer`; filed only by his hand | *(carry-over slack — Friday is one piece on purpose)* | R3 |
@@ -158,10 +160,10 @@ only if he is there twice a day to say the word; one a day slips the
 
 ## 7. The daily rhythm (the operator's, written down once)
 
-**Morning** — `hand-open` if a hand sits; `python chain.py` (or the door);
+**Morning** — `python manjuel.py` (or the door, `--headless`);
 `/brief`; the standup once the pieces of the day are in; the pieces, two,
 each with its word; **close every sitting** (the toll, attended when he
-sat); `hand-close` last. **Monday** — "weekly check-in": the fold of every
+sat). **Monday** — "weekly check-in": the fold of every
 client (open items, next due, balance), the estate's last prove, the tags
 owed. **Never** — `git status` from a sandbox; an edit while a sitting is
 open; a folder unasked; a name in the record.
@@ -222,7 +224,7 @@ newest block → `CHANGELOG.md` Unreleased → `TASKS.md` open lines →
 - **SEAT_LOG.md** — nothing; no sitting sat this afternoon.
 
 *Hand `H20260908-174703` opened for this review and closed with this
-file and one CHANGELOG line. The three surveys behind it — the chain
+file and one CHANGELOG line. The three surveys behind it — Manjuel
 record, the atlas record's tails, the TBC world — are in the day's chat
 and folded here; nothing in `worlds\` was written except this file, at his
 word.*

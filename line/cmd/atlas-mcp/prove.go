@@ -126,7 +126,9 @@ func runProve() int {
 	protocol.Serve(bytes.NewReader(lb), &ob, protocol.ServerInfo{}, "", surface2, reg2)
 	var tl struct {
 		Result struct {
-			Tools []struct{ Name string `json:"name"` } `json:"tools"`
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
 		} `json:"result"`
 	}
 	json.Unmarshal(ob.Bytes(), &tl)
@@ -145,7 +147,7 @@ func runProve() int {
 	// 3-5. MULTI-TENANCY: one server, three grounds, three truths.
 	for _, project := range []string{"atlas", "manjuel", "estate-steward"} {
 		text, isErr := callTool(map[string]any{
-			"name": "get_in_line",
+			"name":      "get_in_line",
 			"arguments": map[string]any{"project": project}})
 		marker := "MARKER-" + strings.ToUpper(project)
 		check(project+" pack carries its own ground",
@@ -284,7 +286,7 @@ func runProve() int {
 		go func(i int) {
 			defer wg.Done()
 			callTool(map[string]any{
-				"name": "remember",
+				"name":      "remember",
 				"arguments": map[string]any{"project": "atlas", "text": fmt.Sprintf("line %d", i)}})
 		}(i)
 	}
@@ -606,8 +608,8 @@ func runProve() int {
 	} else {
 		var planDoc struct {
 			Vectors []struct {
-				Name    string `json:"name"`
-				Models  []struct {
+				Name   string `json:"name"`
+				Models []struct {
 					Name string `json:"name"`
 					Size int64  `json:"size"`
 				} `json:"models"`
@@ -644,8 +646,8 @@ func runProve() int {
 	text, isErr = callTool(map[string]any{
 		"name": "rack_pull", "arguments": map[string]any{
 			"project": "atlas", "model": "llama3.2:latest", "confirm": true}})
-	check("rack_pull refuses without CHAINKIT_RACK_PULL=1",
-		isErr && strings.Contains(text, "CHAINKIT_RACK_PULL"))
+	check("rack_pull refuses without MANJUEL_RACK_PULL=1",
+		isErr && strings.Contains(text, "MANJUEL_RACK_PULL"))
 
 	// --- N1 chat ------------------------------------------------------------
 	// Sessions with receipts over a stub door: open, send, list, isolate,
@@ -858,10 +860,10 @@ func runProve() int {
 		"name": "town_beat", "arguments": map[string]any{"project": "atlas"}})
 	check("town_beat doubles nothing on the second cycle",
 		!isErr && strings.Contains(text, "issued 0"))
-		text, isErr = callTool(map[string]any{
-			"name": "town_status", "arguments": map[string]any{"project": "atlas"}})
-		check("town_status reads the board honestly",
-			!isErr && strings.Contains(text, "TOWN") && strings.Contains(text, "review"))
+	text, isErr = callTool(map[string]any{
+		"name": "town_status", "arguments": map[string]any{"project": "atlas"}})
+	check("town_status reads the board honestly",
+		!isErr && strings.Contains(text, "TOWN") && strings.Contains(text, "review"))
 
 	flowTags, flowTerr := loadFixture("rack_tags.json")
 	if flowTerr != nil {

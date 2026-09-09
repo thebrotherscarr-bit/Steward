@@ -23,8 +23,8 @@ These shape every design decision in the system:
 ### Law 1: state = fold(record)
 
 The JSONL hash chains are the truth. SQLite is a materialized view. If the
-chain says X happened, X happened. If the chain is tampered, the hash breaks.
-If the chain is empty, nothing happened.
+chain says X happened, X happened. If Manjuel is tampered, the hash breaks.
+If Manjuel is empty, nothing happened.
 
 ```
 entry[n].hash = SHA-256(prev || kind || n || payload)

@@ -963,7 +963,7 @@ func toolMemory(t tenant.Tenant, args map[string]any) (string, error) {
 }
 
 // --- N3 model hosting -------------------------------------------------------
-// Pure planner + loopback management. Pulls stay behind CHAINKIT_RACK_PULL
+// Pure planner + loopback management. Pulls stay behind MANJUEL_RACK_PULL
 // + explicit confirm; everything refuses non-loopback before dialing.
 
 func toolRackPlan(t tenant.Tenant, args map[string]any) (string, error) {
@@ -1030,8 +1030,13 @@ func toolRackPull(t tenant.Tenant, args map[string]any) (string, error) {
 	if !confirm {
 		return "", fmt.Errorf("refused: rack_pull needs confirm=true — downloads are the operator's hand")
 	}
-	if os.Getenv("CHAINKIT_RACK_PULL") != "1" {
-		return "", fmt.Errorf("refused: rack_pull needs CHAINKIT_RACK_PULL=1 in the environment")
+	// ONE READING with the core: MANJUEL_RACK_PULL, the CHAINKIT_ twin, the
+	// ground's .env, and the core's truthiness. This read CHAINKIT_RACK_PULL
+	// == "1" while manjuel/skills.py read MANJUEL_RACK_PULL in
+	// ("1","true","yes","on"), so the documented name opened the core's wall
+	// and left this one shut.
+	if !dial(t.Home, "RACK_PULL") {
+		return "", fmt.Errorf("refused: rack_pull needs MANJUEL_RACK_PULL=1 -- in the environment, or in this world's .env")
 	}
 	host, err := rack.Host()
 	if err != nil {

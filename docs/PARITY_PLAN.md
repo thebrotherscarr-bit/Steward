@@ -8,7 +8,7 @@ of what must hold for Atlas to ship with confidence.*
 ## 1. The Parity Thesis
 
 Atlas is five languages bolted together by math. The hash chain is the
-truth. Every language must agree on what the chain says. If Rust says
+truth. Every language must agree on what Manjuel says. If Rust says
 INTACT and Go says FLIP, someone is wrong — and we must know which one.
 
 Parity is not "the port passes its own tests." Parity is "two independent

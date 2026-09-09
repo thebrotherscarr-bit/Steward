@@ -156,7 +156,7 @@ The outside world — and the repo — sees **ciphertext only**. Plaintext exist
 
 `links.py`'s SEALED commits to `H(document)` — safe there because documents are
 high-entropy. A message mesh is different: committing to `H("yes")` or
-`H("meet at 3")` lets anyone holding the chain brute-force the plaintext in
+`H("meet at 3")` lets anyone holding Manjuel brute-force the plaintext in
 milliseconds. A bare hash only hides when its input is unguessable.
 
 Worse, committing to `H(ct)` (the ciphertext) does not give you what SEALED is
@@ -200,7 +200,7 @@ seal.
 
 - THE MESH refuses any destination that is not loopback or an estate ground.
   Mirrors `manjuel_us.py`'s web mirror, which has **no write path**
-  (`manjuel_us.py:582-586`): the chain is written only on the estate.
+  (`manjuel_us.py:582-586`): Manjuel is written only on the estate.
 - A message addressed to a non-estate endpoint is refused outright — egress is a
   packet, not a message.
 
@@ -221,7 +221,7 @@ THE MESH uses **live transport + the ledger, both**:
 ### 7.1 Surfaces (who may read)
 
 - **Aurora** — the console, the face of `manjuel.us`. **View / verify only** (a
-  human reads and checks the chain). It does not write.
+  human reads and checks Manjuel). It does not write.
 - **`api.manjuel.us`** — the operator's personal API. **READ-ONLY by structure**:
   `GET` (head / chain / entry / verify) only; a write verb (`POST/PUT/DELETE/
   PATCH`) is **refused with 405**, never reached over the network during a prove.
@@ -255,7 +255,7 @@ Two first-class chain kinds ride THE MESH (observed in the folded `neiro`
 ledger):
 
 - **`reconcile`** — tallies `weighed / grounded / flagged / registry`; the estate
-  reconciling its own state against the chain.
+  reconciling its own state against Manjuel.
 - **`breach_attempt`** — logs a refused operation (e.g. `detail: "network call
   refused"`); the structural gate's receipt.
 

@@ -117,7 +117,7 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 	// lives in the GROUND's .env -- which the engine loads at startup and this
 	// process never sees. Reading only its own environment made the panel say
 	// the wall was shut while the council could push straight through it.
-	on := remoteAllowed(t.Home)
+	on := dial(t.Home, "GIT_REMOTE")
 	out["remote_allowed"] = on
 	if !on {
 		out["remote_note"] = "remote git operations are OFF (MANJUEL_GIT_REMOTE unset). " +
@@ -131,8 +131,15 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 	return string(b), nil
 }
 
-// remoteAllowed answers whether the core would permit a push, reading the same
-// two places the engine does and in the same order.
+// dial answers whether a wall is open, reading the same two places the engine
+// does and in the same order. `name` is the bare dial -- "GIT_REMOTE",
+// "RACK_PULL" -- and both the MANJUEL_ and the older CHAINKIT_ spelling answer.
+//
+// ONE READING, because two were measured disagreeing. The rack_pull wall was
+// MANJUEL_RACK_PULL in ("1","true","yes","on") in the core and
+// CHAINKIT_RACK_PULL == "1" in atlas: set the documented name and the core
+// permitted a pull while atlas refused it. The git wall had the same shape --
+// the door reported shut while the council pushed straight through.
 //
 // PRECEDENCE IS THE ENGINE'S, not invented here: dotenv.load skips a key that
 // is already in the environment ("if key in os.environ: already"), so a shell
@@ -141,8 +148,8 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 //
 // RULE 7: one key is looked up and a boolean comes back. No value is returned,
 // logged, or put anywhere it could be printed.
-func remoteAllowed(home string) bool {
-	for _, name := range []string{"MANJUEL_GIT_REMOTE", "CHAINKIT_GIT_REMOTE"} {
+func dial(home, name string) bool {
+	for _, name := range []string{"MANJUEL_" + name, "CHAINKIT_" + name} {
 		if truthy(os.Getenv(name)) {
 			return true
 		}
@@ -161,7 +168,7 @@ func remoteAllowed(home string) bool {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key != "MANJUEL_GIT_REMOTE" && key != "CHAINKIT_GIT_REMOTE" {
+		if key != "MANJUEL_"+name && key != "CHAINKIT_"+name {
 			continue
 		}
 		if truthy(strings.Trim(strings.TrimSpace(val), `"'`)) {

@@ -54,7 +54,7 @@ For each `.us` file:
 2. **Validate pass** — required fields per kind (agent, module, tool, skill)
 3. **can_approve: false** — must be explicitly stated, absence is a refusal
 4. **Covenant cited** — must contain the covenant hash `1512741580b7239b`
-5. **reports_to resolvable** — the chain must resolve to a known seat
+5. **reports_to resolvable** — Manjuel must resolve to a known seat
 
 ## Schema
 
