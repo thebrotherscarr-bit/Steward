@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -109,10 +110,14 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 		out["remotes"] = strings.Fields(v)
 	}
 
-	// The core's wall, read and reported. gitstate.py: REMOTE_ENV, on for
-	// "1", "true", "yes", "on".
-	env := strings.TrimSpace(os.Getenv("MANJUEL_GIT_REMOTE"))
-	on := env == "1" || env == "true" || env == "yes" || env == "on"
+	// The core's wall, read WHERE THE ENGINE READS IT. gitstate.py: REMOTE_ENV,
+	// on for "1", "true", "yes", "on".
+	//
+	// This door is a separate process from the engine, and the flag normally
+	// lives in the GROUND's .env -- which the engine loads at startup and this
+	// process never sees. Reading only its own environment made the panel say
+	// the wall was shut while the council could push straight through it.
+	on := remoteAllowed(t.Home)
 	out["remote_allowed"] = on
 	if !on {
 		out["remote_note"] = "remote git operations are OFF (MANJUEL_GIT_REMOTE unset). " +
@@ -124,4 +129,52 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// remoteAllowed answers whether the core would permit a push, reading the same
+// two places the engine does and in the same order.
+//
+// PRECEDENCE IS THE ENGINE'S, not invented here: dotenv.load skips a key that
+// is already in the environment ("if key in os.environ: already"), so a shell
+// variable always wins over a line in .env. The CHAINKIT_ twin is honoured the
+// way manjuel/__init__.py carries it.
+//
+// RULE 7: one key is looked up and a boolean comes back. No value is returned,
+// logged, or put anywhere it could be printed.
+func remoteAllowed(home string) bool {
+	for _, name := range []string{"MANJUEL_GIT_REMOTE", "CHAINKIT_GIT_REMOTE"} {
+		if truthy(os.Getenv(name)) {
+			return true
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".env"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key != "MANJUEL_GIT_REMOTE" && key != "CHAINKIT_GIT_REMOTE" {
+			continue
+		}
+		if truthy(strings.Trim(strings.TrimSpace(val), `"'`)) {
+			return true
+		}
+	}
+	return false
+}
+
+func truthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
