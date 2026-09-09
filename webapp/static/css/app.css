@@ -619,3 +619,46 @@ td code {
 .chat-gate-title { font-weight: 600; color: #f9e2af; }
 .chat-gate-prompt { white-space: pre-wrap; margin: 6px 0; }
 
+/* ---- Home: the launchpad. A line earns its place only if it changes what
+   you do next; green is silence, so the quiet state is one row. ---- */
+.home-box { padding: 18px 20px; }
+.home-input { font-size: 15px; padding: 12px 14px; }
+.home-block { margin-top: 10px; font-size: 12px; color: var(--muted, #6c7086); }
+
+.home-brief { padding: 0; overflow: hidden; }
+.home-brief.quiet { padding: 12px 16px; }
+.brief-ok { font-size: 13px; }
+.brief-ok .muted { margin-left: 8px; font-size: 12px; }
+.brief-src { float: right; font-size: 10px; color: var(--muted, #6c7086);
+             font-family: var(--mono, monospace); opacity: .75; }
+
+.brief-row { display: flex; align-items: flex-start; gap: 12px;
+             padding: 12px 16px; border-left: 3px solid var(--border);
+             border-bottom: 1px solid var(--border); }
+.brief-row:last-child { border-bottom: 0; }
+.brief-text { flex: 1; font-size: 13px; line-height: 1.5; }
+.brief-side { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.brief-side .brief-src { float: none; }
+.brief-wait { border-left-color: #f9e2af; background: rgba(249,226,175,0.08); }
+.brief-warn { border-left-color: #f9e2af; }
+.brief-bad  { border-left-color: #f38ba8; background: rgba(243,139,168,0.08); }
+
+.home-recent-row { padding: 7px 10px; border-radius: 6px; cursor: pointer;
+                   font-size: 12px; color: var(--muted, #6c7086); }
+.home-recent-row:hover { background: var(--bg); color: var(--text, #e0e0e0); }
+.home-recent-text { display: block; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; }
+
+/* ---- the seats, streaming, each under its own name ---- */
+.chat-a.live { min-width: 60%; }
+.seat-block { margin: 0 0 10px; }
+.seat-block:last-child { margin-bottom: 0; }
+.seat-name { font-size: 11px; font-family: var(--mono, monospace);
+             color: var(--accent, #89b4fa); margin-bottom: 3px; }
+.seat-name .muted { color: var(--muted, #6c7086); }
+.seat-words { white-space: pre-wrap; }
+.seat-block:last-child .seat-words::after {
+  content: '█'; color: var(--accent, #89b4fa);
+  animation: seatcaret 1s step-end infinite; margin-left: 1px; }
+@keyframes seatcaret { 50% { opacity: 0; } }
+

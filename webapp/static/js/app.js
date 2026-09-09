@@ -62,7 +62,9 @@ const App = {
   async render() {
     const el = document.getElementById('content');
     switch (this.currentPage) {
-      case 'dashboard': await this.renderDashboard(el); break;
+      // The launchpad (home.js). renderDashboard below is the old estate
+      // readout -- kept whole, no longer routed, until he says its fate.
+      case 'dashboard': await Home.render(el); break;
       case 'agents': this.pageParam ? await this.renderAgentDetail(el) : await this.renderAgents(el); break;
       case 'traces': this.pageParam ? await this.renderTraceDetail(el) : await this.renderTraces(el); break;
       case 'tools': await this.renderTools(el); break;

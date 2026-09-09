@@ -30,6 +30,7 @@ const Run = {
   es: null,
   running: false,
   engineOpen: false,
+  world: '',
   sitting: '',
   pending: '',
   unreachable: false,
@@ -54,11 +55,13 @@ const Run = {
     try {
       const r = await fetch(API.base + '/council/state').then(x => x.json());
       this.engineOpen = !!r.open;
+      this.world = r.world || '';
       this.sitting = r.sitting || '';
       this.pending = r.pending || '';
       this.unreachable = false;
     } catch {
       this.engineOpen = false;
+      this.world = '';
       this.sitting = '';
       this.pending = '';
       this.unreachable = true;
@@ -288,7 +291,10 @@ const Run = {
       const s = t.seats[t.seats.length - 1];
       return s.seat + (s.model ? ' · ' + s.model : '');
     }
-    return 'starting';
+    // No seat and no tool yet means the door has the request and the
+    // engine has not begun: either a cold start, or this turn is QUEUED
+    // behind another on the same world (one run at a time, by design).
+    return 'waiting for the engine';
   },
 
   elapsed(t) {

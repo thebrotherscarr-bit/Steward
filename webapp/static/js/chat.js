@@ -67,6 +67,20 @@ const Chat = {
     };
 
     this.draw();
+    // ADOPT A TURN ALREADY IN FLIGHT. It may have been started on the
+    // launchpad -- which routes here after starting it, so this page did
+    // not exist when 'start' fired -- or it may be one he navigated away
+    // from. Either way the controls are driven by Run's state, not by an
+    // event this page might never have been present to hear.
+    if (Run.running) {
+      const c = document.getElementById('chat-cancel');
+      const g = document.getElementById('chat-send');
+      if (c) c.hidden = false;
+      if (g) g.disabled = true;
+      this.paintLive();
+      this.now(Run.nowLine() + ' \u00b7 ' + Run.elapsed());
+      this.tick(true);
+    }
     await Run.check();
   },
 
@@ -129,7 +143,10 @@ const Chat = {
       return `<div class="chat-a chat-refused"><b>REFUSED</b><br>${escHtml(t.refusal)}</div>`;
     }
 
-    const live = m.live ? ' live' : '';
+    // A live bubble is a container the seats are appended into, so it must
+    // not be seeded with text that paintLive would then have to clear.
+    if (m.live) return `<div class="chat-a live"></div>`;
+    const live = '';
     let foot = '';
     if (t && !m.live) {
       const fails = Run.failures(t);
@@ -171,6 +188,50 @@ const Chat = {
     return `${tools ? `<div class="chat-tools">${tools}</div>` : ''}
       ${rows ? `<table class="chat-steps"><tbody>${rows}</tbody></table>` : ''}
       ${t.transcript ? `<div class="muted">transcript <code>${escHtml(t.transcript)}</code></div>` : ''}`;
+  },
+
+  // The seats, streaming, each under its own name. Called once per event,
+  // so it must stay cheap: a new seat appends a block, and every other
+  // event only writes into the block of the seat currently speaking.
+  // Rebuilding the bubble per token would re-render the whole turn
+  // hundreds of times and fight the scroll.
+  paintLive() {
+    const live = document.querySelector('#chat-thread .chat-a.live');
+    if (!live || !Run.turn) return;
+    const seats = Run.turn.seats;
+    if (!seats.length) {
+      // Tokens before any seat event: show them rather than hold them back.
+      if (Run.turn.answer) live.textContent = Run.turn.answer;
+      return;
+    }
+    for (let i = live.childElementCount; i < seats.length; i++) {
+      const s = seats[i];
+      const d = document.createElement('div');
+      d.className = 'seat-block';
+      d.innerHTML = `<div class="seat-name">${escHtml(s.seat)}`
+        + (s.model ? ` <span class="muted">${escHtml(s.model)}</span>` : '')
+        + `</div><div class="seat-words"></div>`;
+      live.appendChild(d);
+    }
+    const cur = live.lastElementChild;
+    const words = cur && cur.querySelector('.seat-words');
+    if (words) words.textContent = seats[seats.length - 1].text;
+    const box = document.getElementById('chat-thread');
+    if (box) box.scrollTop = box.scrollHeight;
+  },
+
+  // A seat thinking says nothing on the wire, sometimes for a minute. The
+  // clock has to keep moving on its own or a working engine reads as a
+  // hung one and he cancels a turn that was fine.
+  tick(on) {
+    clearInterval(this._tick);
+    this._tick = null;
+    if (!on) return;
+    this._tick = setInterval(() => {
+      if (!Run.running) { this.tick(false); return; }
+      if (!document.getElementById('chat-now')) { this.tick(false); return; }
+      this.now(Run.nowLine() + ' · ' + Run.elapsed());
+    }, 1000);
   },
 
   now(text) {
@@ -239,24 +300,21 @@ const Chat = {
     if (what === 'start') {
       document.getElementById('chat-cancel').hidden = false;
       document.getElementById('chat-send').disabled = true;
+      this.tick(true);
       return;
     }
 
     if (what === 'event') {
       last.turn = Run.turn;
-      // While it streams the page shows the ANSWER SO FAR plus one line of what
-      // is happening. Not the log — the log is Evals.
-      const live = document.querySelector('#chat-thread .chat-a.live');
-      if (live) live.textContent = Run.turn.answer;
+      this.paintLive();
       this.now(Run.nowLine() + ' · ' + Run.elapsed());
-      const box = document.getElementById('chat-thread');
-      if (box) box.scrollTop = box.scrollHeight;
       return;
     }
 
     if (what === 'end') {
       last.turn = Run.turn;
       last.live = false;
+      this.tick(false);
       this.now('');
       document.getElementById('chat-cancel').hidden = true;
       document.getElementById('chat-send').disabled = !Run.engineOpen;
