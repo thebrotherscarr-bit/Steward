@@ -225,6 +225,13 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
+		Name: "git", Writes: false,
+		Description: "the world's repository as it stands now: branch, head, dirty counts, upstream, and whether remote operations are walled",
+		Args:        []string{"project?"},
+		Fn:          toolGit,
+	})
+
+	r.add(Tool{
 		Name: "seats", Writes: false,
 		Description: "the world's own seat declarations and the pipelines they stand in, from agents/ and pipelines.md",
 		Args:        []string{"project?"},

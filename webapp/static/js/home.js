@@ -52,6 +52,19 @@ const Home = {
 
       <div id="home-brief" class="card home-brief"></div>
 
+      <div class="card" id="home-git-card" hidden>
+        <div class="card-header">
+          <span class="card-title">The repository</span>
+          <span class="flex" id="home-git-controls"></span>
+        </div>
+        <div id="home-git"></div>
+      </div>
+
+      <div class="card" id="home-sittings-card" hidden>
+        <div class="card-title">Recent sittings</div>
+        <div id="home-sittings"></div>
+      </div>
+
       <div class="card" id="home-engine-card">
         <div class="card-header">
           <span class="card-title">The engine</span>
@@ -224,6 +237,139 @@ const Home = {
       (why) => { btn.classList.remove('hot'); this.block(why); toast(why, 'error'); });
   },
 
+  // THE REPOSITORY, as it stands now. Read by the door, not the engine: "is
+  // my tree dirty" is what he asks BEFORE deciding to boot anything, and a
+  // panel that needs an engine to answer it cannot answer it.
+  async readGit() {
+    const card = document.getElementById('home-git-card');
+    const box = document.getElementById('home-git');
+    const bar = document.getElementById('home-git-controls');
+    if (!card || !box) return;
+    let g;
+    try { g = JSON.parse(await App.tool('git', {})); }
+    catch (e) {
+      card.hidden = false;
+      box.innerHTML = `<div class="eng-row eng-bad">git could not be read:
+        ${escHtml(e.message || 'refused')}<span class="brief-src">git</span></div>`;
+      return;
+    }
+    this._git = g;
+    card.hidden = false;
+
+    if (!g.is_repo) {
+      box.innerHTML = `<div class="eng-row">${escHtml(g.note || 'not a repository')}
+        <span class="brief-src">git</span></div>`;
+      bar.innerHTML = '';
+      return;
+    }
+
+    const rows = [];
+    // GREEN IS SILENCE: clean and level is one line.
+    if (!g.dirty && !g.ahead) {
+      rows.push(`<div class="eng-row"><b>${escHtml(g.branch || '?')}</b>
+        <code>${escHtml(g.head || '')}</code> — clean${g.upstream ? ', level with <code>' +
+        escHtml(g.upstream) + '</code>' : ''}
+        <span class="muted"> · ${escHtml(g.subject || '')} (${escHtml(g.when || '')})</span>
+        <span class="brief-src">git</span></div>`);
+    } else {
+      if (g.dirty) {
+        rows.push(`<div class="eng-row eng-warn"><b>${g.changed} changed, ${g.untracked} untracked</b>
+          on ${escHtml(g.branch || '?')} — uncommitted work
+          <div class="git-files">${(g.files || []).map(escHtml).join('<br>')}</div>
+          <span class="brief-src">git</span></div>`);
+      }
+      if (g.ahead) {
+        rows.push(`<div class="eng-row eng-warn">${g.ahead} commit${g.ahead === 1 ? '' : 's'}
+          ahead of <code>${escHtml(g.upstream || 'the remote')}</code> — landed locally, not pushed
+          <span class="brief-src">git</span></div>`);
+      }
+      if (g.behind) {
+        rows.push(`<div class="eng-row eng-warn">${g.behind} behind <code>${escHtml(g.upstream)}</code>
+          <span class="brief-src">git</span></div>`);
+      }
+    }
+    // THE WALL, named precisely. Being walled and being unauthenticated are
+    // different problems with the same symptom, and telling them apart is the
+    // difference between "set a flag" and "your credentials broke".
+    if (!g.remote_allowed) {
+      rows.push(`<div class="eng-row"><span class="muted">${escHtml(g.remote_note || '')}
+        This is the estate's own wall, not a credentials problem.</span>
+        <span class="brief-src">gitstate.py</span></div>`);
+    }
+    box.innerHTML = rows.join('');
+
+    bar.innerHTML = `<input id="git-msg" class="input git-msg" type="text"
+        placeholder="what changed (optional — the council writes one if you don't)" />
+      <button class="btn btn-sm ${g.dirty ? 'btn-primary' : ''}" id="git-commit"
+        ${g.dirty ? '' : 'disabled'}>Commit</button>
+      <button class="btn btn-sm" id="git-push"
+        ${g.remote_allowed && g.ahead ? '' : 'disabled'}>Push</button>`;
+    document.getElementById('git-commit').onclick = () => this.commit();
+    const push = document.getElementById('git-push');
+    push.title = !g.remote_allowed
+      ? 'remote operations are walled by MANJUEL_GIT_REMOTE (the estate, not your credentials)'
+      : (g.ahead ? 'push ' + g.ahead + ' commit(s) to ' + (g.upstream || 'the remote')
+                 : 'nothing to push');
+    push.onclick = () => this.push();
+  },
+
+  // Through the council, never around it: the law gate stamps it, the Router
+  // runs git_commit, and the run lands in the record like any other turn. A
+  // button that shelled out to git would be a second write-path past
+  // everything this estate checks.
+  commit() {
+    const msg = (document.getElementById('git-msg') || {}).value || '';
+    const said = msg.trim()
+      ? `Commit the working tree with this message: ${msg.trim()}`
+      : 'Commit the working tree. Read what changed and write one line saying what it was.';
+    this.ask(said);
+  },
+
+  push() {
+    const g = this._git || {};
+    if (!g.remote_allowed) {
+      toast('Remote operations are walled by MANJUEL_GIT_REMOTE', 'error');
+      return;
+    }
+    this.ask('Push the committed work to the remote.');
+  },
+
+  // One objective, into the same loop as anything he types.
+  ask(objective) {
+    if (!Run.engineOpen) { toast('No engine is open — boot first', 'error'); return; }
+    if (Run.running) { toast('A turn is already running', 'error'); return; }
+    Chat.thread.push({ who: 'him', text: objective });
+    Chat.thread.push({ who: 'council', text: '', live: true });
+    this.thread();
+    Run.start({ objective });
+  },
+
+  // THE SITTINGS, read from the record. Every one of them is a real sitting
+  // with a toll owed or paid; a run of them with no toll is a thing he can
+  // see rather than discover at a release gate.
+  async readSittings() {
+    const card = document.getElementById('home-sittings-card');
+    const box = document.getElementById('home-sittings');
+    if (!card || !box) return;
+    let p;
+    try { p = JSON.parse(await App.tool('proofs', {})); }
+    catch { return; }
+    const rc = (p && p.record) || {};
+    const rows = (rc.recent || []).slice(-6).reverse();
+    if (!rows.length) return;
+    card.hidden = false;
+    box.innerHTML = `<div class="sit-head">${rc.sittings} sittings · ${rc.tolled} tolled ·
+        ${rc.runs} runs${rc.still_open ? ' · <span class="tool-bad">' + rc.still_open +
+        ' never closed</span>' : ''}<span class="brief-src">sessions/sessions.jsonl</span></div>` +
+      rows.map(r => `<div class="sit-row">
+        <span class="sit-n">${escHtml(String(r.n))}</span>
+        <span class="muted">${escHtml(String(r.started || '').replace('T', ' '))}</span>
+        <span>${escHtml(String(r.runs))} runs</span>
+        <span>${r.ended ? (r.toll_paid ? '<span class="badge badge-green">tolled</span>'
+                                       : '<span class="badge badge-yellow">no toll</span>')
+                        : '<span class="tool-bad">still open</span>'}</span></div>`).join('');
+  },
+
   block(text) {
     const el = document.getElementById('home-block');
     if (!el) return;
@@ -387,6 +533,8 @@ const Home = {
     this.brief = { muster, rack };
     this.paint();
     this.paintEngine();
+    this.readGit();
+    this.readSittings();
   },
 
   bad(v) { return v && typeof v === 'object'; },
