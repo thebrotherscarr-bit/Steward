@@ -670,6 +670,9 @@ td code {
 .eng-row .brief-src { float: right; }
 .eng-warn { border-left: 3px solid #f9e2af; padding-left: 10px; }
 .eng-bad  { border-left: 3px solid #f38ba8; padding-left: 10px; }
+/* An engine open and doing nothing. Amber, not red: it is waste, not a
+   fault, and the card must not cry the same colour as a dead door. */
+.eng-idle { color: #f9e2af; font-weight: 600; }
 .home-boot { margin-top: 10px; max-height: 40vh; overflow: auto; font-size: 11px;
              white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border);
              border-radius: var(--radius, 6px); padding: 10px; line-height: 1.5; }

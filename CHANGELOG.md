@@ -4,6 +4,41 @@ All notable changes to ATLAS will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **The engine card says how long it has been standing, and when it is idle.**
+  The card already showed `started 10:58:58 AM` — a clock time you have to
+  subtract from to learn anything. It now ticks a live elapsed beside it, and
+  turns amber with `— idle Nm` once nothing has run for five minutes.
+
+  The measurement behind it, taken across every sitting the core has ever
+  recorded: a standup gets 69 seconds of engine time per run; sittings of two
+  runs or fewer get 208, and there are 63 of them — **5.3 engine-hours for 91
+  runs**. Twenty-two sittings were never closed at all. Sitting 74 held an
+  engine thirty minutes for 2 runs, 82 held one fifty-four minutes for 5, and
+  166 held one **sixteen minutes for zero**. The record had known for weeks;
+  nothing on the glass said a word.
+
+  **Idle is measured from the last turn, not from boot.** A first cut went
+  amber only when nothing had EVER run, which misses the shape the waste
+  actually takes — 74 and 82 both did work, then sat. A running turn is never
+  idle however slow the model is: this must not scold a slow rack, only an
+  engine nobody is using.
+
+  Ticks at one second, not on the 15s poll, which would read as a broken clock.
+  The interval clears itself the moment the span leaves the DOM — an
+  idle-engine warning that leaked timers would be its own joke.
+
+  `static/js/home.js` (`Home.age`), `static/css/app.css` (`.eng-idle`).
+  Operator: "we can just add that to the dashboard to view as tasks are
+  running in real time, right?"
+
+### Note
+- Static assets are compiled into the binary (`//go:embed static/...`), so a
+  change under `static/` needs `go build -o atlas-webapp.exe .` and a restart
+  before it reaches the glass. Editing the file alone does nothing.
+
 ## [0.1.1+f1] — 2026-09-08
 
 ### Added

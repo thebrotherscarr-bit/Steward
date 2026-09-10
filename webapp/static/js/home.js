@@ -123,6 +123,51 @@ const Home = {
     }, 15000);
   },
 
+  // HOW LONG THIS ENGINE HAS BEEN STANDING, ticking, beside the clock time.
+  //
+  // ONE SECOND, NOT FIFTEEN. The card repaints on the 15s poll; hanging the
+  // elapsed off that would make it jump in fifteen-second steps, which reads
+  // as a broken clock rather than a live one. This writes into a span the
+  // repaint leaves alone.
+  //
+  // IT STOPS ITSELF. The interval clears the moment the span is gone -- a
+  // navigation away, or a repaint with no engine open -- so leaving this page
+  // does not leave a timer running. An idle-engine warning that leaks timers
+  // would be its own joke.
+  age(on) {
+    clearInterval(this._age);
+    this._age = null;
+    if (!on) return;
+    const paint = () => {
+      const el = document.getElementById('eng-age');
+      if (!el) { this.age(false); return; }
+      const ms = Date.now() - new Date(Run.started).getTime();
+      if (!isFinite(ms) || ms < 0) { el.textContent = ''; return; }
+      const s = Math.floor(ms / 1000);
+      const txt = s < 60 ? s + 's'
+        : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's'
+        : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+      // IDLE IS MEASURED FROM THE LAST TURN, NOT FROM BOOT. A first cut went
+      // amber only when NOTHING had ever run, which misses the shape the waste
+      // actually takes: sitting 74 held an engine thirty minutes for 2 runs,
+      // 82 held one fifty-four minutes for 5. Both did work. Both then sat.
+      // What costs the machine is the gap since the last turn, so that is what
+      // is measured -- from `turn.ended` when there is one, from the engine's
+      // own start when there is not.
+      //
+      // A RUNNING TURN IS NEVER IDLE, however long it takes. This must not
+      // scold him for a slow model, only for an engine nobody is using.
+      const since = (Run.turn && Run.turn.ended) || new Date(Run.started).getTime();
+      const idleS = Math.floor((Date.now() - since) / 1000);
+      const idle = !Run.running && idleS >= 300;
+      const im = Math.floor(idleS / 60);
+      el.textContent = 'open ' + txt + (idle ? ' — idle ' + im + 'm' : '');
+      el.className = idle ? 'eng-idle' : '';
+    };
+    paint();
+    this._age = setInterval(paint, 1000);
+  },
+
   // ---- the launch ---------------------------------------------------------
 
   // He types here and lands in the conversation. The turn starts from Home so
@@ -398,6 +443,7 @@ const Home = {
     const t = (iso) => { try { return new Date(iso).toLocaleTimeString(); } catch { return iso; } };
 
     if (Run.unreachable) {
+      this.age(false);
       box.innerHTML = '<div class="eng-row eng-bad">The MCP door did not answer. ' +
         'Nothing can be opened or closed until it does.' +
         '<span class="brief-src">run/state</span></div>';
@@ -405,6 +451,7 @@ const Home = {
       return;
     }
     if (!Run.engineOpen) {
+      this.age(false);
       box.innerHTML = '<div class="eng-row eng-warn">No engine on <b>' +
         escHtml(Run.world || 'this world') + '</b>. Nothing will run until one is open. ' +
         'Booting starts a sitting; closing pays its toll.' +
@@ -417,8 +464,26 @@ const Home = {
     const rows = ['<div class="eng-row">Engine open on <b>' + escHtml(Run.world) +
       '</b> — sitting <b>' + escHtml(Run.sitting || '?') + '</b>' +
       (Run.session ? ' · session <code>' + escHtml(Run.session) + '</code>' : '') +
-      (Run.started ? '<span class="muted"> · started ' + escHtml(t(Run.started)) + '</span>' : '') +
+      (Run.started ? '<span class="muted"> · started ' + escHtml(t(Run.started)) +
+        ' · <span id="eng-age"></span></span>' : '') +
       '<span class="brief-src">run/state</span></div>'];
+
+    // AN ENGINE OPEN AND DOING NOTHING IS THE MOST EXPENSIVE THING IN THE
+    // RECORD, and until now nothing on this page said so. Measured across
+    // every sitting ever recorded: a standup gets 69 seconds of engine time
+    // per run; sittings of two runs or fewer get 208, and there are 63 of
+    // them -- 5.3 engine-hours for 91 runs. Twenty-two sittings were never
+    // closed at all. Sitting 74 held an engine thirty minutes for 2 runs, 82
+    // held one fifty-four minutes for 5, and 166 held one SIXTEEN MINUTES FOR
+    // ZERO while the operator watched a hand do nothing with it.
+    //
+    // `started` was already on this card, as a fixed clock time -- a number
+    // you have to subtract from to learn anything. The elapsed is the part a
+    // person reads without doing arithmetic, so it ticks, and it turns amber
+    // once an engine has been standing this long with no turn behind it.
+    // His word: "we can just add that to the dashboard to view as tasks are
+    // running in real time, right?"
+    if (Run.started) this.age(true);
 
     // THE ROW THAT USED TO BE A SENTENCE IN A CHANGELOG. The engine runs
     // whatever manjuel/*.py said when it was spawned, and he no longer has a
