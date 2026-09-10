@@ -30,7 +30,7 @@
 | `atlas-door` | Go | 0.1.1+f1 | PASS |
 | `atlas-webapp` | Go | 0.1.1+f1 | PASS |
 
-## MCP Tool Surface (25 tools)
+## MCP Tool Surface (72 tools)
 
 | Tool | Writes | Description |
 |---|---|---|
@@ -201,7 +201,7 @@ atlas/
 ├── faces/                 Console + bridge
 ├── kernels/               C++ (prove, digest, foldall, bench)
 ├── line/                  Go workspace (92 tests)
-│   ├── cmd/atlas-mcp/     MCP server (25 tools)
+│   ├── cmd/atlas-mcp/     MCP server (72 tools)
 │   ├── cmd/atlas-tui/     Terminal UI
 │   ├── cmd/atlas-town/    Town square
 │   ├── cmd/atlas-door/    Door gateway

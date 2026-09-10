@@ -54,7 +54,7 @@
 | test-line | `cd line && go test ./...` | 92+ pass |
 | build-webapp | `cd webapp && go build ./...` | exit 0 |
 | vet-webapp | `cd webapp && go vet ./...` | clean |
-| mcp-describe | `cd line && go run ./cmd/atlas-mcp --describe` | 25 tools listed |
+| mcp-describe | `cd line && go run ./cmd/atlas-mcp --describe` | 72 tools listed |
 | mcp-version | `cd line && go run ./cmd/atlas-mcp --version` | 0.1.1+f1 |
 | mcp-prove | `cd line && go run ./cmd/atlas-mcp --prove` | 58 strokes PASS |
 | town-prove | `cd line && go run ./cmd/atlas-town --prove` | 11 strokes PASS |
