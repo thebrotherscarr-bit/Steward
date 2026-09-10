@@ -93,6 +93,7 @@ const Home = {
 
     this.paintRecent();
     await this.read();
+    await this.showKeptBoot();
     this.watch(true);
   },
 
@@ -261,6 +262,18 @@ const Home = {
     if (!document.getElementById('home-thread')) return;   // not the live page
     if (what === 'state') { this.paintEngine(); this.paint(); return; }
     if (what === 'start') {
+      // A TURN THIS BROWSER DID NOT ASK FOR STILL NEEDS SOMEWHERE TO LAND.
+      // The runner pushes its own pair into the thread in ask(); a window
+      // MIRRORING a turn started elsewhere never did, so every event found no
+      // live bubble and the page sat on "waiting for the engine" while the
+      // answer streamed past it. Watching and running paint the same way; only
+      // who created the bubble differs.
+      if (Run.turn && Run.turn.watching &&
+          !Chat.thread.some(m => m.live)) {
+        Chat.thread.push({ who: 'him', text: Run.turn.objective || '' });
+        Chat.thread.push({ who: 'council', text: '', live: true });
+        this.thread();
+      }
       this.block('starting...');
       this.tick(true);
       return;
@@ -521,12 +534,61 @@ const Home = {
     document.getElementById('eng-boot').onclick = () => this.boot();
   },
 
+  // THE BOOT REPORT IS KEPT, AND KEPT WHERE BOTH BROWSERS CAN SEE IT.
+  //
+  // It used to live only in this <pre>, which render() rebuilds empty and
+  // hidden on every navigation. Refresh the page and the report was gone --
+  // the RECORD, the GATE, the RACK and VOICE, everything the boot actually
+  // told you -- and the only way back was to reboot an engine that was working
+  // perfectly well. His word: "keep the boot report ... i want to be able to
+  // see it runing in sync on my chromium browser with your internal browser."
+  //
+  // SO IT GOES TO THE SERVER, NOT TO STORAGE. sessionStorage is per-tab and
+  // localStorage is per-browser; neither can put two browsers on the same
+  // page. The settings store is the one place both can read.
+  //
+  // KEYED TO THE SESSION, so a dead engine's boot log is never painted over a
+  // live one. The engine that wrote it is named in the value, and a report
+  // whose session does not match the engine standing now is discarded.
   bootLine(text, append) {
     const el = document.getElementById('home-boot');
     if (!el) return;
     el.hidden = false;
     el.textContent = append ? (el.textContent + text) : text;
     el.scrollTop = el.scrollHeight;
+    this._boot = el.textContent;
+    this.keepBoot();
+  },
+
+  // Written after the last line rather than on every one: a boot streams
+  // dozens of lines and this must not become dozens of POSTs.
+  keepBoot() {
+    clearTimeout(this._bootSave);
+    this._bootSave = setTimeout(() => {
+      const text = this._boot || '';
+      if (!text.trim()) return;
+      API.setSetting('boot.' + (Run.world || 'research'),
+        JSON.stringify({ session: Run.session || '', text })).catch(() => {});
+    }, 800);
+  },
+
+  // Painted on arrival, so a refresh -- or a second browser opening the page
+  // for the first time -- shows the report the engine actually gave.
+  async showKeptBoot() {
+    const el = document.getElementById('home-boot');
+    if (!el || el.textContent.trim()) return;      // a live boot is streaming
+    try {
+      const r = await API.getSetting('boot.' + (Run.world || 'research'));
+      const kept = JSON.parse((r && r.value) || '{}');
+      if (!kept.text) return;
+      // A report from an engine that is no longer standing is not the truth
+      // about this one. Silence beats a stale wall of text.
+      if (!Run.engineOpen || (kept.session && kept.session !== Run.session)) return;
+      el.hidden = false;
+      el.textContent = kept.text;
+      el.scrollTop = el.scrollHeight;
+      this._boot = kept.text;
+    } catch { /* no report kept yet */ }
   },
 
   busy(on, what) {

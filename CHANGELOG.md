@@ -54,6 +54,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `internal/engine/engine.go`, `internal/tools/runstream.go`,
   `static/js/council.js`, `static/js/home.js`.
 
+- **A turn is visible in every browser, not only the one that started it.**
+  Operator: "i want to be able to see it runing in sync on my chromium browser
+  with your internal browser."
+
+  `/council/stream` belongs to whoever opened it, so a second window could not
+  know a turn was running and would not learn until its own 15s poll — by then
+  the turn was usually over. **Storage could never have fixed this**:
+  sessionStorage is per-tab, localStorage is per-browser. The server is the
+  only place two browsers can agree, so `pipeSSE` now mirrors every council
+  line onto the broadcast bus `/api/events` and `/ws` already serve, and
+  `Run.mirror()` follows it. The runner ignores its own echo (`running` is the
+  whole test) or every event would be doubled in its trace.
+
+  **A watched turn needed somewhere to land.** The runner pushes its own pair
+  into the thread in `ask()`; a mirroring window never did, so every event
+  found no live bubble and the page sat on "waiting for the engine" while the
+  answer streamed past it.
+
+- **THE BUS HAS NEVER SENT THE TYPE IT IS KEYED ON.** `SSE` marshalled
+  `e.Data` alone, dropping `e.Type` — so `App.onEvent`, which switches on
+  `e.type` across eleven events, **had never fired once**. The struct already
+  carried `json:"type"`; only that one line disagreed. Fixed, and the toasts
+  work for the first time.
+
+- **The boot report is kept.** It lived only in a `<pre>` that `render()`
+  rebuilds empty and hidden, so a refresh discarded the RECORD, GATE, RACK and
+  VOICE the boot had reported and the only way back was rebooting a healthy
+  engine. Now written to the settings store, debounced, **keyed to the
+  session** so a dead engine's report is never painted over a live one.
+
 ### Note
 - Static assets are compiled into the binary (`//go:embed static/...`), so a
   change under `static/` needs `go build -o atlas-webapp.exe .` and a restart

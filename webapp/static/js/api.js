@@ -34,6 +34,11 @@ const API = {
   sendMessage(m)    { return this.post('/messages/send', m); },
   upsertAgent(a)    { return this.post('/agents', a); },
   setSetting(k, v)  { return this.post('/settings/' + k, { value: v }); },
+  // Read side of the same store. THE SERVER IS THE ONLY PLACE TWO
+  // BROWSERS CAN AGREE: sessionStorage is per-tab and localStorage is per
+  // browser, so neither can put his Chromium and another browser on the
+  // same page. Anything both must see lives here.
+  getSetting(k)     { return this.get('/settings/' + k); },
   listSessions() { return this.get('/chat/sessions'); },
   getSession(s)  { return this.get('/chat/session?session=' + encodeURIComponent(s)); },
   startSession(actor, voice) { return this.post('/chat/start', { actor: actor || '', voice: voice || '' }); },

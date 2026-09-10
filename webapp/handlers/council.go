@@ -8,6 +8,7 @@ package handlers
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,7 +42,7 @@ func (h *Handlers) StreamCouncil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL.RawQuery = qq.Encode()
-	h.pipeSSE(w, r, req)
+	h.pipeSSE(w, r, req, "council")
 }
 
 // ListenCouncil proxies GET /run/listen: one spoken turn, captured by the
@@ -62,7 +63,7 @@ func (h *Handlers) ListenCouncil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL.RawQuery = qq.Encode()
-	h.pipeSSE(w, r, req)
+	h.pipeSSE(w, r, req, "")
 }
 
 // CouncilState proxies GET /run/state: is an engine standing on this world, and
@@ -118,7 +119,8 @@ func (h *Handlers) scopeProject(r *http.Request, qq map[string][]string, asked s
 // pipeSSE streams the MCP door's event-stream through to the browser line by
 // line. Shared by every SSE proxy so there is one place where the flush, the
 // disconnect and the buffer bound are decided.
-func (h *Handlers) pipeSSE(w http.ResponseWriter, r *http.Request, req *http.Request) {
+func (h *Handlers) pipeSSE(w http.ResponseWriter, r *http.Request, req *http.Request,
+	broadcastAs string) {
 	if h.service != "" {
 		req.Header.Set("Authorization", "Bearer "+h.service)
 	}
@@ -163,6 +165,26 @@ func (h *Handlers) pipeSSE(w http.ResponseWriter, r *http.Request, req *http.Req
 			}
 			fmt.Fprintf(w, "%s\n", l)
 			flusher.Flush()
+			// AND EVERY OTHER BROWSER SEES IT TOO.
+			//
+			// This stream belongs to whoever started the turn. A second
+			// window -- his Chromium beside another browser, or a phone on
+			// the LAN -- held a page that could not know a turn was running
+			// at all, and would not until its own fifteen-second poll. Two
+			// glasses onto one estate showing different things is the fault
+			// this page was rewritten to end.
+			//
+			// STORAGE CANNOT FIX IT: sessionStorage is per-tab and
+			// localStorage is per-browser. The SERVER is the only place two
+			// browsers can agree, so each line also goes on the broadcast bus
+			// that /api/events and /ws already serve. Non-blocking by
+			// construction -- broadcast drops on a full channel rather than
+			// waiting -- so a slow watcher can never hold up the turn.
+			if broadcastAs != "" {
+				if d, ok := strings.CutPrefix(l, "data: "); ok && d != "" {
+					h.broadcast(broadcastAs, json.RawMessage(d))
+				}
+			}
 		case <-notify:
 			return
 		}

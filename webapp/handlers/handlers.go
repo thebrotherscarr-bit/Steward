@@ -436,7 +436,13 @@ func (h *Handlers) SSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case e := <-ch:
-			data, _ := json.Marshal(e.Data)
+			// THE TYPE GOES ON THE WIRE. This marshalled e.Data alone, so the
+			// `type` the whole bus is keyed on never reached a browser -- and
+			// App.onEvent, which switches on e.type for eleven different
+			// events, has therefore never fired once. The struct already
+			// carries `json:"type"` and `json:"data"` and the client already
+			// reads e.type; only this line disagreed with both.
+			data, _ := json.Marshal(e)
 			fmt.Fprintf(w, "data: %s\n\n", string(data))
 			flusher.Flush()
 		case <-notify:

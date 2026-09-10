@@ -15,6 +15,10 @@ const App = {
     });
     this.loadHealth();
     API.sse((e) => this.onEvent(e));
+    // Every page follows a turn started in another browser, not just the
+    // one that asked for it. Idempotent: mirror() returns at once if it is
+    // already listening.
+    Run.mirror();
   },
 
   router() {

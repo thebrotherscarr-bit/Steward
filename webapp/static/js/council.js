@@ -174,6 +174,54 @@ const Run = {
     } catch {}
   },
 
+  // ---- WATCHING A TURN THIS BROWSER DID NOT START -----------------------
+  //
+  // His ask, 2026-09-10: "i want to be able to see it runing in sync on my
+  // chromium browser with your internal browser."
+  //
+  // /council/stream belongs to whoever opened it. A second window held a page
+  // that could not know a turn was running at all, and would not learn until
+  // its own fifteen-second poll -- by which time the turn was usually over.
+  // Two glasses onto one estate, disagreeing.
+  //
+  // STORAGE COULD NEVER HAVE FIXED THIS. sessionStorage is per-tab;
+  // localStorage is per-browser. The server is the only place two browsers can
+  // agree, so the webapp now mirrors every council line onto the broadcast bus
+  // and this follows it.
+  //
+  // THE RUNNER IGNORES ITS OWN ECHO. A browser that started the turn is
+  // already reading the real stream; absorbing the mirror as well would double
+  // every event in its trace. `running` is the whole test.
+  mirror() {
+    if (this._mirror) return;
+    this._mirror = true;
+    API.sse((e) => {
+      if (!e || e.type !== 'council' || this.running) return;
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      // The first line of a turn nobody here started opens a trace to hold it,
+      // so the page has somewhere to paint. Marked so the reader can tell a
+      // turn it is WATCHING from one it asked for.
+      if (!this.turn || this.turn.ended) {
+        this.turn = {
+          objective: d.objective || '(a turn started in another window)',
+          answering: false, watching: true,
+          events: [], seats: [], tools: [], notes: [],
+          answer: '', delivery: null, waiting: null,
+          started: Date.now(), ended: null, verdict: '', dropped: 0,
+          refusal: '', pipeline: '', transcript: ''
+        };
+        this.emit('start');
+      }
+      this.absorb(d.event || 'unnamed', d);
+      if (d.event === 'delivery' || d.event === 'refused') {
+        this.turn.ended = Date.now();
+        this.keep();
+        this.emit('done');
+      }
+    });
+  },
+
   // Drops the READER, not the run. A closed glass does not cancel the
   // council's work; only run_cancel does that.
   drop() {
