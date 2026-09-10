@@ -416,7 +416,14 @@ func (h *Handlers) SSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch := make(chan event, 32)
+	// DEEP ENOUGH FOR A TURN'S TOKENS. broadcast() drops on a full channel
+	// rather than blocking -- correct, since one slow watcher must never
+	// hold up a turn -- but at 32 that made dropping the NORMAL case: a
+	// council turn puts hundreds of token events on this bus in seconds,
+	// and a watcher would lose nearly all of them, seeing a tool card and
+	// then silence. The events are small JSON; the depth costs nothing and
+	// the drop stays as the backstop it was meant to be.
+	ch := make(chan event, 512)
 	h.clientMu.Lock()
 	h.clients = append(h.clients, ch)
 	h.clientMu.Unlock()
@@ -438,12 +445,29 @@ func (h *Handlers) SSE(w http.ResponseWriter, r *http.Request) {
 		case e := <-ch:
 			// THE TYPE GOES ON THE WIRE. This marshalled e.Data alone, so the
 			// `type` the whole bus is keyed on never reached a browser -- and
-			// App.onEvent, which switches on e.type for eleven different
-			// events, has therefore never fired once. The struct already
-			// carries `json:"type"` and `json:"data"` and the client already
-			// reads e.type; only this line disagreed with both.
-			data, _ := json.Marshal(e)
-			fmt.Fprintf(w, "data: %s\n\n", string(data))
+			// App.onEvent, which switches on e.type for eleven different events,
+			// had therefore never fired once. The struct already carries
+			// `json:"type"` and `json:"data"` and the client already reads
+			// e.type; only this line disagreed with both.
+			//
+			// DRAINED IN BATCHES, FLUSHED ONCE. A flush per event cannot keep up
+			// with a token stream, and a writer that falls behind is exactly what
+			// fills the channel and starts the dropping. Everything already
+			// queued is written before the flush.
+			batch := []event{e}
+			for len(batch) < 256 {
+				select {
+				case more := <-ch:
+					batch = append(batch, more)
+				default:
+					goto write
+				}
+			}
+		write:
+			for _, ev := range batch {
+				data, _ := json.Marshal(ev)
+				fmt.Fprintf(w, "data: %s\n\n", string(data))
+			}
 			flusher.Flush()
 		case <-notify:
 			return

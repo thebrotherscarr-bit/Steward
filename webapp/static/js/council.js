@@ -202,9 +202,16 @@ const Run = {
       // The first line of a turn nobody here started opens a trace to hold it,
       // so the page has somewhere to paint. Marked so the reader can tell a
       // turn it is WATCHING from one it asked for.
+      // ONLY A REAL START OPENS A WATCHED TURN. A first cut opened one on ANY
+      // mirrored event, so the trailing lines of a turn THIS TAB HAD JUST RUN
+      // -- arriving after `running` went false -- opened a second, empty turn
+      // and pushed "(a turn started in another window)" into the runner's own
+      // conversation. The start event is the one carrying the objective;
+      // everything else only feeds a turn already open.
       if (!this.turn || this.turn.ended) {
+        if (!d.objective) return;
         this.turn = {
-          objective: d.objective || '(a turn started in another window)',
+          objective: d.objective,
           answering: false, watching: true,
           events: [], seats: [], tools: [], notes: [],
           answer: '', delivery: null, waiting: null,

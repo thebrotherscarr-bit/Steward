@@ -94,6 +94,7 @@ const Home = {
     this.paintRecent();
     await this.read();
     await this.showKeptBoot();
+    await this.showKeptThread();
     this.watch(true);
   },
 
@@ -305,8 +306,66 @@ const Home = {
       // read those follow it -- a repository card still saying "2 changed"
       // after the commit it just watched is the two halves disagreeing again.
       this.readGit();
-      this.readSittings();
+      // `this.readSittings()` stood here and HAS NOT EXISTED SINCE a014c77,
+      // the pass that took the sittings strip off this page at his markup --
+      // the function went, the call stayed. Every turn since has thrown a
+      // TypeError on this line, silently, killing the rest of the handler. It
+      // cost nothing while it was the last statement; the moment anything was
+      // added after it, that thing simply never ran. Which is exactly how the
+      // kept conversation appeared to work and stored nothing.
+      this.keepThread();
     }
+  },
+
+  // ---- THE CONVERSATION IS KEPT WHERE BOTH BROWSERS CAN READ IT ----------
+  //
+  // His ask was "keep the boot report AND THE RUN TURNS", and mirroring the
+  // live events only did half of it: `Chat.thread` is in-memory per tab and
+  // `Run.turn` is sessionStorage, which is also per tab. So a browser that
+  // reloaded AFTER a turn showed an empty box -- engine card, nothing else --
+  // and that is exactly how he was checking parity: "i have been reloading my
+  // external browser tab every once in a while to watch and see if there is
+  // parity between the two." There never could be. The mirror only ever showed
+  // a turn that ran WHILE a tab was already open.
+  //
+  // WHAT IS KEPT IS WHAT RENDERS: who spoke and what was said. The events,
+  // seats and tokens behind a turn stay in the transcript on disk, which is
+  // the real record; putting them here would push a long run past the store
+  // for nothing anyone reads twice.
+  //
+  // KEYED TO THE SESSION, like the boot report, so one engine's conversation
+  // is never painted under another's.
+  keepThread() {
+    clearTimeout(this._threadSave);
+    this._threadSave = setTimeout(() => {
+      // A COUNCIL BUBBLE'S WORDS ARE IN `turn.answer`, NOT IN `text`. line()
+      // renders from m.turn and leaves m.text empty, so a first cut filtered
+      // on m.text and threw away every answer in the conversation -- keeping
+      // only what HE typed, which is the half nobody needs kept.
+      const said = (Chat.thread || [])
+        .slice(-this.TAIL)
+        .map(m => ({
+          who: m.who,
+          text: m.who === 'him' ? (m.text || '')
+            : ((m.turn && (m.turn.answer || m.turn.refusal)) || m.text || '')
+        }))
+        .filter(m => m.text.trim());
+      if (!said.length) return;
+      API.setSetting('thread.' + (Run.world || 'research'),
+        JSON.stringify({ session: Run.session || '', said })).catch(() => {});
+    }, 600);
+  },
+
+  async showKeptThread() {
+    if ((Chat.thread || []).length) return;      // this tab already has one
+    try {
+      const r = await API.getSetting('thread.' + (Run.world || 'research'));
+      const kept = JSON.parse((r && r.value) || '{}');
+      if (!kept.said || !kept.said.length) return;
+      if (!Run.engineOpen || (kept.session && kept.session !== Run.session)) return;
+      Chat.thread = kept.said.map(m => ({ who: m.who, text: m.text }));
+      this.thread();
+    } catch { /* nothing kept yet */ }
   },
 
   // The clock keeps moving while a seat thinks. Thinking is withheld from the

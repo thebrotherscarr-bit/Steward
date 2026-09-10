@@ -84,6 +84,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   engine. Now written to the settings store, debounced, **keyed to the
   session** so a dead engine's report is never painted over a live one.
 
+- **The conversation is kept, so a reloaded browser is not an empty box.**
+  Mirroring live events was only half of "keep the boot report and the run
+  turns": `Chat.thread` is in-memory per tab and `Run.turn` is sessionStorage,
+  also per tab, so a browser that reloaded AFTER a turn showed the engine card
+  and nothing else. That is exactly how he was checking — "i have been
+  reloading my external browser tab every once in a while to watch and see if
+  there is parity" — and there never could be. The thread now goes to the
+  settings store, keyed to the session, and any browser restores it on load.
+
+- **`onRun` HAS THROWN AT THE END OF EVERY TURN SINCE a014c77.** That pass took
+  the sittings strip off the launchpad at his markup and deleted
+  `Home.readSittings` — but left `this.readSittings()` standing in the turn-end
+  handler. A `TypeError` on every completed turn, silent, killing the rest of
+  the handler. It cost nothing while it was the last statement, and the moment
+  anything was added after it that thing simply never ran: the kept
+  conversation looked correct in every unit and stored nothing at all. Found
+  by asking the live page which of the three calls threw, rather than reasoning
+  about it.
+
+- **A council bubble's words are in `turn.answer`, not `text`.** `line()`
+  renders from `m.turn` and leaves `m.text` empty, so a first cut of the keeper
+  filtered on `m.text` and discarded every answer, keeping only what he typed.
+
+- **Only a real start opens a watched turn.** The mirror opened one on ANY
+  event, so the trailing lines of a turn the tab had just run — arriving after
+  `running` went false — opened a second, empty turn and pushed "(a turn
+  started in another window)" into the runner's own conversation.
+
+- **The broadcast bus was 32 deep and dropping.** `broadcast` drops rather than
+  blocks, which is right — one slow watcher must never hold up a turn — but at
+  32 a council turn's token events made dropping the normal case. 512 deep, and
+  the writer now drains in batches and flushes once instead of flushing per
+  event, which is what let it fall behind in the first place.
+
 ### Note
 - Static assets are compiled into the binary (`//go:embed static/...`), so a
   change under `static/` needs `go build -o atlas-webapp.exe .` and a restart
