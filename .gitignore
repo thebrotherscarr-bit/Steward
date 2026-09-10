@@ -1,0 +1,38 @@
+# atlas keeps its own ignores now.
+#
+# Until the split (2026-09-10) every one of these lines lived in the ground's
+# .gitignore, one directory up, and atlas had no file of its own. The moment
+# atlas became its own repository that file stopped applying to it, and the
+# next `git add -A` here would have committed two .exe binaries, three logs,
+# a server's data directory and the seat log. These lines are carried across
+# unchanged in meaning, rewritten to be relative to this repository's root.
+
+# Build output. The source is 4.5 MB; a cargo build drops a 456 MB target/
+# beside it and `go build` leaves .exe in line/ and webapp/. None of it is
+# source and none of it goes in the record.
+target/
+*.exe
+*.exe~
+*.obj
+
+# The two servers' own stdout. atlas-mcp and atlas-webapp are started by hand,
+# and a doc that tells him to run a command which dirties his repo is a bad
+# doc.
+line/mcp.log
+webapp/web.log
+
+# The webapp's own store. Written at runtime, never authored.
+webapp/data/
+
+# The ledger is written at every open, toll, land and close, so a tracked copy
+# makes the ground DIRTY before he types a word. Operator's ruling 2026-09-08:
+# "dont git track them." It stays on disk as the record; git holds the code and
+# the docs.
+SEAT_LOG.md
+
+# Keys are silent (LAW 9).
+.env
+
+# Fetched, never authored.
+node_modules/
+.venv/
