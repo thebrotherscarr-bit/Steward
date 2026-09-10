@@ -66,6 +66,12 @@ const Run = {
       // next turn, and an alarm over a doc edit would teach him to ignore
       // the one row that matters.
       this.started = r.started || '';
+      // WHAT THIS ENGINE HAS DONE, from the door rather than from this page's
+      // memory. `turn` is whatever THIS tab has seen; it is empty after a
+      // reload, so an engine that ran ten turns an hour ago looked untouched.
+      // The door counts every turn it pumped, so the glass stops guessing.
+      this.runs = r.runs || 0;
+      this.lastRun = r.last_run || '';
       this.stale = !!r.stale;
       this.staleFile = r.stale_file || '';
       this.codeChanged = r.code_changed || '';
@@ -76,6 +82,8 @@ const Run = {
       this.sitting = '';
       this.session = '';
       this.started = '';
+      this.runs = 0;
+      this.lastRun = '';
       this.stale = false;
       this.pending = '';
       this.unreachable = true;

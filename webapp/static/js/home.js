@@ -151,17 +151,33 @@ const Home = {
       // amber only when NOTHING had ever run, which misses the shape the waste
       // actually takes: sitting 74 held an engine thirty minutes for 2 runs,
       // 82 held one fifty-four minutes for 5. Both did work. Both then sat.
-      // What costs the machine is the gap since the last turn, so that is what
-      // is measured -- from `turn.ended` when there is one, from the engine's
-      // own start when there is not.
+      // What costs the machine is the gap since the last turn.
+      //
+      // THE DOOR IS ASKED, NOT THIS PAGE. `Run.turn` is only what THIS tab has
+      // seen, and it is empty after a reload -- an engine that ran ten turns an
+      // hour ago read as untouched. The door counts every turn it pumped, so
+      // `last_run` is the truth and the tab's own memory is only the fallback
+      // for an engine mid-turn.
       //
       // A RUNNING TURN IS NEVER IDLE, however long it takes. This must not
       // scold him for a slow model, only for an engine nobody is using.
-      const since = (Run.turn && Run.turn.ended) || new Date(Run.started).getTime();
+      // AND IT CAN NEVER PREDATE THE ENGINE. A first cut fell back to this
+      // tab's own `turn.ended` when the door reported no runs -- and that
+      // memory survives a reboot, so a THIRTY-EIGHT-SECOND-OLD engine reported
+      // "idle 14m", counting from a turn a previous engine had run. The floor
+      // is this engine's own start: whatever else is true, it cannot have been
+      // idle for longer than it has existed.
+      const born = new Date(Run.started).getTime();
+      const since = Math.max(
+        born,
+        Run.lastRun ? new Date(Run.lastRun).getTime() : 0,
+        (Run.turn && Run.turn.ended) || 0);
       const idleS = Math.floor((Date.now() - since) / 1000);
       const idle = !Run.running && idleS >= 300;
-      const im = Math.floor(idleS / 60);
-      el.textContent = 'open ' + txt + (idle ? ' — idle ' + im + 'm' : '');
+      const n = Run.runs || 0;
+      const ran = n === 1 ? '1 run' : n + ' runs';
+      el.textContent = 'open ' + txt + ' · ' + ran
+        + (idle ? ' — idle ' + Math.floor(idleS / 60) + 'm' : '');
       el.className = idle ? 'eng-idle' : '';
     };
     paint();

@@ -100,6 +100,20 @@ type Engine struct {
 	pending Event
 	closed  atomic.Bool
 	reaped  atomic.Bool
+
+	// WHAT THIS ENGINE HAS ACTUALLY DONE. `Started` alone cannot tell an
+	// engine hard at work from one standing open doing nothing, and the
+	// difference is the most expensive fact in the record: measured across
+	// every sitting the core has logged, a standup gets 69 seconds of engine
+	// time per run while sittings of two runs or fewer get 208 -- 63 of them,
+	// 5.3 engine-hours, 91 runs between them. One held an engine sixteen
+	// minutes for ZERO runs. Nothing on the wire could say so.
+	//
+	// Counted where every turn converges (pump), so Run and Answer both land
+	// here and neither has to remember to. Atomics because /run/state is
+	// served on another goroutine while a turn is mid-flight.
+	runs    atomic.Int64
+	lastRun atomic.Int64 // unix seconds; 0 until the first turn finishes
 }
 
 // ---------------------------------------------------------------------
@@ -328,6 +342,23 @@ func Open(name, ground, coreCmd string) (*Engine, error) {
 	return e, nil
 }
 
+// tick records that a turn finished. Both terminal paths in pump call it, so
+// no caller has to remember.
+func (e *Engine) tick() {
+	e.runs.Add(1)
+	e.lastRun.Store(time.Now().Unix())
+}
+
+// Runs is how many turns this engine has finished, and when the last one did.
+// A zero time means none has.
+func (e *Engine) Runs() (int, time.Time) {
+	n := int(e.runs.Load())
+	if sec := e.lastRun.Load(); sec > 0 {
+		return n, time.Unix(sec, 0)
+	}
+	return n, time.Time{}
+}
+
 func (e *Engine) Opened() Event { return e.opened }
 
 // Pending is the needs_answer a run stopped on, or nil.
@@ -453,7 +484,17 @@ func (e *Engine) Run(objective, feed, method string, sink func(Event)) (Result, 
 	if err := e.send(row); err != nil {
 		return Result{}, err
 	}
-	return e.pump(sink)
+	res, err := e.pump(sink)
+	// A SLASH COMMAND IS THE DOOR'S OWN HOUSEKEEPING, NOT WORK. Booting runs
+	// `/warm` and `/status` through this same path, so counting them meant a
+	// freshly opened engine reported "2 runs" before anyone had asked it
+	// anything -- and "0 runs", the state most worth shouting about, became
+	// unreachable. Counted after pump rather than inside it, because pump
+	// cannot see the objective and only the caller knows what it was.
+	if err == nil && !strings.HasPrefix(strings.TrimSpace(objective), "/") {
+		e.tick()
+	}
+	return res, err
 }
 
 // Answer resumes a run stopped at a needs_answer. This is the operator's hand
@@ -468,7 +509,12 @@ func (e *Engine) Answer(text string, sink func(Event)) (Result, error) {
 		return Result{}, err
 	}
 	e.setPending(nil)
-	return e.pump(sink)
+	// An answer is always his hand crossing the wire; it is never housekeeping.
+	res, err := e.pump(sink)
+	if err == nil {
+		e.tick()
+	}
+	return res, err
 }
 
 // Listen captures one spoken turn through the core's own voice.py -- the

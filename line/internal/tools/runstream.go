@@ -82,6 +82,14 @@ type EngineFacts struct {
 	Stale       bool   `json:"stale"`
 	StaleFile   string `json:"stale_file,omitempty"`
 	CodeChanged string `json:"code_changed,omitempty"`
+	// Runs is how many turns this engine has finished, LastRun when the last
+	// one did. Started alone cannot tell an engine at work from one standing
+	// open doing nothing, and that difference is the most expensive fact in
+	// the record: sittings of two runs or fewer have cost 5.3 engine-hours for
+	// 91 runs, against a standup's 69 seconds per run. LastRun is empty until
+	// the first turn finishes, which is exactly the case worth shouting about.
+	Runs    int    `json:"runs"`
+	LastRun string `json:"last_run,omitempty"`
 }
 
 // EngineOpen reports whether a world has an engine standing, and what it is
@@ -108,6 +116,12 @@ func Facts(t tenant.Tenant) EngineFacts {
 	}
 	if !e.Started.IsZero() {
 		f.Started = e.Started.Format(time.RFC3339)
+	}
+	if n, last := e.Runs(); true {
+		f.Runs = n
+		if !last.IsZero() {
+			f.LastRun = last.Format(time.RFC3339)
+		}
 	}
 	stale, changed, what := e.Stale()
 	f.Stale = stale

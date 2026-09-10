@@ -34,6 +34,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Operator: "we can just add that to the dashboard to view as tasks are
   running in real time, right?"
 
+- **The card counts the turns, from the door.** `/run/state` now carries `runs`
+  and `last_run`; the engine counts every turn it pumps, in `Engine.tick`.
+  Before this the glass used `Run.turn` — only what THIS TAB had seen, empty
+  after a reload — so an engine that had run ten turns read as untouched.
+
+  **A slash command is housekeeping, not work.** Booting sends `/warm` and
+  `/status` through the same path, so a freshly opened engine reported "2 runs"
+  before anyone asked it anything, and **"0 runs" — the state most worth
+  shouting about — was unreachable.** Counted in `Run` after `pump` returns
+  rather than inside `pump`, because pump cannot see the objective and only the
+  caller knows what it was. An `Answer` always counts: that is his hand.
+
+  **Idleness can never predate the engine.** With no runs, the client fell back
+  to its own `turn.ended` — which survives a reboot — and a
+  THIRTY-EIGHT-SECOND-OLD engine reported `idle 14m`, counting from a turn a
+  previous engine had run. The floor is now this engine's own start.
+
+  `internal/engine/engine.go`, `internal/tools/runstream.go`,
+  `static/js/council.js`, `static/js/home.js`.
+
 ### Note
 - Static assets are compiled into the binary (`//go:embed static/...`), so a
   change under `static/` needs `go build -o atlas-webapp.exe .` and a restart
