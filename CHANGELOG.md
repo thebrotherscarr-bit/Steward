@@ -12,6 +12,36 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The gofmt gate repeated the fault it was named after
+
+Its own note, written this morning: *"three files had never been through gofmt
+and nobody knew, because the check that found the first one was scoped to a
+single directory."* It was then written with `working-directory: line`.
+
+SIX FILES IN `webapp/` HAD NEVER BEEN FORMATTED — `db/db.go` and
+`handlers/{flows,prompts,session,team,ws}.go`, untouched since they landed in
+`77162d9` on 2026-09-09 — and the gate could not see one of them, because
+webapp is a separate Go module. Found by running gofmt by hand during a
+function check, not by the gate.
+
+Five were struct-tag alignment and nothing else; their token streams with all
+whitespace removed hash identical before and after. `ws.go` was NOT: gofmt
+1.19 and later read the hanging indent under `Frames out:` as a CODE BLOCK and
+would have reflowed it to a tab and split the label from its own list. That
+comment was reflowed flat by hand instead, so it says the same thing, reads the
+same way, and gofmt now has nothing left to do to it — checked, zero lines.
+
+THE GATE NOW NAMES BOTH MODULES, and deliberately does not just run `gofmt -l .`
+from the root: that walks `target/` and every vendored tree, which is how a
+gate gets slow and then gets deleted. It also reports both before exiting, so
+one run names every offender instead of one per push. A third Go module has to
+be added to that list on the day it is created, and the note in the workflow
+says so.
+
+Proven to bite: an unformatted function was put into `webapp/handlers/team.go`
+and the gate's own script exited 1 naming the file, then the file was restored
+and it exited 0. `go build` and `go vet` clean across both modules.
+
 ### 0.1.3
 
 His word: atlas is 0.1.3. `VERSION` is the single authority — `core/src/version.rs`

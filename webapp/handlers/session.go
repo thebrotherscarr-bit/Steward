@@ -25,10 +25,10 @@ import (
 
 // Session is one login: no secrets, just pointers back to the key.
 type Session struct {
-	Token   string   `json:"token"`
-	Tenant  string   `json:"tenant"`
-	Tenants []string `json:"tenants"`
-	KeyID   string   `json:"key_id"`
+	Token   string    `json:"token"`
+	Tenant  string    `json:"tenant"`
+	Tenants []string  `json:"tenants"`
+	KeyID   string    `json:"key_id"`
 	Expiry  time.Time `json:"expiry"`
 }
 

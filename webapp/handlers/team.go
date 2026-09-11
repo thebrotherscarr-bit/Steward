@@ -46,7 +46,7 @@ func (h *Handlers) TeamHistory(w http.ResponseWriter, r *http.Request) {
 		last = n
 	}
 	text, err := h.rpcCallAs(r, "team_history", map[string]any{
-		"channel": r.URL.Query().Get("channel"),
+		"channel":  r.URL.Query().Get("channel"),
 		"platform": r.URL.Query().Get("platform"), "last": last})
 	if err != nil {
 		jsonErr(w, 502, err.Error())

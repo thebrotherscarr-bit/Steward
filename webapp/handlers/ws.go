@@ -1,11 +1,18 @@
 // WebSocket face (N1): GET /ws speaks RFC 6455 hand-rolled over stdlib —
 // no npm, no Go modules, handshake to frames by hand.
 //
-// Frames in:  {type:"chat.send", session, question, voice?, actor?}
-// Frames out: {type:"chat.token", session, token} as the voice speaks,
-//             {type:"chat.done", session, text} with the receipt,
-//             {type:"chat.error", error} on refusal,
-//             plus every hub broadcast (chat.opened/done, trace/eval/message).
+// Frames in: {type:"chat.send", session, question, voice?, actor?}
+//
+// Frames out: {type:"chat.token", session, token} as the voice speaks, then
+// {type:"chat.done", session, text} with the receipt, or {type:"chat.error",
+// error} on refusal -- plus every hub broadcast (chat.opened/done, and the
+// trace, eval and message events).
+//
+// The hanging indent these four lines used to carry was read by gofmt (1.19
+// and later) as a CODE BLOCK, so it reflowed them to a tab and split the label
+// from its own list. Kept flat on purpose: the comment says the same thing and
+// gofmt has nothing left to do to it.
+//
 // Browsers that cannot speak WS keep the SSE faces; nothing is WS-only.
 package handlers
 

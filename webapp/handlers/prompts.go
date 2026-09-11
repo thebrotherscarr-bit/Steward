@@ -65,10 +65,10 @@ func (h *Handlers) SavePrompt(w http.ResponseWriter, r *http.Request) {
 // RunPrompt proxies prompt_run and announces the measurement.
 func (h *Handlers) RunPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string `json:"name"`
-		Vars    string `json:"vars"`
+		Name    string  `json:"name"`
+		Vars    string  `json:"vars"`
 		Version float64 `json:"version"`
-		Voice   string `json:"voice"`
+		Voice   string  `json:"voice"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, 400, "invalid json")
@@ -92,11 +92,11 @@ func (h *Handlers) RunPrompt(w http.ResponseWriter, r *http.Request) {
 // ComparePrompts proxies prompt_compare.
 func (h *Handlers) ComparePrompts(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string  `json:"name"`
-		VerA    float64 `json:"vera"`
-		VerB    float64 `json:"verb"`
-		Vars    string  `json:"vars"`
-		Voice   string  `json:"voice"`
+		Name  string  `json:"name"`
+		VerA  float64 `json:"vera"`
+		VerB  float64 `json:"verb"`
+		Vars  string  `json:"vars"`
+		Voice string  `json:"voice"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, 400, "invalid json")

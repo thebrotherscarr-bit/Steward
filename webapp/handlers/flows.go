@@ -78,8 +78,8 @@ func (h *Handlers) FlowList(w http.ResponseWriter, r *http.Request) {
 // FlowRun proxies flow_run and announces the verdict.
 func (h *Handlers) FlowRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string `json:"name"`
-		Inputs  string `json:"inputs"`
+		Name    string  `json:"name"`
+		Inputs  string  `json:"inputs"`
 		Version float64 `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

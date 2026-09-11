@@ -65,11 +65,11 @@ type Message struct {
 }
 
 type fileData struct {
-	Traces   []Trace          `json:"traces"`
-	Evals    []Eval           `json:"evals"`
-	Agents   []Agent          `json:"agents"`
-	Msgs     []Message        `json:"messages"`
-	Keys     map[string]string `json:"keys"`
+	Traces []Trace           `json:"traces"`
+	Evals  []Eval            `json:"evals"`
+	Agents []Agent           `json:"agents"`
+	Msgs   []Message         `json:"messages"`
+	Keys   map[string]string `json:"keys"`
 }
 
 func Open(dir string) (*DB, error) {
