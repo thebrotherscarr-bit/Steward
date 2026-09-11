@@ -39,20 +39,15 @@ const Home = {
         </div>
       </div>
 
-      <!-- THE ENGINE FIRST. Nothing below this card runs until one is open --
-           not the box, not the git buttons, not a brief row's action -- and it
-           used to sit three cards down. His word: "move to top of this screen
-           above the chat bar". -->
-      <div class="card" id="home-engine-card">
-        <div class="card-header">
-          <span class="card-title">The engine</span>
-          <span class="flex" id="home-engine-controls"></span>
-        </div>
-        <div id="home-engine"></div>
-        <pre id="home-boot" class="home-boot" hidden></pre>
-      </div>
+      <!-- WHAT THIS BUILD HAS PROVED, FIRST. The scores lived at the top of
+           Records, a page you go to; they answer "is the build sound", which
+           is the question the launchpad should answer before you type into it.
+           Moved here 2026-09-10 at the operator's word. One proofs call,
+           read by App.paintProof, which still paints the estate half on
+           Records. -->
+      <div id="home-proof"></div>
 
-      <div class="card home-box">
+      <div class="card home-box mt-16">
         <div id="home-thread" class="home-thread" hidden></div>
         <form id="home-form" class="chat-form">
           <button class="btn btn-mic" type="button" id="home-mic" title="Speak (local whisper, nothing leaves this machine)">&#127908;</button>
@@ -63,15 +58,38 @@ const Home = {
         <div id="home-block" class="home-block" hidden></div>
       </div>
 
+      <!-- THE RUN, UNDER THE BOX HE TYPED INTO. It was a card on Evals, a page
+           away from the thing that started it. The id stays ev-run so
+           App.paintRun draws it unchanged -- the turn is the same turn, and a
+           second copy of that renderer would be the drift this estate keeps
+           writing docstrings about. -->
+      <div class="card" id="home-run-card">
+        <div class="card-header">
+          <span class="card-title">The run, step by step</span>
+          <span class="flex"><span id="ev-run-state" class="badge">&mdash;</span>
+            <button class="btn btn-sm" id="ev-run-cancel" type="button" hidden>Cancel</button></span>
+        </div>
+        <div id="ev-run" class="chat-log council-log"></div>
+      </div>
+
+      <!-- THE ENGINE, LOWER. It opened the page and crowded it: a card whose
+           whole content is one sentence, above everything you came here to do.
+           It is still above the brief, because nothing below it runs until an
+           engine is open. -->
+      <div class="card" id="home-engine-card">
+        <div class="card-header">
+          <span class="card-title">The engine</span>
+          <span class="flex" id="home-engine-controls"></span>
+        </div>
+        <div id="home-engine"></div>
+        <pre id="home-boot" class="home-boot" hidden></pre>
+      </div>
+
       <div id="home-brief" class="card home-brief"></div>
 
-      <div class="card" id="home-git-card" hidden>
-        <div class="card-header">
-          <span class="card-title">The repository</span>
-          <span class="flex" id="home-git-controls"></span>
-        </div>
-        <div id="home-git"></div>
-      </div>
+      <!-- The repository card MOVED TO FLOWS (2026-09-10): "this needs to go
+           with the other github stuff". Flows already carries the per-world
+           overwatch, so every git surface is now on one page. -->
 
       <div class="card" id="home-recent-card" hidden>
         <div class="card-title">Recent</div>
@@ -92,6 +110,14 @@ const Home = {
     this.thread();
 
     this.paintRecent();
+    // The scores, and the turn's own step-by-step. Both are App's renderers:
+    // one `proofs` read and one `paintRun`, shared with Records and with
+    // whatever else asks -- never a second copy that can drift.
+    App.paintProof('home-proof', 'scores');
+    if (!App._runBound) { Run.on(() => App.paintRun()); App._runBound = true; }
+    App.paintRun();
+    const cancel = document.getElementById('ev-run-cancel');
+    if (cancel) cancel.onclick = () => Run.cancel();
     await this.read();
     await this.showKeptBoot();
     await this.showKeptThread();
@@ -302,10 +328,11 @@ const Home = {
       const input = document.getElementById('home-input');
       if (input) input.focus();      // the loop: he can answer without reaching
       this.paintRecent();
-      // A turn can commit, or open a sitting, or close one. The panels that
-      // read those follow it -- a repository card still saying "2 changed"
-      // after the commit it just watched is the two halves disagreeing again.
-      this.readGit();
+      // A turn can commit, or open a sitting, or close one, and it can turn a
+      // suite green. The panels that read those follow it -- a score still
+      // saying RED after the run that fixed it is the two halves disagreeing.
+      // The repository card moved to Flows and is repainted there.
+      App.paintProof('home-proof', 'scores');
       // `this.readSittings()` stood here and HAS NOT EXISTED SINCE a014c77,
       // the pass that took the sittings strip off this page at his markup --
       // the function went, the call stayed. Every turn since has thrown a
@@ -402,138 +429,11 @@ const Home = {
       (why) => { btn.classList.remove('hot'); this.block(why); toast(why, 'error'); });
   },
 
-  // THE REPOSITORY, as it stands now. Read by the door, not the engine: "is
-  // my tree dirty" is what he asks BEFORE deciding to boot anything, and a
-  // panel that needs an engine to answer it cannot answer it.
-  //
-  // THE ELEMENTS ARE FOUND AFTER THE AWAIT, NEVER BEFORE IT. A first cut
-  // captured all three up top, then asked the door, then wrote into them --
-  // and a route away during that round trip leaves those references pointing
-  // at DETACHED nodes. Writing innerHTML into a detached node SUCCEEDS, which
-  // is what made this hard to see; the throw landed one line later, on
-  // `document.getElementById('git-commit')` returning null because the node
-  // it had just written was no longer in the document. Every navigation away
-  // from Home mid-read threw `Cannot set properties of null (setting
-  // 'onclick')`, and both the 15s poll and every turn-end call this, so it
-  // fired constantly and killed the rest of the handler each time.
-  //
-  // The button lookups are scoped to `bar` for the same reason: querySelector
-  // on the element just written cannot miss, while getElementById can only
-  // find what is still attached.
-  async readGit() {
-    if (!document.getElementById('home-git-card')) return;   // not the live page
-    let g, err;
-    try { g = JSON.parse(await App.tool('git', {})); }
-    catch (e) { err = e; }
-
-    // Re-acquired: the page may have changed while the door was answering.
-    const card = document.getElementById('home-git-card');
-    const box = document.getElementById('home-git');
-    const bar = document.getElementById('home-git-controls');
-    if (!card || !box || !bar) return;
-
-    if (err) {
-      card.hidden = false;
-      box.innerHTML = `<div class="eng-row eng-bad">git could not be read:
-        ${escHtml(err.message || 'refused')}<span class="brief-src">git</span></div>`;
-      bar.innerHTML = '';
-      return;
-    }
-    this._git = g;
-    card.hidden = false;
-
-    if (!g.is_repo) {
-      box.innerHTML = `<div class="eng-row">${escHtml(g.note || 'not a repository')}
-        <span class="brief-src">git</span></div>`;
-      bar.innerHTML = '';
-      return;
-    }
-
-    const rows = [];
-    // GREEN IS SILENCE: clean and level is one line.
-    if (!g.dirty && !g.ahead) {
-      rows.push(`<div class="eng-row"><b>${escHtml(g.branch || '?')}</b>
-        <code>${escHtml(g.head || '')}</code> — clean${g.upstream ? ', level with <code>' +
-        escHtml(g.upstream) + '</code>' : ''}
-        <span class="muted"> · ${escHtml(g.subject || '')} (${escHtml(g.when || '')})</span>
-        <span class="brief-src">git</span></div>`);
-    } else {
-      if (g.dirty) {
-        rows.push(`<div class="eng-row eng-warn"><b>${g.changed} changed, ${g.untracked} untracked</b>
-          on ${escHtml(g.branch || '?')} — uncommitted work
-          <div class="git-files">${(g.files || []).map(escHtml).join('<br>')}</div>
-          <span class="brief-src">git</span></div>`);
-      }
-      if (g.ahead) {
-        rows.push(`<div class="eng-row eng-warn">${g.ahead} commit${g.ahead === 1 ? '' : 's'}
-          ahead of <code>${escHtml(g.upstream || 'the remote')}</code> — landed locally, not pushed
-          <span class="brief-src">git</span></div>`);
-      }
-      if (g.behind) {
-        rows.push(`<div class="eng-row eng-warn">${g.behind} behind <code>${escHtml(g.upstream)}</code>
-          <span class="brief-src">git</span></div>`);
-      }
-    }
-    // THE WALL, named precisely. Being walled and being unauthenticated are
-    // different problems with the same symptom, and telling them apart is the
-    // difference between "set a flag" and "your credentials broke".
-    if (!g.remote_allowed) {
-      rows.push(`<div class="eng-row"><span class="muted">${escHtml(g.remote_note || '')}
-        This is the estate's own wall, not a credentials problem.</span>
-        <span class="brief-src">gitstate.py</span></div>`);
-    }
-    box.innerHTML = rows.join('');
-
-    bar.innerHTML = `<input id="git-msg" class="input git-msg" type="text"
-        placeholder="what changed (optional — the council writes one if you don't)" />
-      <button class="btn btn-sm ${g.dirty ? 'btn-primary' : ''}" id="git-commit"
-        ${g.dirty ? '' : 'disabled'}>Commit</button>
-      <button class="btn btn-sm" id="git-push"
-        ${g.remote_allowed && g.ahead ? '' : 'disabled'}>Push</button>`;
-    const commit = bar.querySelector('#git-commit');
-    const push = bar.querySelector('#git-push');
-    if (!commit || !push) return;
-    commit.onclick = () => this.commit();
-    push.title = !g.remote_allowed
-      ? 'remote operations are walled by MANJUEL_GIT_REMOTE (the estate, not your credentials)'
-      : (g.ahead ? 'push ' + g.ahead + ' commit(s) to ' + (g.upstream || 'the remote')
-                 : 'nothing to push');
-    push.onclick = () => this.push();
-  },
-
-  // Through the council, never around it: the law gate stamps it, the Router
-  // runs git_commit, and the run lands in the record like any other turn. A
-  // button that shelled out to git would be a second write-path past
-  // everything this estate checks.
-  commit() {
-    // HIS OWN PHRASING, from the record: "git commit" appears 36 times in
-    // sessions.jsonl and the estate composes the message from what changed.
-    // The first wrapper here read "Commit the working tree with this message:
-    // X" and the Router passed that WHOLE SENTENCE as the message -- a commit
-    // titled after its own instruction. A quoted message reads the way he
-    // types one, and an empty field falls back to what already works.
-    const msg = (document.getElementById('git-msg') || {}).value || '';
-    this.ask(msg.trim() ? `git commit: "${msg.trim()}"` : 'git commit');
-  },
-
-  push() {
-    const g = this._git || {};
-    if (!g.remote_allowed) {
-      toast('Remote operations are walled by MANJUEL_GIT_REMOTE', 'error');
-      return;
-    }
-    this.ask('Push the committed work to the remote.');
-  },
-
-  // One objective, into the same loop as anything he types.
-  ask(objective) {
-    if (!Run.engineOpen) { toast('No engine is open — boot first', 'error'); return; }
-    if (Run.running) { toast('A turn is already running', 'error'); return; }
-    Chat.thread.push({ who: 'him', text: objective });
-    Chat.thread.push({ who: 'council', text: '', live: true });
-    this.thread();
-    Run.start({ objective });
-  },
+  // THE REPOSITORY MOVED TO FLOWS, 2026-09-10 ("this needs to go with the
+  // other github stuff"). readGit, commit, push and the ask() that carried
+  // them through the council went with it, whole -- Flows already held the
+  // per-world overwatch, so the two git surfaces now sit on one page instead
+  // of one per page.
 
   // THE SITTINGS, read from the record. Every one of them is a real sitting
   // with a toll owed or paid; a run of them with no toll is a thing he can
@@ -778,7 +678,7 @@ const Home = {
     this.readAt = Date.now();       // stamped so the quiet line cannot lie
     this.paint();
     this.paintEngine();
-    this.readGit();
+    App.paintProof('home-proof', 'scores');
   },
 
   bad(v) { return v && typeof v === 'object'; },

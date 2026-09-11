@@ -12,6 +12,35 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The console is rearranged around what you actually look at
+- **The Dashboard opens with the scores.** strokes, smoke, standup, standups run
+  and parity moved off Records, where they were a page you had to go to, and now
+  head the launchpad. They answer *is the build sound* — the question worth
+  answering before you type into the box beneath them.
+- **The run sits under the box that started it.** The step-by-step was a card on
+  Evals, a page away from the thing that produced it. Same renderer, same
+  `ev-run` id — `App.paintRun` draws it unchanged, because a second copy of that
+  renderer is exactly the drift this estate keeps writing docstrings about.
+- **The engine card moved down.** A card whose whole content is one sentence was
+  opening the page and crowding it. Still above the brief, because nothing below
+  it runs until an engine is open.
+- **Every git surface is on one page.** The repository card left the Dashboard
+  for Flows — "this needs to go with the other github stuff" — so the door path
+  (the per-world buttons, no engine needed) and the council path (law gate,
+  recorded run) now sit one above the other. Two ways in, on purpose: *"there is
+  a series of redundancies.. its called safety, bud."*
+- **The flow builder came off.** Registry, editor, SVG graph, fire, resume, the
+  runs table, compare, replay and the town board — all rendered, none ever used.
+  **Nothing behind them was deleted:** the `/api/flows` routes, `flow.go`,
+  `run.go` and their strokes all stand, so a builder is a render away.
+- **Records leads with the documents.** What this ground *carries* is what the
+  page is opened for; the sittings and standups are the history behind it.
+- **Live standups show the last 5 of 33, newest first.** It listed every run ever
+  recorded, oldest first, so the one that mattered — the last — was at the bottom
+  of a table that grew a row every morning. The rest are named in
+  `tests/run_history.jsonl`.
+
+
 ### Added
 - **The Flows page controls git, in your own words.** The overwatch card was
   read-only; it now carries the verbs. Per world: a message box and **Save the

@@ -569,14 +569,10 @@ const App = {
         <div class="page-header">
           <div>
             <div class="page-title">Evaluations</div>
-            <div class="page-subtitle">The last run, whole — then ${evals.length} scored evals, ${passed} passed, ${failed} failed. The suites, the standups and the sittings are on <a href="/records" onclick="event.preventDefault();history.pushState(null,'','/records');App.router();">Records</a>.</div>
+            <div class="page-subtitle">${evals.length} scored evals, ${passed} passed, ${failed} failed. The last run, whole, is on the <a href="/" onclick="event.preventDefault();history.pushState(null,'','/');App.router();">Dashboard</a>; the suites, standups and sittings are on <a href="/records" onclick="event.preventDefault();history.pushState(null,'','/records');App.router();">Records</a>.</div>
           </div>
           <div class="flex"><span id="ev-run-state" class="badge">—</span>
             <button class="btn btn-sm" id="ev-run-cancel" type="button" hidden>Cancel</button></div>
-        </div>
-        <div class="card">
-          <div class="card-title">The run</div>
-          <div id="ev-run" class="chat-log council-log"></div>
         </div>
         <div class="card">
           <div class="card-title">Scored evals <span class="muted">— written by the Add-an-eval flow, not by the suites</span></div>
@@ -741,9 +737,18 @@ const App = {
   // Every card names the file it came from; a world that never ran a suite
   // says so rather than rendering as a zero, because "zero passed" and "never
   // run" are opposite claims.
-  // Paints into whichever box it is given -- it lived on Evals, it lives on
-  // Records now, and the id is the caller's business rather than this one's.
-  async paintProof(boxId) {
+  // Paints into whichever box it is given -- it lived on Evals, then Records,
+  // and the scores now open the Dashboard. The id is the caller's business.
+  //
+  // `only` SPLITS THE TWO HALVES, because they answer different questions and
+  // they belong on different pages now (the operator, 2026-09-10): the SCORES
+  // are "is the build sound", which is the first thing the Dashboard should
+  // say; the ESTATE is "what has sat here", which is the record and stays on
+  // Records. One reader, one `proofs` call, two placements.
+  //   'scores' -- strokes, smoke, standup, standups run, parity
+  //   'estate' -- sittings, tolls, runs, and the live standups table
+  //   omitted  -- both, as before
+  async paintProof(boxId, only) {
     const box = document.getElementById(boxId || 'rec-proof');
     if (!box) return;
     box.innerHTML = '<div class="loading">Reading the record...</div>';
@@ -848,16 +853,30 @@ const App = {
         </div></div>`;
     }
 
-    box.innerHTML = estate + `<div class="stats">${cards.join('')}</div>` +
-      (runs.length ? `<div class="card"><div class="card-title">Live standups
-        <span class="muted">— every run on record, oldest first</span></div>
+    // THE NEWEST FIVE, not all thirty-three. This ran every live standup ever
+    // recorded, oldest first, so the run that matters — the last one — sat at
+    // the bottom of a table that grew a row every morning. Five, newest first,
+    // matching the sittings table above it.
+    const RECENT = 5;
+    const shown = runs.slice(-RECENT).reverse();
+    const older = runs.length - shown.length;
+    const standups = runs.length ? `<div class="card"><div class="card-title">Live standups
+        <span class="muted">— the last ${shown.length} of ${runs.length}, newest first</span></div>
         <div class="table-wrap"><table><thead><tr><th>when</th><th>score</th><th>failed</th><th>report</th></tr></thead><tbody>` +
-        runs.map(r => `<tr>
+        shown.map(r => `<tr>
           <td>${escHtml(when(r.at))}</td>
           <td><span class="badge ${r.green ? 'badge-green' : 'badge-red'}">${r.passed}/${r.total}</span></td>
           <td>${(r.failed || []).length ? escHtml((r.failed || []).join(', ')) : '<span class="muted">—</span>'}</td>
           <td><code>${escHtml(r.report || '')}</code></td></tr>`).join('') +
-        `</tbody></table></div></div>` : '');
+        `</tbody></table>` +
+        (older ? `<div class="stat-note" style="margin-top:10px">${older} earlier
+           run${older === 1 ? '' : 's'} are in <code>tests/run_history.jsonl</code>.</div>` : '') +
+        `</div>` : '';
+
+    const scores = `<div class="stats">${cards.join('')}</div>`;
+    box.innerHTML = only === 'scores' ? scores
+                  : only === 'estate' ? estate + standups
+                  : estate + scores + standups;
   },
 
   // === RECORDS ===
@@ -871,8 +890,7 @@ const App = {
           <div class="page-subtitle">What was proven, what sat, and what this ground carries — read from the record, never counted here</div>
         </div>
       </div>
-      <div id="rec-proof"></div>
-      <div class="card mt-16">
+      <div class="card">
         <div class="card-title">The documents</div>
         <!-- The kinds get their own line and WRAP. In the header they were one
              unwrapping flex row 621px wide inside a narrower card, so "skills"
@@ -881,9 +899,14 @@ const App = {
         <div class="flex" id="rec-kinds" style="flex-wrap:wrap;gap:6px;margin:8px 0 12px"></div>
         <div id="rec-list"><div class="loading">Reading what this ground carries...</div></div>
       </div>
-      <div id="rec-doc"></div>`;
-    this.paintProof('rec-proof');
+      <div id="rec-doc"></div>
+      <div id="rec-proof" class="mt-16"></div>`;
+    // THE DOCUMENTS OPEN THE PAGE (the operator, 2026-09-10). What this ground
+    // CARRIES is the question Records is opened to answer; the sittings and the
+    // standups are the history behind it, and they read better after. The
+    // SCORES that used to head this page moved to the Dashboard entirely.
     this.paintDocs();
+    this.paintProof('rec-proof', 'estate');
   },
 
   // The docs, by kind. `records` sorts them; this page only draws the sections
