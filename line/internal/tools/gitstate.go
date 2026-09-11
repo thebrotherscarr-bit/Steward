@@ -146,15 +146,40 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 // variable always wins over a line in .env. The CHAINKIT_ twin is honoured the
 // way manjuel/__init__.py carries it.
 //
+// THE WALL IS THE ESTATE'S, NOT ONE REPOSITORY'S. A carried tenant has its own
+// Home but not its own .env: the flag lives once, in the ground the operator
+// opened. Reading only <Home>/.env made the panel tell him two different
+// stories about one ruling -- research "Sending allowed" and atlas "Sending
+// OFF" side by side -- when the only difference between them was that
+// Research\.env exists and Research\atlas\.env does not. He did not shut a
+// wall for atlas; atlas was looking in the wrong place.
+//
+// ONE LEVEL UP, AND NO FURTHER. That bound is not invented here: it is the
+// door's own ground law from main.go ("one level up, one level across; the
+// attic is skipped"). A tenant sees its ground's .env and stops. Walking to
+// the filesystem root would leave the ground, which RULE 1 forbids -- and a
+// stray .env in Desktop\ must never be able to open this estate's wall.
+//
 // RULE 7: one key is looked up and a boolean comes back. No value is returned,
 // logged, or put anywhere it could be printed.
 func dial(home, name string) bool {
-	for _, name := range []string{"MANJUEL_" + name, "CHAINKIT_" + name} {
-		if truthy(os.Getenv(name)) {
+	for _, env := range []string{"MANJUEL_" + name, "CHAINKIT_" + name} {
+		if truthy(os.Getenv(env)) {
 			return true
 		}
 	}
-	b, err := os.ReadFile(filepath.Join(home, ".env"))
+	for _, dir := range []string{home, filepath.Dir(home)} {
+		if envFileSays(filepath.Join(dir, ".env"), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// envFileSays reads one dial out of one .env. Absent file, absent key and
+// absent value all answer the same way: not open.
+func envFileSays(path, name string) bool {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}

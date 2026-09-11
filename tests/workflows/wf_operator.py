@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from _mcp_client import call, is_online
 
 PROJECT = "atlas"
-VERSION = "0.1.1+f1"
+VERSION = "0.1.2"
 
 def main():
     print("=== OPERATOR WORKFLOW ===\n")

@@ -1,6 +1,6 @@
 # ATLAS Acceptance Criteria
 
-**Version:** 0.1.1+f1
+**Version:** 0.1.2
 
 ---
 
@@ -9,7 +9,7 @@
 ### SPINE (Rust Core)
 - [ ] `cargo build --workspace` exits 0
 - [ ] `cargo test --workspace` passes 85+ tests
-- [ ] `atlas --version` prints `0.1.1+f1`
+- [ ] `atlas --version` prints `0.1.2`
 - [ ] `atlas chain verify` returns INTACT on lawful chain
 - [ ] `atlas chain recognize` identifies form
 - [ ] `atlas db init` creates database
@@ -25,11 +25,11 @@
 - [ ] `go vet ./...` clean
 - [ ] `go test ./...` passes 92+ tests
 - [ ] `atlas-mcp --describe` lists 72 tools
-- [ ] `atlas-mcp --version` prints `0.1.1+f1`
+- [ ] `atlas-mcp --version` prints `0.1.2`
 - [ ] `atlas-mcp --prove` 58 strokes PASS
 - [ ] `atlas-town --prove` 11 strokes PASS
 - [ ] `atlas-door --prove` 13 strokes PASS
-- [ ] `atlas-tui --version` prints `atlas-tui 0.1.1+f1`
+- [ ] `atlas-tui --version` prints `atlas-tui 0.1.2`
 
 ### GOLDEN (Python)
 - [ ] All 17 cutters `--verify` byte-identical
@@ -66,7 +66,7 @@
 - [ ] Build exits 0
 - [ ] `go vet` clean
 - [ ] Health endpoint returns status ok
-- [ ] Version matches 0.1.1+f1
+- [ ] Version matches 0.1.2
 - [ ] List agents returns >= 40
 - [ ] Get agent returns agent detail
 - [ ] Add trace returns hash
@@ -134,7 +134,7 @@
 - [ ] All 6 pipelines PASS
 - [ ] All 84 scenarios PASS
 - [ ] All 38 workflow steps PASS
-- [ ] VERSION = 0.1.1+f1 in all 6 files
+- [ ] VERSION = 0.1.2 in all 6 files
 - [ ] All 6 binaries version-pinned
 - [ ] Git clean (no uncommitted changes)
 - [ ] DELIVERABLE.md present

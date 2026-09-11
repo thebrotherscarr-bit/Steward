@@ -405,17 +405,38 @@ const Home = {
   // THE REPOSITORY, as it stands now. Read by the door, not the engine: "is
   // my tree dirty" is what he asks BEFORE deciding to boot anything, and a
   // panel that needs an engine to answer it cannot answer it.
+  //
+  // THE ELEMENTS ARE FOUND AFTER THE AWAIT, NEVER BEFORE IT. A first cut
+  // captured all three up top, then asked the door, then wrote into them --
+  // and a route away during that round trip leaves those references pointing
+  // at DETACHED nodes. Writing innerHTML into a detached node SUCCEEDS, which
+  // is what made this hard to see; the throw landed one line later, on
+  // `document.getElementById('git-commit')` returning null because the node
+  // it had just written was no longer in the document. Every navigation away
+  // from Home mid-read threw `Cannot set properties of null (setting
+  // 'onclick')`, and both the 15s poll and every turn-end call this, so it
+  // fired constantly and killed the rest of the handler each time.
+  //
+  // The button lookups are scoped to `bar` for the same reason: querySelector
+  // on the element just written cannot miss, while getElementById can only
+  // find what is still attached.
   async readGit() {
+    if (!document.getElementById('home-git-card')) return;   // not the live page
+    let g, err;
+    try { g = JSON.parse(await App.tool('git', {})); }
+    catch (e) { err = e; }
+
+    // Re-acquired: the page may have changed while the door was answering.
     const card = document.getElementById('home-git-card');
     const box = document.getElementById('home-git');
     const bar = document.getElementById('home-git-controls');
-    if (!card || !box) return;
-    let g;
-    try { g = JSON.parse(await App.tool('git', {})); }
-    catch (e) {
+    if (!card || !box || !bar) return;
+
+    if (err) {
       card.hidden = false;
       box.innerHTML = `<div class="eng-row eng-bad">git could not be read:
-        ${escHtml(e.message || 'refused')}<span class="brief-src">git</span></div>`;
+        ${escHtml(err.message || 'refused')}<span class="brief-src">git</span></div>`;
+      bar.innerHTML = '';
       return;
     }
     this._git = g;
@@ -469,8 +490,10 @@ const Home = {
         ${g.dirty ? '' : 'disabled'}>Commit</button>
       <button class="btn btn-sm" id="git-push"
         ${g.remote_allowed && g.ahead ? '' : 'disabled'}>Push</button>`;
-    document.getElementById('git-commit').onclick = () => this.commit();
-    const push = document.getElementById('git-push');
+    const commit = bar.querySelector('#git-commit');
+    const push = bar.querySelector('#git-push');
+    if (!commit || !push) return;
+    commit.onclick = () => this.commit();
     push.title = !g.remote_allowed
       ? 'remote operations are walled by MANJUEL_GIT_REMOTE (the estate, not your credentials)'
       : (g.ahead ? 'push ' + g.ahead + ' commit(s) to ' + (g.upstream || 'the remote')

@@ -4,7 +4,114 @@ All notable changes to ATLAS will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+Versions are plain semver from 0.1.2 on. Through 0.1.1 they carried a build
+tag naming the stone that cut them — `0.1.0+a1` through `0.1.1+f1`. The
+operator struck the moniker 2026-09-10: *"remove the moniker for the stones,
+no letters in my versions."* Released headers below keep the tag they shipped
+under, because they are the record of what happened.
+
 ## [Unreleased]
+
+### Added
+- **The Flows page controls git, in your own words.** The overwatch card was
+  read-only; it now carries the verbs. Per world: a message box and **Save the
+  work**, **Send to GitHub**, **Take from GitHub**, and **Lines of work** —
+  which lists every branch as *you are here · the main line · on GitHub*, and
+  opens, moves to, or finishes with one. A button that cannot work is greyed
+  out **with the reason in its tooltip**, so it says why before it is pressed
+  rather than after.
+
+  Five new door tools behind it (`internal/tools/gitctl.go`, split from
+  `gitstate.go` because that file's own header promises "REMOTE OPERATIONS ARE
+  REPORTED, NEVER PERFORMED" and a file must not quietly stop meaning what it
+  says at the top): `git_commit`, `git_push`, `git_pull`, `git_branch`,
+  `git_remote`. Every one closes its child's stdin, jails paths to the
+  tenant's Home, and reads the remote wall without ever opening it.
+
+  **Nothing here fires on its own.** RULE 6 is untouched: these are the
+  buttons on the operator's glass and the hand on the button is his.
+
+  **Plain git, not `gh`.** The GitHub CLI is free, open source, installed and
+  authenticated on this machine, and it still does not go in: RULE 4 walls
+  anything needing someone else's server "even when the remote thing is
+  better, free, or open source", and atlas law 6 is hand-roll or refuse.
+  Everything named — branches, mains, open and closed, sending — is plain git.
+  What `gh` alone would add is GitHub-side objects (pull requests, issues,
+  releases, CI runs): a wall to open deliberately, not a dependency to acquire
+  by accident.
+
+- **`internal/tools` has strokes for the first time.** 19 of them
+  (`gitctl_test.go`), on the package that carries every MCP tool handler and
+  was named the estate's biggest hole in `tests/PROVING.md` that morning.
+  Hermetic by law 5: each builds its own repository in `t.TempDir()`, none
+  touches the record, none reaches a network — the two about sending prove the
+  *refusal*, which is the only half provable without one.
+
+### Fixed
+- **The wall is the estate's, not one repository's.** The panel told the
+  operator two different stories about one ruling — `research` "Sending
+  allowed" and `atlas` "Sending OFF" side by side — because `dial()` read only
+  `<Home>/.env`, and a carried tenant has no `.env` of its own. He had not
+  shut a wall for atlas; atlas was looking in the wrong place. `dial()` now
+  reads one level up, and that bound is not invented: it is the door's own
+  ground law from `main.go` ("one level up, one level across"). It stops
+  there, because walking to the filesystem root would leave the ground
+  (RULE 1) and a stray `.env` in `Desktop\` must never open this estate's wall.
+
+- **`readGit()` threw on every navigation away from the dashboard.** It
+  captured `home-git-card`, `home-git` and `home-git-controls`, *then* awaited
+  the door. A route away during that round trip left all three pointing at
+  detached nodes — and writing `innerHTML` into a detached node SUCCEEDS,
+  which is what hid it; the throw landed one line later on
+  `document.getElementById('git-commit')` returning null. Both the 15-second
+  poll and every turn-end call it, so it fired constantly and killed the rest
+  of the handler each time. The elements are re-acquired after the await and
+  the buttons are found through the bar, not the document.
+
+- **The door was started without `--atlas-bin`, so nothing could reach the
+  spine.** `verify_chain` answered `exec: "atlas": executable file not found
+  in %PATH%`, which is what put three of the six workflows in the red.
+  `atlas-mcp` defaults the flag to the bare string `"atlas"` and does none of
+  the built-tree lookup `atlas-door` does. Relaunched with it;
+  `verify_chain` now answers `verdict=INTACT`. The code default is still a
+  trap and is written up as a ruling in `tests/PROVING.md`.
+
+- **The door's `--manjuel` had been mangled into an error.** `mcp.err` held
+  `refused: "C:/.../manjuel.py" is not a landed command` — the `python `
+  prefix was lost by a PowerShell `-ArgumentList` earlier the same day, so the
+  council engine was never wired. Restarted correctly; `mcp.err` now carries
+  only its startup notes.
+
+- **`tests/e2e/_start_mcp.ps1` pointed at the wrong tree.** All three of its
+  lines named `C:\Users\novad\Desktop\Archive\atlas` — the pre-split copy,
+  outside the ground RULE 1 fences, which nobody edits. A suite started
+  against it would have proven a repository no one was changing. Every path
+  now derives from the script's own location.
+
+## [0.1.2] — 2026-09-10
+
+### Changed
+- **The stone moniker is struck from the version.** `0.1.1+f1` → `0.1.2`, in
+  all fourteen places it was pinned: the six `VERSION` files, `Cargo.toml`,
+  `core/src/version.rs`, both Go `main.go`s, both webapp handlers, and the two
+  test harnesses. The stones are still named where they belong — THE_ROAD,
+  STATE_OF_BUILD, the released CHANGELOG headers — but the version is now only
+  what the thing IS, not which sitting cut it.
+
+  **The drift catcher was inverted, not deleted.** `core/src/version.rs`'s
+  tests used to REQUIRE a `+` and a stone; they now REFUSE one, so the
+  moniker cannot creep back unnoticed. And `version.ps1` — the canonical
+  bumper — was force-appending a stone in `Format-Version` and defaulting a
+  stoneless version to `"f1"` in `Parse-Version`, so the very next
+  `bump patch` would have quietly rewritten `0.1.2` as `0.1.2+f1` and
+  re-broken every pin. The stone is gone from it entirely and it now refuses a
+  version carrying one. Same trap as the flow cutter, one file over.
+
+  **The prove battery caught what grep missed.** Five `VERSION` files under
+  `line/` carry no extension, so the first sweep walked past all of them; the
+  Rust spine's `version-cross` stroke named every one by path on the next run.
+  `version.ps1` now says out loud that its six files are not the only pins and
+  points at `tests/prove.py` for the rest.
 
 ### Added
 - **The engine card says how long it has been standing, and when it is idle.**

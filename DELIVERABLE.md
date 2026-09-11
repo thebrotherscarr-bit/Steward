@@ -1,7 +1,7 @@
-# ATLAS 0.1.1+f1 — Deliverable
+# ATLAS 0.1.2 — Deliverable
 
 **Date:** 2026-09-08
-**Version:** 0.1.1+f1
+**Version:** 0.1.2
 **Covenant:** 1512741580b7239b
 **License:** MIT
 
@@ -23,12 +23,12 @@
 
 | Binary | Language | Version | Status |
 |---|---|---|---|
-| `atlas` | Rust | 0.1.1+f1 | PASS |
-| `atlas-mcp` | Go | 0.1.1+f1 | PASS |
-| `atlas-tui` | Go | 0.1.1+f1 | PASS |
-| `atlas-town` | Go | 0.1.1+f1 | PASS |
-| `atlas-door` | Go | 0.1.1+f1 | PASS |
-| `atlas-webapp` | Go | 0.1.1+f1 | PASS |
+| `atlas` | Rust | 0.1.2 | PASS |
+| `atlas-mcp` | Go | 0.1.2 | PASS |
+| `atlas-tui` | Go | 0.1.2 | PASS |
+| `atlas-town` | Go | 0.1.2 | PASS |
+| `atlas-door` | Go | 0.1.2 | PASS |
+| `atlas-webapp` | Go | 0.1.2 | PASS |
 
 ## MCP Tool Surface (72 tools)
 
@@ -228,7 +228,7 @@ atlas/
 ├── LICENSE
 ├── README.md
 ├── SECURITY.md
-├── VERSION                0.1.1+f1
+├── VERSION                0.1.2
 ├── prove.ps1              Local prove suite
 ├── version.ps1            Version management
 └── release.ps1            Release automation

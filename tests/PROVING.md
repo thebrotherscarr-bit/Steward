@@ -102,16 +102,23 @@ never a pass.
 
 ---
 
-## The real gap: 17 packages carry no prover
+## The real gap: 16 packages carry no prover
 
-`go test ./...` says `[no test files]` seventeen times. That is not an
-absence — it is untested code.
+`go test ./...` says `[no test files]` sixteen times. That is not an absence
+— it is untested code.
 
-**THE LINE (9):**
+**`internal/tools` came off this list on 2026-09-10** with 19 strokes
+(`gitctl_test.go`) — the wall's one-level-up reading and its bound, branch
+names that would become flags, path jailing, credential-free remote hosts,
+saves that refuse without a message, sending and fetching that refuse by
+name through a shut wall, and a line of work that refuses to be closed while
+it holds work found nowhere else. Every one is hermetic: its own repository
+in `t.TempDir()`, nothing touching the record, no network.
+
+**THE LINE (8):**
 
 | Package | Why it matters |
 |---|---|
-| `internal/tools` | **the biggest hole.** Every MCP tool handler lives here — `git`, `git_cycle`, `git_diff`, `muster`, `remember`, the wall checks. 6 source files, 0 strokes. |
 | `internal/tenant` | the multi-tenancy law (law 8): every call names its ground, strangers refused by name |
 | `internal/rbac` | who may do what |
 | `internal/protocol` | the wire shape |
@@ -124,11 +131,14 @@ absence — it is untested code.
 `search`, `server`, `traces` — only `handlers` has a prover.
 
 Ranked by what would hurt most if it broke silently:
-1. `internal/tools` — the tools are the product surface
-2. `internal/tenant` — a leak here crosses projects
-3. `internal/rbac` — a leak here crosses permissions
-4. `webapp/db` — the face's persistence
-5. the rest
+1. `internal/tenant` — a leak here crosses projects
+2. `internal/rbac` — a leak here crosses permissions
+3. `webapp/db` — the face's persistence
+4. the rest
+
+`internal/tools` still has only its git verbs covered — the other five files
+(`records`, `proofs`, `seats`, `runstream`, and the bulk of `tools.go`) carry
+no strokes yet.
 
 ---
 
@@ -188,9 +198,9 @@ BALL exists.
 `25 held · 15 absent · 4 broke`. The four are two root causes, and **neither
 is a broken test** — both are the system telling the truth about itself.
 
-### The live door cannot reach the Rust spine (3 reds)
+### The live door could not reach the Rust spine (3 reds) — FIXED IN THE LAUNCH
 
-`wf_town`, `wf_steward` and `wf_operator` all fail on the same step:
+`wf_town`, `wf_steward` and `wf_operator` all failed on the same step:
 
 ```
 verify_chain: FAIL — exec: "atlas": executable file not found in %PATH%
@@ -199,14 +209,18 @@ verify_chain: FAIL — exec: "atlas": executable file not found in %PATH%
 `line/cmd/atlas-mcp/main.go:54` defaults `--atlas-bin` to the bare string
 `"atlas"`. The door's own `findAtlas()` (`cmd/atlas-door/door.go:33`) walks
 up to four levels looking for `target/debug/atlas`, and falls back to
-`ATLAS_BIN` and `PATH` before that. **THE LINE does neither.** So unless
-the operator passes `--atlas-bin` or puts the binary on PATH, every tool
-that shells the spine — `verify_chain` among them — refuses.
+`ATLAS_BIN` and `PATH` before that. **THE LINE does neither.** So unless the
+launch passes `--atlas-bin`, every tool that shells the spine refuses.
 
-Fix is a ruling, not a patch: either `atlas-mcp` grows the same built-tree
-walk the door already has, or the launch always passes `--atlas-bin`. The
-first is one small function and makes the two binaries agree; the second
-leaves a trap for the next hand.
+The door was relaunched with `--atlas-bin` and `verify_chain` now answers
+`verdict=INTACT`. `tests/e2e/_start_mcp.ps1` carries the flag too, with the
+reason written beside it.
+
+**The code default is still a trap**, and that part is a ruling, not a patch:
+either `atlas-mcp` grows the same built-tree walk `atlas-door` already has —
+one small function, and the two binaries stop disagreeing — or every launch
+recipe must remember the flag forever. RUNBOOK's own start line still does
+not carry it.
 
 ### E2E layer 7 tests a directory that no longer exists (1 red)
 

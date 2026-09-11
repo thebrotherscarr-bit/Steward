@@ -1,6 +1,6 @@
 # ATLAS 6 Agent Workflows
 
-**Version:** 0.1.1+f1
+**Version:** 0.1.2
 **Ollama Backend:** 127.0.0.1:11434
 
 ---
@@ -405,7 +405,7 @@ def operator_workflow(mcp_url, project="atlas"):
         ("verify_chain", {"project": project}, "INTACT"),
         ("mesh_enroll", {"project": project, "actor": "operator"}, None),
         ("mesh_post", {"project": project, "actor": "operator",
-                        "channel": "releases", "text": "release candidate 0.1.1+f1"}, None),
+                        "channel": "releases", "text": "release candidate 0.1.2"}, None),
         ("mesh_chain", {"project": project}, "INTACT"),
         ("read_handoffs", {"project": project}, "sha256"),
         ("state_matrix", {"project": project}, "fold"),

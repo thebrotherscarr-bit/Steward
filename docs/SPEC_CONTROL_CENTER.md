@@ -69,7 +69,7 @@ the ENTIRE webapp/gui end of this thing … there will be a merger at some
 point."*
 
 **atlas** (`Desktop\Archive\atlas`, Rust · Go · C++ · TS, zero external
-deps, `0.1.1+f1`). The provenance spine: SHA-256, canon, Manjuel verdicts
+deps, `0.1.2`). The provenance spine: SHA-256, canon, Manjuel verdicts
 (`EMPTY|INTACT|FLIP|TAMPER`), Merkle, covenant, a SQLite mirror where
 `state = fold(record)`, and THE LINE — a multi-tenant MCP server (**62**
 tools, `:8090`) carrying every project by name. Around it: `atlas-town`,

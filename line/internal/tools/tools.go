@@ -238,6 +238,44 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 		Fn:          toolGitDiff,
 	})
 
+	// The verbs that CHANGE a repository (gitctl.go). Nothing here fires on
+	// its own: these are the buttons on the operator's glass, and RULE 6
+	// leaves the hand on the button his.
+	r.add(Tool{
+		Name: "git_commit", Writes: true,
+		Description: "save this world's work: stages everything (or only the files named, one per line) and records it under a message you write",
+		Args:        []string{"message", "files?", "project?"},
+		Fn:          toolGitCommit,
+	})
+
+	r.add(Tool{
+		Name: "git_push", Writes: true,
+		Description: "send saved work to the remote; refuses by name while the estate's wall is shut, and says so when it binds a branch to origin for the first time",
+		Args:        []string{"project?"},
+		Fn:          toolGitPush,
+	})
+
+	r.add(Tool{
+		Name: "git_pull", Writes: true,
+		Description: "fetch and catch up, fast-forward only; refuses over unsaved work, and refuses to join two histories that both moved",
+		Args:        []string{"project?"},
+		Fn:          toolGitPull,
+	})
+
+	r.add(Tool{
+		Name: "git_branch", Writes: true,
+		Description: "the lines of work: list them (which one you are on, which is the main line, which have been sent), or open, switch to, or close one",
+		Args:        []string{"action?", "name?", "project?"},
+		Fn:          toolGitBranch,
+	})
+
+	r.add(Tool{
+		Name: "git_remote", Writes: false,
+		Description: "where this world sends: each remote by name, its host, and whether the estate's wall is open",
+		Args:        []string{"project?"},
+		Fn:          toolGitRemote,
+	})
+
 	r.add(Tool{
 		Name: "records", Writes: false,
 		Description: "the estate's own documents sorted by what they are (doctrine, record, spec, agents, commands, skills, logs); a kind listed, or one document served whole with a sha256 receipt",

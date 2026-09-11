@@ -3,14 +3,19 @@
 // as waterfalls. Gates pause for the hand — continue|stop, never more.
 const Flows = {
   current: null,
+  // Which worlds have their lines-of-work panel open. Kept here and not in
+  // the DOM: repos() rebuilds every node in that card.
+  open: {},
 
   async render(el) {
     el.innerHTML = `
       <div class="page-header"><div><div class="page-title">Flows</div>
       <div class="page-subtitle">DAGs with gates — branches declare, the queue runs one by one</div></div></div>
-      <div class="card"><div class="card-title">The repositories — what is saved, and what is not</div>
+      <div class="card"><div class="card-title">The repositories — what is saved, what is not, and what you can do about it</div>
         <div id="repo-watch"><div class="loading">Reading both grounds...</div></div>
-        <div class="muted mt-16">Read-only. Nothing here commits, sends or fetches.</div>
+        <div class="muted mt-16">Every button here is your hand, not the machine's.
+        Nothing fires on its own, nothing sends while the wall is shut, and
+        nothing is thrown away without saying so first.</div>
       </div>
       <div class="grid-2 mt-16">
         <div class="card"><div class="card-title">Registry</div>
@@ -154,13 +159,156 @@ const Flows = {
       }).join('');
       cards.push(`<div class="mt-16"><b>${escHtml(w)}</b>`
         + `<table style="margin-top:6px">${rows}</table>`
+        + this.controls(w, g)
         + (files ? `<div class="mt-16">${files}</div>` : '')
+        + `<div id="lines-${escHtml(w)}"></div>`
         + `</div>`);
     }
     box.innerHTML = cards.join('') + '<div id="repo-diff"></div>';
     box.querySelectorAll('.repo-file').forEach(d => {
       d.onclick = () => this.diff(d.dataset.w, d.dataset.f);
     });
+    box.querySelectorAll('[data-act]').forEach(b => {
+      b.onclick = () => this.act(b.dataset.act, b.dataset.w);
+    });
+    for (const w of worlds) this.lines(w);
+  },
+
+  // THE BUTTONS. Each one is a door tool, and each tool refuses in words the
+  // moment it should -- a save with no message, a send through a shut wall, a
+  // switch over unsaved work. The glass does not re-judge any of that; it
+  // shows the refusal. The one thing it DOES decide is what to grey out, so a
+  // button that cannot work says why before it is pressed rather than after.
+  controls(w, g) {
+    const q = escHtml(w);
+    const walled = !g.remote_allowed;
+    const nothingToSend = !g.ahead;
+
+    const sendWhy = walled
+      ? 'Sending is OFF — the estate wall (MANJUEL_GIT_REMOTE) is shut'
+      : nothingToSend ? 'Nothing to send — GitHub already has every save here'
+        : `Send ${g.ahead} save${g.ahead === 1 ? '' : 's'} to GitHub`;
+    const fetchWhy = walled
+      ? 'Fetching is OFF — the estate wall (MANJUEL_GIT_REMOTE) is shut'
+      : g.dirty ? 'There is unsaved work here — save it first'
+        : !g.behind ? 'Nothing to fetch — you already have every save on GitHub'
+          : `Take the ${g.behind} save${g.behind === 1 ? '' : 's'} GitHub has`;
+
+    return `<div class="mt-16">
+      <input type="text" id="msg-${q}" placeholder="say what this save is, in your own words" />
+      <div class="flex">
+        <button class="btn btn-sm" data-act="save" data-w="${q}"
+          title="Save every change in this world under the message above">Save the work</button>
+        <button class="btn btn-sm" data-act="send" data-w="${q}"
+          ${walled || nothingToSend ? 'disabled' : ''} title="${escHtml(sendWhy)}">Send to GitHub</button>
+        <button class="btn btn-sm" data-act="fetch" data-w="${q}"
+          ${walled || g.dirty || !g.behind ? 'disabled' : ''} title="${escHtml(fetchWhy)}">Take from GitHub</button>
+        <button class="btn btn-sm" data-act="lines" data-w="${q}"
+          title="The lines of work in this world">Lines of work</button>
+      </div>
+      <div id="out-${q}" class="muted"></div>
+    </div>`;
+  },
+
+  // ACTING. One place, so every button reports the same way: the tool's own
+  // words, verbatim, and then a re-read of the world so the panel never shows
+  // a state the ground has already left.
+  //
+  // THE ANSWER OUTLIVES THE REFRESH. repos() rebuilds this whole card, which
+  // destroys the element the answer was just written into -- so the text is
+  // held, the card is rebuilt, and only then is it put back. A first cut said
+  // it and then wiped it half a second later, which reads exactly like the
+  // button doing nothing.
+  async act(what, w) {
+    const say = t => {
+      const out = document.getElementById('out-' + w);
+      if (out) out.innerHTML = `<pre>${escHtml(t)}</pre>`;
+    };
+    let answer;
+    try {
+      if (what === 'save') {
+        const box = document.getElementById('msg-' + w);
+        const msg = (box && box.value || '').trim();
+        if (!msg) { say('Say what the save is first — the message is the record of why.'); return; }
+        say('Saving...');
+        answer = await App.tool('git_commit', { project: w, message: msg });
+      } else if (what === 'send') {
+        say('Sending...');
+        answer = await App.tool('git_push', { project: w });
+      } else if (what === 'fetch') {
+        say('Fetching...');
+        answer = await App.tool('git_pull', { project: w });
+      } else if (what === 'lines') {
+        this.open[w] = !this.open[w];
+        await this.lines(w);
+        return;
+      }
+    } catch (e) { say('Refused: ' + e.message); return; }
+    await this.repos();
+    say(answer);
+  },
+
+  // THE LINES OF WORK. A branch is a line of work, main is the main line,
+  // opening one is starting it and closing one is finishing with it. The
+  // words are the operator's; the jargon stays on the far side of the wire.
+  //
+  // WHICH WORLDS ARE OPEN IS REMEMBERED ON THE OBJECT, not on the element.
+  // repos() replaces every node in this card, so a flag stored in the DOM is
+  // erased by the very refresh that follows each action -- the panel would
+  // slam shut every time you used it.
+  async lines(w) {
+    const box = document.getElementById('lines-' + w);
+    if (!box) return;
+    if (!this.open[w]) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="loading">Reading the lines...</div>';
+    let d;
+    try { d = JSON.parse(await App.tool('git_branch', { project: w, action: 'list' })); }
+    catch (e) { box.innerHTML = `<div class="empty-text">Could not read them: ${escHtml(e.message)}</div>`; return; }
+
+    const rows = (d.branches || []).map(b => {
+      const tags = [];
+      if (b.current) tags.push('you are here');
+      if (b.main) tags.push('the main line');
+      tags.push(b.sent ? 'on GitHub' : 'only on this machine');
+      const act = b.current ? ''
+        : `<button class="btn btn-sm" data-line="switch" data-w="${escHtml(w)}" data-n="${escHtml(b.name)}">Move here</button>`
+        + `<button class="btn btn-sm" data-line="close" data-w="${escHtml(w)}" data-n="${escHtml(b.name)}">Finish with it</button>`;
+      return `<tr><td style="padding-right:12px;white-space:nowrap"><b>${escHtml(b.name)}</b></td>`
+        + `<td class="muted" style="padding-right:12px">${escHtml(tags.join(' · '))}</td>`
+        + `<td class="muted" style="padding-right:12px">${escHtml(b.when || '')}</td>`
+        + `<td>${act}</td></tr>`;
+    }).join('');
+
+    box.innerHTML = `<div class="card-title mt-16">Lines of work</div>`
+      + `<table>${rows}</table>`
+      + `<div class="flex mt-16">`
+      + `<input type="text" id="newline-${escHtml(w)}" placeholder="name a new line, e.g. fix/the-door" />`
+      + `<button class="btn btn-sm" data-line="new" data-w="${escHtml(w)}">Start a new line</button></div>`
+      + `<div id="lineout-${escHtml(w)}" class="muted"></div>`;
+
+    box.querySelectorAll('[data-line]').forEach(b => {
+      b.onclick = () => this.line(b.dataset.line, b.dataset.w, b.dataset.n);
+    });
+  },
+
+  async line(action, w, name) {
+    const say = t => {
+      const out = document.getElementById('lineout-' + w);
+      if (out) out.innerHTML = `<pre>${escHtml(t)}</pre>`;
+    };
+    if (action === 'new') {
+      const box = document.getElementById('newline-' + w);
+      name = (box && box.value || '').trim();
+      if (!name) { say('Name the line first.'); return; }
+    }
+    let answer;
+    try {
+      answer = await App.tool('git_branch', { project: w, action: action, name: name });
+    } catch (e) { say('Refused: ' + e.message); return; }
+    // The card first (the branch may have moved, which changes every row
+    // above), then the lines, then the answer into the element both rebuilt.
+    await this.repos();
+    say(answer);
   },
 
   // ONE CHANGE, SERVED WHOLE. Read-only: git_diff is declared Writes:false at

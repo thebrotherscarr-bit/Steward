@@ -1,6 +1,6 @@
 # ATLAS 6 CI/CD Pipelines
 
-**Version:** 0.1.1+f1
+**Version:** 0.1.2
 **Ollama Backend:** 127.0.0.1:11434
 
 ---
@@ -17,7 +17,7 @@
 |---|---|---|
 | build | `cargo build --workspace` | exit 0 |
 | unit | `cargo test --workspace` | 85+ pass |
-| version | `cargo run -q -p atlas -- --version` | prints 0.1.1+f1 |
+| version | `cargo run -q -p atlas -- --version` | prints 0.1.2 |
 | chain-verify | `cargo run -q -p atlas -- chain verify tests/fixtures/chains/agents_seatlog.jsonl` | INTACT |
 | chain-recognize | `cargo run -q -p atlas -- chain recognize tests/fixtures/chains/agents_seatlog.jsonl` | form recognized |
 | db-init | `cargo run -q -p atlas -- db init /tmp/spine_test.db` | exit 0 |
@@ -55,11 +55,11 @@
 | build-webapp | `cd webapp && go build ./...` | exit 0 |
 | vet-webapp | `cd webapp && go vet ./...` | clean |
 | mcp-describe | `cd line && go run ./cmd/atlas-mcp --describe` | 72 tools listed |
-| mcp-version | `cd line && go run ./cmd/atlas-mcp --version` | 0.1.1+f1 |
+| mcp-version | `cd line && go run ./cmd/atlas-mcp --version` | 0.1.2 |
 | mcp-prove | `cd line && go run ./cmd/atlas-mcp --prove` | 58 strokes PASS |
 | town-prove | `cd line && go run ./cmd/atlas-town --prove` | 11 strokes PASS |
 | door-prove | `cd line && go run ./cmd/atlas-door --prove` | 13 strokes PASS |
-| tui-version | `cd line && go run ./cmd/atlas-tui --version` | atlas-tui 0.1.1+f1 |
+| tui-version | `cd line && go run ./cmd/atlas-tui --version` | atlas-tui 0.1.2 |
 
 ### Artifacts
 - `atlas-mcp`, `atlas-tui`, `atlas-town`, `atlas-door` binaries
@@ -209,7 +209,7 @@
 | vet | `cd webapp && go vet ./...` | clean |
 | start | `./atlas-webapp &` (port 8091) | process running |
 | health | `curl http://localhost:8091/api/health` | status ok |
-| version | Response contains 0.1.1+f1 | version matches |
+| version | Response contains 0.1.2 | version matches |
 | list-agents | `curl http://localhost:8091/api/agents` | count >= 40 |
 | get-agent | `curl http://localhost:8091/api/agents/manjuel` | agent found |
 | add-trace | `POST /api/traces` with test data | trace with hash |

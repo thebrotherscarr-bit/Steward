@@ -36,7 +36,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Println("0.1.1+f1")
+		fmt.Println("0.1.2")
 		return
 	}
 
