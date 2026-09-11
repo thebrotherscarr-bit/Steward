@@ -1,6 +1,6 @@
 # ATLAS E2E Test Scenarios
 
-**Version:** 0.1.2
+**Version:** 0.1.3
 **Ollama:** 127.0.0.1:11434 (11 models available)
 
 ---
@@ -10,11 +10,11 @@
 ### S1: Binary Smoke (5 scenarios)
 | # | Scenario | Binary | Expected |
 |---|---|---|---|
-| S1-1 | atlas --version | atlas | prints 0.1.2 |
-| S1-2 | atlas-mcp --version | atlas-mcp | prints 0.1.2 |
-| S1-3 | atlas-tui --version | atlas-tui | prints atlas-tui 0.1.2 |
-| S1-4 | atlas-town --version | atlas-town | prints 0.1.2 |
-| S1-5 | atlas-door --version | atlas-door | prints 0.1.2 |
+| S1-1 | atlas --version | atlas | prints 0.1.3 |
+| S1-2 | atlas-mcp --version | atlas-mcp | prints 0.1.3 |
+| S1-3 | atlas-tui --version | atlas-tui | prints atlas-tui 0.1.3 |
+| S1-4 | atlas-town --version | atlas-town | prints 0.1.3 |
+| S1-5 | atlas-door --version | atlas-door | prints 0.1.3 |
 
 ### S2: MCP Tool Surface (8 scenarios)
 | # | Scenario | Tool | Expected |
@@ -97,7 +97,7 @@
 ### S9: Webapp (6 scenarios)
 | # | Scenario | Endpoint | Expected |
 |---|---|---|---|
-| S9-1 | Health | GET /api/health | status ok, version 0.1.2 |
+| S9-1 | Health | GET /api/health | status ok, version 0.1.3 |
 | S9-2 | List agents | GET /api/agents | count >= 40 |
 | S9-3 | Add trace | POST /api/traces | trace with hash |
 | S9-4 | Add eval | POST /api/evals | eval recorded |

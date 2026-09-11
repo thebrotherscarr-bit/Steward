@@ -46,7 +46,7 @@ func (h *Handlers) Metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(&b, "# HELP atlas_uptime_seconds webapp uptime\n# TYPE atlas_uptime_seconds gauge\n")
 	fmt.Fprintf(&b, "atlas_uptime_seconds %d\n", int64(time.Since(metricStart).Seconds()))
 	b.WriteString("# HELP atlas_server_info build info\n# TYPE atlas_server_info gauge\n")
-	b.WriteString("atlas_server_info{server=\"atlas-webapp\",version=\"0.1.2\"} 1\n")
+	b.WriteString("atlas_server_info{server=\"atlas-webapp\",version=\"0.1.3\"} 1\n")
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprint(w, b.String())
 }

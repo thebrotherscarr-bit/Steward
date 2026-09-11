@@ -43,7 +43,7 @@ cargo test --workspace                                # 56 strokes
 cd line ; go build ./... ; go test ./... ; cd ..
 cd line ; go run ./cmd/atlas-mcp --prove ; cd ..      # 125 strokes exit 0
 python tools\<any_cutter>.py --verify
-cargo run -q -p atlas -- --version                    # 0.1.2
+cargo run -q -p atlas -- --version                    # 0.1.3
 ```
 
 A stone is DONE only when its ACCEPTANCE row passes AND

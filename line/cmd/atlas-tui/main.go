@@ -176,7 +176,7 @@ func printVersion() {
 	if out, err := run("atlas", "--version"); err == nil {
 		fmt.Printf("atlas-tui %s\n", strings.TrimSpace(out))
 	} else {
-		fmt.Println("atlas-tui 0.1.2")
+		fmt.Println("atlas-tui 0.1.3")
 	}
 }
 

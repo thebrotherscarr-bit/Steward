@@ -24,7 +24,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 OLLAMA_URL = "http://127.0.0.1:11434"
 MCP_URL = "http://127.0.0.1:8090"
 WEBAPP_URL = "http://127.0.0.1:8091"

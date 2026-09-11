@@ -25,6 +25,12 @@ target/
 # that finally made a hung boot diagnosable -- so the file earns its place on
 # disk and has no business in the record.
 line/mcp.log
+# ...and its stderr, when the two streams are kept apart. The RUNBOOK's
+# start line merges them with `*>`; a hand that redirects them separately
+# gets a second file, and a second file nobody named is a second file
+# `git add -A` takes. Named 2026-09-11, the first time it happened.
+line/mcp.err.log
+webapp/web.err.log
 line/mcp.err
 webapp/web.log
 webapp/web.err

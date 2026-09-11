@@ -76,7 +76,7 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	// the tenant-filtered list faces.
 	resp := map[string]interface{}{
 		"status":  "ok",
-		"version": "0.1.2",
+		"version": "0.1.3",
 		"time":    time.Now().UTC(),
 		"auth":    h.authOn,
 	}
