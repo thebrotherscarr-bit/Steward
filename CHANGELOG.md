@@ -56,6 +56,20 @@ its job rather than a defect. No ambushes remain.
 Swept afterwards across all eight pages: none scrolls sideways, and the crumb
 is hidden on the Dashboard and present everywhere else.
 
+### Two the sweep turned up on the way
+
+- **"Through the council" was pushing its own input out of its card.** The
+  header's right-hand group was `flex-shrink: 0`, which is right for a row of
+  buttons and wrong the moment a FIELD is in it — the base field rule is
+  `width: 100%`, and a full-width input in a group that will not give anything
+  back goes straight through the card's edge. A field in a header now sizes to
+  the room it is given. Measured at 1400px: one row, 48px, inside the card.
+- **A changed file's label ran into its filename with no gap.** The label was
+  an inline-block with `min-width: 150px`, which is a floor and not a ceiling,
+  and *"changed, ready to save"* is wider than that in the mono face. It is
+  two real columns now: the label takes what it needs up to a cap, the path
+  takes the rest and wraps rather than pushing the card.
+
 ### The Aurora scheme
 
 The operator pointed at a console he built for an earlier version of this

@@ -643,7 +643,15 @@ body {
   content: ''; order: 1; flex: 1; height: 1px; background: var(--border);
 }
 .card-header > .card-title { order: 0; flex-shrink: 0; }
-.card-header > *:not(.card-title) { order: 2; flex-shrink: 0; }
+/* THE RIGHT-HAND GROUP MAY SHRINK. It was `flex-shrink: 0`, which is right
+   for a row of buttons and wrong the moment a FIELD is in it: the base field
+   rule is `width: 100%`, and a 100%-wide input in a group that refuses to
+   give anything back pushes straight out of the card. Through the council was
+   doing exactly that. The group shrinks, and a field inside a header sizes to
+   the room it is given rather than demanding the whole width. */
+.card-header > *:not(.card-title) { order: 2; min-width: 0; }
+.card-header input, .card-header .input,
+.card-header select, .card-header .select { width: auto; flex: 1 1 200px; min-width: 0; }
 .card-title {
   font-size: var(--t-xs);
   text-transform: uppercase;
