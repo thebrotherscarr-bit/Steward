@@ -12,6 +12,49 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### atlas gets a CI, and it needs no network
+
+Until today every claim in this repo rested on one machine — 78 tools, 19 green
+packages, a 35-leg battery — while the core beside it has proved itself on four
+matrix legs per push since 2026-09-03. A stranger had to take all of it on
+faith. `.github/workflows/prove.yml` is the answer, in the shape the core's
+workflow already established.
+
+**It fetches nothing.** `Cargo.lock` holds three packages and all three are
+this workspace's own; both `go.mod` files are stdlib only; `tests/prove.py`
+imports nothing outside the standard library. Nothing after `checkout` touches
+the network. Stated in the file as a PROPERTY, so a change that needs a
+dependency is the regression rather than a surprise.
+
+**Two jobs, and they are separate on purpose.**
+
+- **The gate, on Windows.** Toolchains named in the log, `cargo build -p atlas
+  --locked` first (the battery reports the spine ABSENT when unbuilt — honest,
+  but then the door leg proves nothing), a `gofmt -l` that must come back
+  empty, then THE BALL. It does not re-run cargo test or go test separately:
+  the battery runs them itself, and two batteries that can disagree are worse
+  than one that cannot.
+
+  Windows is not a preference. `store/src/ffi.rs` does
+  `#[link(name = "winsqlite3")]` against the Windows SDK with no `cfg(windows)`
+  guard and no alternative backend — the store links the OS's own SQLite rather
+  than vendoring one (ADR-004). On any other platform cargo fails at link time.
+
+- **The portability probe, on Linux.** Its own job so a red there can never
+  mask the gate. The Go half has no platform gating at all — no `_windows.go`,
+  no `//go:build windows`, and `GOOS=linux go build ./...` was verified clean
+  before the file was written. But the Go SUITES have never once run off
+  Windows. They look portable (the Windows-shaped strings in them are test
+  INPUTS, paths the wall must refuse) and looking portable is not being
+  portable. **A red there is a finding, not a broken workflow** — it would mean
+  the suites picked up a dependency on the operator's platform, which is
+  exactly what the core's own matrix exists to catch.
+
+Verified locally before it was committed: the YAML parses to two jobs,
+`gofmt -l .` is empty, `cargo build -p atlas --locked` succeeds, and
+`tests/prove.py --check` exits 0 with 21 held, 14 absent, 0 broke.
+
+
 ### gofmt comes back empty
 
 Three files had never been through it: `internal/tools/gitctl_test.go` (a map

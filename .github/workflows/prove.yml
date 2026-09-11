@@ -1,0 +1,154 @@
+# THE BATTERY, ON SOMEONE ELSE'S MACHINE.
+#
+# atlas had no CI at all until 2026-09-11. Every claim in this repo about the
+# door -- 78 tools, 19 green packages, a battery of 35 legs -- rested on one
+# machine, while the core beside it has been proving itself on four matrix legs
+# per push since 2026-09-03. A stranger evaluating atlas had to take all of it
+# on faith.
+#
+# NO NETWORK AFTER CHECKOUT, AND THAT IS A PROPERTY, NOT A CONVENIENCE.
+# Cargo.lock holds three packages and all three are this workspace's own
+# (atlas-core, atlas-store, atlas -- `store/src/ffi.rs`: "zero crates.io, zero
+# downloads, zero compiler"). Both go.mod files are stdlib only. tests/prove.py
+# imports nothing outside the standard library. So nothing here fetches a
+# dependency, and if a change makes it need one, THAT IS THE REGRESSION.
+#
+# NO MODEL, NO RACK, NO :8090. The workflow legs and the e2e leg both need a
+# live engine and are SKIPPED without --live, which this never passes. The
+# battery says so in its own output rather than pretending.
+#
+# THREE VERDICTS, AND ABSENT IS NOT A PASS. tests/prove.py reports PASS, FAIL
+# or ABSENT. Fourteen golden legs report ABSENT here and that is CORRECT: the
+# goldens themselves are committed and travel, but RE-CUTTING one needs the
+# private oracle ground it was cut from, and that ground does not ship and
+# never will (CLAUDE.md RULE 1). They name ATLAS_ORACLE_ROOT so a reader can
+# act on it. Only FAIL is red. See tests/PROVING.md.
+
+name: prove
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# ONE RUN PER REF, for the reason the core's workflow learned on 2026-09-10:
+# five pushes in half an hour otherwise means twenty jobs, most of them proving
+# commits that have already been replaced.
+concurrency:
+  group: prove-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # THE GATE. This is the one that must be green.
+  #
+  # Windows because the Rust spine is Windows BY CONSTRUCTION: store/src/ffi.rs
+  # does `#[link(name = "winsqlite3")]` against the Windows SDK's import
+  # library, with no cfg(windows) guard and no alternative backend. It is not
+  # an oversight to be fixed by a matrix entry -- it is the design (ADR-004,
+  # socket-free kernels; the store links the OS's own SQLite rather than
+  # vendoring one). On any other platform cargo fails at link time.
+  # ---------------------------------------------------------------------
+  ball:
+    name: the battery (windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Both go.mod files say `go 1.26`. Named here rather than floating,
+          # so a runner image bump cannot silently change what was proven.
+          go-version: "1.26"
+          cache: false # nothing to cache: stdlib only
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Toolchains, named in the log
+        # A stranger reading a failed run should be able to tell a version
+        # problem from a code problem without guessing.
+        run: |
+          go version
+          cargo --version
+          rustc --version
+          python --version
+
+      - name: Build the spine
+        # BEFORE the battery, deliberately. tests/prove.py reports the atlas
+        # binary ABSENT when it is unbuilt -- honest, but it means the door leg
+        # proves nothing. Building it first is what makes that leg an answer.
+        run: cargo build -p atlas --locked
+
+      - name: gofmt leaves nothing behind
+        # The gate that earned this workflow. Three files had never been
+        # through gofmt and nobody knew, because the check that found the
+        # first one was scoped to a single directory.
+        shell: bash
+        working-directory: line
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "unformatted:"; echo "$out"; exit 1
+          fi
+          echo "gofmt -l . is empty"
+
+      - name: THE BALL
+        # One command, every leg, three verdicts. It runs cargo test, go test
+        # and the golden cutters itself -- this workflow does not re-run them
+        # separately, because two batteries that can disagree are worse than
+        # one that cannot.
+        run: python tests/prove.py --check
+
+  # ---------------------------------------------------------------------
+  # THE PORTABILITY PROBE. Its own job on purpose, so a red here can never
+  # mask the gate above.
+  #
+  # The Go half has no platform gating at all -- no _windows.go, no
+  # //go:build windows, and `GOOS=linux go build ./...` was verified clean
+  # before this file was written. The TESTS, however, have never once run on
+  # Linux. They look portable (the Windows-shaped strings in them are test
+  # INPUTS -- paths the wall must refuse -- not assumptions), but looking
+  # portable is not being portable.
+  #
+  # SO A RED HERE IS A FINDING, NOT A BROKEN WORKFLOW. It means the Go suites
+  # picked up a dependency on the operator's platform, which is exactly the
+  # thing the core's own matrix exists to catch ("the suites must not quietly
+  # depend on the operator's platform").
+  #
+  # cargo is absent from this job by design: see the note on the gate.
+  # ---------------------------------------------------------------------
+  portable:
+    name: the go half, off Windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: It builds
+        working-directory: line
+        run: go build ./...
+
+      - name: It vets
+        working-directory: line
+        run: go vet ./...
+
+      - name: The webapp builds too
+        working-directory: webapp
+        run: go build ./...
+
+      - name: The suites, for the first time off Windows
+        working-directory: line
+        run: go test ./...
