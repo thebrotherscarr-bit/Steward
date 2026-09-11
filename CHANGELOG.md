@@ -12,6 +12,62 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The watchboard: the council from the inside
+
+Chat was a second conversation — the same box as the launchpad, the same
+`Chat.thread` array, the same bubbles, plus scrollback. Two of its jobs were
+real and neither needed a whole page: answering a gate, and showing each
+seat's words as they stream. Both belong in a watchboard. His words:
+*"basically like a multi-panel watchboard to see the backend of all the system
+and core work so literally every tool call and everything is being landed on a
+page. this would be like the internal chat of the models themselves."*
+
+**The feed was already there and nothing rendered it.** council.js has kept
+EVERY event of every turn since it was written — *"the record of a run is the
+events"* — and the only reader was a single-column card that drops, on
+purpose, the one kind that matters most here:
+
+    case 'token': return '';   // App.runRow
+
+The seats' own words. The step-by-step shows what the council DID; this shows
+what the models SAID while doing it. Same wire, nothing new asked of the
+engine, nothing new stored, no second definition of anything.
+
+- **Four panels**, because they answer four different questions and reading
+  them interleaved is what made the single column unreadable. THE TURN: what
+  was asked, under which pipeline, and the delivery. THE FLOOR: every seat that
+  took it, its model, and its raw output whole. THE TOOLS: every call, the
+  arguments in, the result out, `failed` read off the engine's own field. THE
+  WIRE: every event in order, unreduced — with a `raw` toggle that prints
+  each whole payload, because *every event* has to mean every event or the
+  panel is only another summary. An event kind this build has never met is
+  printed as its own JSON rather than dropped.
+- **Tokens are counted, not listed, when the wire is folded** — a turn carries
+  hundreds and they are shown whole on the floor. `raw` lists them too.
+- **The past is on the page.** The live turn is one turn; `logs/` holds every
+  run this ground has made, served whole with a sha256 by `records`. That
+  answers the other half of what he asked: *"should we move the session
+  tracking over there? more of the in-depth view."*
+- **The gate stays** — a council question is answered in a field on this page,
+  never a `prompt()`, never a default, never a guess (RULE 6). The label in the
+  panel is Watchboard; the route and `data-page` stay `chat`, exactly as flows
+  did when it became Version control.
+
+**Proved against a real turn, not a stub.** Engine booted, sitting 196,
+`git status` run from the watchboard's own box: 2 seats, 1 tool call, **148
+events**, 54.3s, delivered. The floor carried Router (`qwen3.5:4b`, 280 chars)
+and Steward (`llama3.2:latest`, 409 chars) streaming their own words under
+their own names; the wire carried the arithmetic guard, the skill decision, the
+call, the result, both token runs and the delivery. Sitting closed and tolled.
+
+- **Two clocks on one page stopped disagreeing.** The facts row is painted per
+  EVENT, and a seat can think for a minute without putting one on the wire — so
+  it read 2.6s beside a badge reading 49s. The turn's clock now ticks into its
+  own span, the same shape as the engine's age on the Dashboard.
+- **`when()` takes an epoch, not an ISO string**, and hands anything else
+  straight back — so the earlier-runs table printed raw `2026-09-11T02:59:20Z`
+  in UTC. Records already knew this and wrapped it in `Date.parse`.
+
 ### The Dashboard answers the question it is actually asked
 
 Rebuilt against what the console is FOR, at the operator's word: *"think about

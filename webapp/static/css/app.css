@@ -292,6 +292,88 @@ body {
   .hero-verdict { font-size: var(--t-num); }
 }
 
+
+/* ---- THE WATCHBOARD -----------------------------------------------------
+   Four panels, because they answer four different questions and reading them
+   interleaved is what made the single-column step-by-step unreadable. The two
+   busy ones sit side by side and scroll in their own boxes: a turn can carry
+   hundreds of events, and a panel that grows the page instead of scrolling
+   itself throws the other three off screen the moment anything happens. */
+.wb-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--s4); }
+.wb-grid > * { min-width: 0; }
+.wb-panel { display: flex; flex-direction: column; }
+.wb-scroll { overflow-y: auto; max-height: 46vh; }
+.wb-wire { max-height: 34vh; }
+
+/* THE TURN */
+.wb-obj { font-size: var(--t-lg); color: var(--text); line-height: 1.5;
+          margin-bottom: var(--s3); }
+.wb-facts { display: flex; flex-wrap: wrap; gap: var(--s4);
+            font-size: var(--t-sm); color: var(--text-3);
+            font-variant-numeric: tabular-nums;
+            padding-bottom: var(--s3); border-bottom: 1px solid var(--border); }
+.wb-facts b { color: var(--text-2); }
+.wb-label { font-size: var(--t-xs); letter-spacing: 0.08em; text-transform: uppercase;
+            color: var(--text-3); font-weight: 600; margin: var(--s4) 0 var(--s2); }
+.wb-words { font-size: var(--t-md); line-height: 1.65; color: var(--text-2);
+            white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-delivery .wb-words { color: var(--text); }
+/* A FAILURE IS NEVER FOLDED (LAW 5). It is loud, on the turn's own face. */
+.wb-bad { margin-top: var(--s3); padding: var(--s3) var(--s4); font-size: var(--t-sm);
+          line-height: 1.55; color: var(--red); border-radius: var(--radius);
+          background: rgba(243,139,168,0.08); border: 1px solid rgba(243,139,168,0.25); }
+.wb-bad .muted { color: var(--red); opacity: 0.75; }
+
+/* THE FLOOR -- a seat's own words, which is the whole reason this page exists */
+.wb-seat { border-bottom: 1px solid var(--border); }
+.wb-seat:last-child { border-bottom: 0; }
+.wb-seat-head { display: flex; align-items: baseline; gap: var(--s3); width: 100%;
+                background: none; border: 0; cursor: pointer; text-align: left;
+                padding: var(--s3) 0; color: var(--text); font-family: var(--font); }
+.wb-seat-name { font-weight: 600; font-size: var(--t-base); }
+.wb-seat-model { font-family: var(--mono); font-size: var(--t-xs); color: var(--accent); }
+.wb-seat-n { margin-left: auto; font-size: var(--t-xs); color: var(--text-3);
+             font-variant-numeric: tabular-nums; }
+.wb-seat .wb-words { padding: 0 0 var(--s4); font-family: var(--mono);
+                     font-size: var(--t-sm); line-height: 1.6; }
+
+/* THE TOOLS -- the call, its arguments, and what came back */
+.wb-call { padding: var(--s3) 0; border-bottom: 1px solid var(--border); }
+.wb-call:last-child { border-bottom: 0; }
+.wb-call-head { font-size: var(--t-md); color: var(--text); }
+.wb-call.ok .wb-call-head b { color: var(--green); }
+.wb-call.bad .wb-call-head b { color: var(--red); }
+.wb-args { font-family: var(--mono); font-size: var(--t-xs); line-height: 1.55;
+           color: var(--text-3); white-space: pre-wrap; overflow-wrap: anywhere;
+           margin: var(--s2) 0 0; padding: var(--s2) var(--s3); background: var(--bg);
+           border: 1px solid var(--border); border-radius: var(--radius);
+           max-height: 16em; overflow-y: auto; }
+.wb-err { font-size: var(--t-sm); color: var(--red); margin-top: var(--s1); }
+
+/* THE WIRE -- one row per event, the kind in its own column so the shape of a
+   turn is readable by scanning the left edge alone. */
+.wb-ev { display: grid; grid-template-columns: 92px 1fr; gap: var(--s3);
+         padding: 3px 0; font-size: var(--t-xs); align-items: baseline; }
+.wb-kind { font-family: var(--mono); color: var(--accent); text-align: right;
+           overflow: hidden; text-overflow: ellipsis; }
+.wb-ev code { font-size: var(--t-xs); color: var(--text-3); overflow-wrap: anywhere; }
+.wb-dim .wb-kind, .wb-dim code { opacity: 0.55; }
+
+/* THE GATE -- answered here, in a field, never a prompt() (RULE 6) */
+.wb-gate { padding: var(--s4); margin-bottom: var(--s3); border-radius: var(--radius);
+           background: rgba(249,226,175,0.06); border: 1px solid rgba(249,226,175,0.25); }
+.wb-gate-title { font-weight: 600; color: var(--yellow); font-size: var(--t-md); }
+.wb-gate-prompt { white-space: pre-wrap; margin: var(--s2) 0 var(--s3);
+                  font-size: var(--t-base); line-height: 1.55; }
+
+/* EARLIER RUNS */
+.wb-past-row { cursor: pointer; }
+.wb-past-row:hover td { color: var(--accent); }
+.wb-past-open { margin-top: var(--s4); padding-top: var(--s4);
+                border-top: 1px solid var(--border); }
+
+@media (max-width: 900px) { .wb-grid { grid-template-columns: 1fr; } }
+
 /* ---- THE SIDEBAR'S HEAD -------------------------------------------------
    A lockup, the one action worth pinning, and the palette made visible. The
    nav used to start at the top of the panel with nothing above it, so the

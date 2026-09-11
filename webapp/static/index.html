@@ -39,7 +39,13 @@
              colour through idle, hover and active. -->
         <div class="nav-section">Work</div>
         <a href="/" class="nav-link active" data-page="dashboard">Dashboard</a>
-        <a href="/chat" class="nav-link" data-page="chat">Chat</a>
+        <!-- THE LABEL is Watchboard; the route and data-page stay "chat" on
+             purpose, exactly as flows did when it became Version control: the
+             route is what every link, bookmark and history entry points at,
+             and data-page is the key css/icons.css draws the glyph from.
+             Renaming the label is the operator's word (2026-09-10); renaming
+             the route would break things for a word. -->
+        <a href="/chat" class="nav-link" data-page="chat">Watchboard</a>
         <a href="/agents" class="nav-link" data-page="agents">Agents<span class="nav-badge" id="badge-agents" hidden></span></a>
         <div class="nav-section">Record</div>
         <a href="/evals" class="nav-link" data-page="evals">Evals</a>
