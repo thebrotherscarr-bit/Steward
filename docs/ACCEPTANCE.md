@@ -24,7 +24,7 @@
 - [ ] `go build ./...` exits 0
 - [ ] `go vet ./...` clean
 - [ ] `go test ./...` passes 92+ tests
-- [ ] `atlas-mcp --describe` lists 72 tools
+- [ ] `atlas-mcp --prove` reports the surface carries 78 tools
 - [ ] `atlas-mcp --version` prints `0.1.2`
 - [ ] `atlas-mcp --prove` 58 strokes PASS
 - [ ] `atlas-town --prove` 11 strokes PASS

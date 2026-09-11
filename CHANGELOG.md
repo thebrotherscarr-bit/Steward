@@ -12,6 +12,34 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### Two checks stop naming a command that cannot answer them
+
+`docs/ACCEPTANCE.md` and `docs/PIPELINES.md` both gated on `atlas-mcp
+--describe` listing 72 tools. It does not list tools. `--describe` prints one
+line — the door's name and what it is — and returns (`cmd/atlas-mcp/main.go`),
+and no flag the door declares lists them at all. So the gate could never pass at
+any number, which is why renumbering it to 78 with the rest of the sweep was
+refused: a fresh coat of paint on a check that does nothing is worse than a
+stale one, because the stale one still reads as suspect.
+
+Both now name `atlas-mcp --prove`, which really counts. `prove.go` builds the
+surface in-process, calls `tools/list` against it, and reports `surface carries
+78 tools (>=20)` — no server, no model, which is what every neighbouring row in
+those tables already assumes. PIPELINES' own failure policy for this pipeline,
+"Tool count < 20 → fail", is that stroke's gate written out in prose; it had
+simply never been pointed at the stroke. The LINE table keeps its eleven
+stages, so the summary that counts them stays true.
+
+Measured off the three batteries rather than adjusted:
+
+    atlas-mcp --prove    125 strokes, surface carries 78 tools
+    atlas-town --prove    11 strokes
+    atlas-door --prove    13 strokes
+
+Which names the next stale number and leaves it standing: both documents still
+call `atlas-mcp --prove` 58 strokes. It is 125. Town's 11 and the door's 13 are
+right as written.
+
 ### The last leg that called an absence a failure
 
 The door's battery learned this doctrine at 07:00 on 2026-09-11. One layer up,
