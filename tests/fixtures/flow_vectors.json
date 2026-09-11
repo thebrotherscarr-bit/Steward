@@ -195,7 +195,6 @@
       "why": "edge refs unknown"
     },
     {
-      "why": "run node with no objective",
       "spec": {
         "edges": [],
         "nodes": [
@@ -204,7 +203,8 @@
             "name": "a"
           }
         ]
-      }
+      },
+      "why": "run node with no objective"
     }
   ],
   "run_re": "^f-\\d{8}-\\d{6}-[0-9a-f]{8}$",

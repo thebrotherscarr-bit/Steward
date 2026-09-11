@@ -185,3 +185,96 @@ func truthy(v string) bool {
 	}
 	return false
 }
+
+// gitDiff shows WHAT CHANGED in one file, or across the tree. Read-only.
+//
+// The operator, 2026-09-10: an interactive repo review "kind of like the logs
+// in the records section" -- Records serves one document whole and this serves
+// one change whole, so a count on the panel ("3 files changed") becomes a
+// thing he can actually look at before deciding anything.
+//
+// UNTRACKED IS NOT A DIFF, and pretending otherwise is the trap. `git diff`
+// says NOTHING about a file git has never seen, so a panel that only ran diff
+// would show an empty page for the one kind of file most likely to be lost.
+// For those the file's own first bytes are the answer, and it says so.
+//
+// BOUNDED (LAW 7): one file, capped, with the cap named in the output rather
+// than a silent stump. Nothing here writes, stages, or reaches a remote.
+func toolGitDiff(t tenant.Tenant, args map[string]any) (string, error) {
+	rel := strings.TrimSpace(str(args, "file"))
+
+	run := func(a ...string) (string, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", a...)
+		cmd.Dir = t.Home
+		// stdin closed, every call -- the rule this file already states.
+		if devnull, err := os.Open(os.DevNull); err == nil {
+			cmd.Stdin = devnull
+			defer devnull.Close()
+		}
+		b, err := cmd.Output()
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
+	}
+
+	if _, ok := run("rev-parse", "--is-inside-work-tree"); !ok {
+		return "not a repository -- nothing to review", nil
+	}
+
+	const cap = 60000
+	clip := func(s, what string) string {
+		if len(s) <= cap {
+			return s
+		}
+		return s[:cap] + `
+
+... (` + what + " is " +
+			strconv.Itoa(len(s)) + " bytes; this is the first " +
+			strconv.Itoa(cap) + ")"
+	}
+
+	if rel == "" {
+		v, _ := run("diff")
+		staged, _ := run("diff", "--cached")
+		if strings.TrimSpace(v+staged) == "" {
+			return "Nothing has changed since the last save.", nil
+		}
+		return clip(staged+v, "the whole diff"), nil
+	}
+
+	// A PATH IS JAILED TO ITS OWN WORLD. Same rule the core's gate_paths
+	// makes: resolve first, refuse what escapes, never judge the stated form.
+	if strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") || strings.Contains(rel, ":") {
+		return "Refused: an absolute path is outside this world.", nil
+	}
+	home, err := filepath.Abs(t.Home)
+	if err != nil {
+		return "", err
+	}
+	full, err := filepath.Abs(filepath.Join(home, rel))
+	if err != nil {
+		return "", err
+	}
+	if full != home && !strings.HasPrefix(full, home+string(os.PathSeparator)) {
+		return "Refused: that path resolves outside this world.", nil
+	}
+
+	if v, ok := run("diff", "--", rel); ok && strings.TrimSpace(v) != "" {
+		return clip(v, "the change"), nil
+	}
+	if v, ok := run("diff", "--cached", "--", rel); ok && strings.TrimSpace(v) != "" {
+		return clip(v, "the staged change"), nil
+	}
+	// Never seen by git: show the file, and say plainly that is what this is.
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "That file has no recorded change, and could not be read: " + err.Error(), nil
+	}
+	return "This file is new -- git has never seen it, so there is nothing to " +
+		"compare it against. Its contents:" + `
+
+` + clip(string(b), "the file"), nil
+}

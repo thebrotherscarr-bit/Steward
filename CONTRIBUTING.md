@@ -28,16 +28,24 @@ cd line ; go build ./... ; cd ..
 
 ### Test
 
+One command proves the whole thing:
+
 ```powershell
-cargo test --workspace
-cd line ; go test ./... ; cd ..
-.venv\Scripts\python.exe tools\cut_canon_vectors.py --verify
-.venv\Scripts\python.exe tools\cut_chain_verdicts.py --verify
-.venv\Scripts\python.exe tools\cut_us_vectors.py --verify
-.venv\Scripts\python.exe tools\fold_agents.py --verify
+python tests\prove.py            # every hermetic leg
+python tests\prove.py --check    # fast: skips cargo
+python tests\prove.py --live     # + the legs needing :8090 and Ollama
 ```
 
-All tests must pass before any commit. 92 Go tests, 85 Rust tests, 4 Python verifiers.
+THE BALL runs all eight provers atlas has: the Rust spine, both Go modules,
+the two shipped batteries inside the binaries, twenty-seven golden
+verifiers, the six workflows and the E2E suite. It answers PASS, FAIL, or
+**ABSENT** — a leg whose dependency this ground does not hold, printed with
+the path that would answer it, never counted as a pass. Only FAIL exits red.
+
+The map is `tests/PROVING.md`. Read it before changing what proves atlas.
+
+Nothing may FAIL before a commit. An ABSENT leg is a ruling for the
+operator, not something to route around.
 
 ## Code Style
 

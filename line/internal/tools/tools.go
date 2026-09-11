@@ -232,6 +232,13 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
+		Name: "git_diff", Writes: false,
+		Description: "what actually changed: one file's change served whole, or the whole tree's; a file git has never seen comes back as its contents, said plainly",
+		Args:        []string{"file?", "project?"},
+		Fn:          toolGitDiff,
+	})
+
+	r.add(Tool{
 		Name: "records", Writes: false,
 		Description: "the estate's own documents sorted by what they are (doctrine, record, spec, agents, commands, skills, logs); a kind listed, or one document served whole with a sha256 receipt",
 		Args:        []string{"kind?", "name?", "project?"},

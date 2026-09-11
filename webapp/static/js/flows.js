@@ -8,7 +8,11 @@ const Flows = {
     el.innerHTML = `
       <div class="page-header"><div><div class="page-title">Flows</div>
       <div class="page-subtitle">DAGs with gates — branches declare, the queue runs one by one</div></div></div>
-      <div class="grid-2">
+      <div class="card"><div class="card-title">The repositories — what is saved, and what is not</div>
+        <div id="repo-watch"><div class="loading">Reading both grounds...</div></div>
+        <div class="muted mt-16">Read-only. Nothing here commits, sends or fetches.</div>
+      </div>
+      <div class="grid-2 mt-16">
         <div class="card"><div class="card-title">Registry</div>
           <div id="flow-list"><div class="loading">Loading...</div></div>
           <div class="card-title mt-16">Editor</div>
@@ -57,6 +61,123 @@ const Flows = {
     };
     await this.refresh();
     await this.runs();
+    await this.repos();
+  },
+
+  // THE OVERWATCH, IN PLAIN LANGUAGE (the operator, 2026-09-10: "all the
+  // other stupid fucking jargon from github and turn it into plain language
+  // for me, so it isnt stupid").
+  //
+  // Every fact below is read off the `git` tool, one call per carried world,
+  // and RE-WORDED -- never re-judged. "ahead 2" is not wrong, it is just not
+  // English; a person wants to know whether the work he did is safe. ESTATE
+  // LAW 10 is the rule this satisfies: plain English, honest logs.
+  //
+  // NOTHING HERE ACTS. No commit, no push, no fetch -- a read that cannot
+  // change the ground can be looked at without care, and the acting path
+  // stays where the gate already is (git_cycle, through the council).
+  plain(g) {
+    const L = [];
+    L.push(['You are on', g.branch ? `the ${escHtml(g.branch)} line of work` : 'no branch']);
+
+    const subj = g.subject ? `“${escHtml(g.subject)}”` : '(no message)';
+    L.push(['Last save', `${subj} — ${escHtml(g.head || '?')}, ${escHtml(g.when || 'unknown')}`]);
+
+    // WHAT IS NOT SAVED. `changed` is work git already knows about;
+    // `untracked` is a file it has never seen, which is the one people lose.
+    if (!g.dirty && !g.untracked) {
+      L.push(['Unsaved work', 'none — everything here is saved']);
+    } else {
+      const bits = [];
+      if (g.changed) bits.push(`${g.changed} file${g.changed === 1 ? '' : 's'} changed since the last save`);
+      if (g.untracked) bits.push(`${g.untracked} file${g.untracked === 1 ? '' : 's'} git has never seen before`);
+      L.push(['Unsaved work', bits.join(', ')]);
+    }
+
+    // AHEAD / BEHIND, which is the pair nobody can ever remember.
+    let gh;
+    if (!g.upstream) gh = 'this line of work is not linked to GitHub at all';
+    else if (!g.ahead && !g.behind) gh = 'in step — GitHub has exactly what you have';
+    else {
+      const bits = [];
+      if (g.ahead) bits.push(`${g.ahead} save${g.ahead === 1 ? '' : 's'} here that GitHub does not have yet`);
+      if (g.behind) bits.push(`${g.behind} save${g.behind === 1 ? '' : 's'} on GitHub that you do not have`);
+      gh = bits.join(' · ');
+    }
+    L.push(['GitHub', gh]);
+
+    L.push(['Sending', g.remote_allowed
+      ? 'allowed'
+      : 'OFF — sending and fetching refuse by name until you open that wall']);
+    return L;
+  },
+
+  async repos() {
+    const box = document.getElementById('repo-watch');
+    if (!box) return;
+    let worlds = [];
+    try {
+      const m = await App.tool('muster', {});
+      worlds = (m || '').split(String.fromCharCode(10)).map(s => s.trim())
+        .filter(s => s && !s.endsWith(':'));
+    } catch { box.innerHTML = '<div class="empty-text">MCP unreachable.</div>'; return; }
+    if (!worlds.length) { box.innerHTML = '<div class="empty-text">No worlds are carried.</div>'; return; }
+
+    const cards = [];
+    for (const w of worlds) {
+      let g;
+      try { g = JSON.parse(await App.tool('git', { project: w })); }
+      catch { cards.push(`<div class="mt-16"><b>${escHtml(w)}</b><div class="muted">could not be read</div></div>`); continue; }
+      if (!g.is_repo) { cards.push(`<div class="mt-16"><b>${escHtml(w)}</b><div class="muted">not a repository</div></div>`); continue; }
+      const rows = this.plain(g).map(([k, v]) =>
+        `<tr><td class="muted" style="padding-right:16px;white-space:nowrap">${escHtml(k)}</td><td>${v}</td></tr>`
+      ).join('');
+      // The files themselves, named AND OPENABLE. A count tells you something
+      // is unsaved; the list tells you what; only opening it tells you whether
+      // you meant to. Same shape Records uses for a document -- click the row,
+      // get the thing whole -- because it is the same question.
+      //
+      // The two-letter code is git's porcelain contract, and it is the last
+      // jargon on this page, so it is translated here and nowhere shown raw.
+      const files = (g.files || []).map(f => {
+        const code = f.slice(0, 2).trim();
+        const path = f.slice(2).trim();
+        const what = code === '??' ? 'never saved before'
+          : code === 'M' ? 'changed'
+          : code === 'A' ? 'newly added'
+          : code === 'D' ? 'deleted'
+          : code === 'R' ? 'renamed'
+          : code;
+        return `<div class="chat-session repo-file" data-w="${escHtml(w)}" data-f="${escHtml(path)}">`
+          + `<span class="muted" style="display:inline-block;min-width:150px">${escHtml(what)}</span>`
+          + escHtml(path) + `</div>`;
+      }).join('');
+      cards.push(`<div class="mt-16"><b>${escHtml(w)}</b>`
+        + `<table style="margin-top:6px">${rows}</table>`
+        + (files ? `<div class="mt-16">${files}</div>` : '')
+        + `</div>`);
+    }
+    box.innerHTML = cards.join('') + '<div id="repo-diff"></div>';
+    box.querySelectorAll('.repo-file').forEach(d => {
+      d.onclick = () => this.diff(d.dataset.w, d.dataset.f);
+    });
+  },
+
+  // ONE CHANGE, SERVED WHOLE. Read-only: git_diff is declared Writes:false at
+  // the door and runs nothing that stages, commits or reaches a remote.
+  async diff(world, file) {
+    const box = document.getElementById('repo-diff');
+    if (!box) return;
+    box.innerHTML = `<div class="card-title mt-16">${escHtml(world)} · ${escHtml(file)}</div>`
+      + '<div class="loading">Reading...</div>';
+    try {
+      const text = await App.tool('git_diff', { project: world, file: file });
+      box.innerHTML = `<div class="card-title mt-16">${escHtml(world)} · ${escHtml(file)}</div>`
+        + `<pre>${escHtml(text || '(no change recorded)')}</pre>`;
+    } catch (e) {
+      box.innerHTML = `<div class="card-title mt-16">${escHtml(world)} · ${escHtml(file)}</div>`
+        + `<div class="empty-text">Could not read it: ${escHtml(e.message)}</div>`;
+    }
   },
 
   template() {

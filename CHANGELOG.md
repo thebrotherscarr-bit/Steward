@@ -118,6 +118,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   the writer now drains in batches and flushes once instead of flushing per
   event, which is what let it fall behind in the first place.
 
+- **THE BALL — one command proves the whole of atlas.** `tests/prove.py`
+  gathers the eight places atlas proves itself: the Rust spine, both Go
+  modules, the two batteries shipped inside the binaries, **twenty-seven**
+  golden verifiers, the six workflows and the E2E suite. AGENTS.md named
+  four verifiers; nobody had run the other twenty-two, which is how two legs
+  stayed red for weeks without anyone seeing it.
+
+  **It answers in three verdicts, not two.** `ABSENT` means a leg named a
+  dependency this ground does not hold — a read-only source ground never
+  copied in, a binary not built, a door not answering. ABSENT is never
+  counted as a pass and never silently skipped: it prints the exact path or
+  command that would answer it, and it does not exit red, because nothing is
+  broken — something is missing, and the difference is the whole point. Only
+  FAIL exits red. Every child runs with `stdin=DEVNULL`, so the ball is safe
+  to run from inside a live engine turn.
+
+  Standing today: **22 held · 15 absent · 0 broke**. The fifteen absences are
+  fourteen cutters plus one Rust stroke whose read-only oracles
+  (`estate\`, `secondbrain\`) are not in this ground. Their goldens are all
+  here and green; what is gone is the ability to re-cut them and to notice
+  the source drifting. That is a ruling for the operator — restore the
+  grounds read-only, or retire those cutters with the goldens frozen as the
+  authority. Substituting anything would break law 2 outright.
+
+  `tests/PROVING.md` is the map: every leg, what it costs, what it needs,
+  and the seventeen packages that carry no prover at all — `internal/tools`
+  first among them, where every MCP tool handler lives.
+
+### Fixed
+- **`internal/rack` had been red since the repo split.** Four strokes wanted
+  `tests/fixtures/rack_open_ground/state/rack_ledger.jsonl`. Git does not
+  track empty directories, so the fixture ground came over empty in the H0
+  pull and nothing said a word. The right fix was not a hand-written file
+  but running the cutter that owns it — `tools/cut_rack_open_vectors.py`
+  builds that ground by definition — after which the five tracked goldens
+  judged it byte-exact.
+
+- **The door battery had no binary to shell.** `TestDoorProveStrokesGreen`
+  drives `cmd/atlas-door` against the Rust spine over a real loopback
+  socket, and the Rust binary was never built in this ground. `cargo build
+  -p atlas`. The prover had been behaving correctly the whole time —
+  refusing by name rather than fabricating, exactly as law says.
+
+- **`cut_flow_vectors.py` was behind its own fixture, and would have eaten
+  it.** `ce9c390` added the `run` node kind to the flow contract and updated
+  `flow.go` *and* `flow_vectors.json` — but not the cutter that owns the
+  fixture. So `--verify` had been red since; worse, running the cutter
+  *without* `--verify` would have rewritten the fixture, stripped `run` back
+  out, and turned `internal/flow` red with no visible cause. The cutter now
+  carries the seven-kind contract and refuses a `run` node with no
+  objective, exactly as `flow.go` does. A full re-cut is now a no-op. (The
+  seventh refusal's keys also sort like every other entry now — the giveaway
+  that it had been hand-added rather than cut.)
+
 ### Note
 - Static assets are compiled into the binary (`//go:embed static/...`), so a
   change under `static/` needs `go build -o atlas-webapp.exe .` and a restart

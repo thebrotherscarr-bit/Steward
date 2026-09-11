@@ -7,7 +7,10 @@ The flow v1 contract (the oracle; the Go flow package must honor it):
 
   names         : ^[a-z0-9][a-z0-9_-]{0,63}$ for flows, nodes, runs carry
                   f-YYYYMMDD-HHMMSS-<8hex> (RUN_RE pinned below)
-  node kinds    : ask | prompt | seat | memory | eval | gate — closed set
+  node kinds    : ask | prompt | seat | memory | eval | gate | run — a
+                  closed set. A `run` node drives a whole Manjuel turn (the
+                  council), so it must carry an objective or it refuses; the
+                  others reach one voice.
   edges         : {from, to, when: always|pass|fail}; fail-edges only from
                   eval/gate nodes; everything else with when:fail refuses
   validation    : unique names, known kinds, refs resolve, no cycles,
@@ -39,7 +42,7 @@ FLOW = os.path.join(FIX, "flow_vectors.json")
 
 NAME_RE = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 RUN_RE = r"^f-\d{8}-\d{6}-[0-9a-f]{8}$"
-KINDS = ["ask", "prompt", "seat", "memory", "eval", "gate"]
+KINDS = ["ask", "prompt", "seat", "memory", "eval", "gate", "run"]
 
 
 def topo(nodes, edges):
@@ -52,6 +55,8 @@ def topo(nodes, edges):
     for n in nodes:
         if n["kind"] not in KINDS:
             raise ValueError("unknown kind: " + n["kind"])
+        if n["kind"] == "run" and not (n.get("question") or "").strip():
+            raise ValueError("run node with no objective")
     incoming = {n: 0 for n in names}
     adj = {n: [] for n in names}
     for e in edges:
@@ -198,6 +203,8 @@ def vectors():
              "spec": spec([ask("a"), ask("b")], [E("a", "b", "fail")])},
             {"why": "edge refs unknown",
              "spec": spec([ask("a")], [E("a", "ghost")])},
+            {"why": "run node with no objective",
+             "spec": spec([{"name": "a", "kind": "run"}], [])},
         ],
     }
 

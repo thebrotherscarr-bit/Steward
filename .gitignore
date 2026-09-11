@@ -15,11 +15,19 @@ target/
 *.exe~
 *.obj
 
-# The two servers' own stdout. atlas-mcp and atlas-webapp are started by hand,
-# and a doc that tells him to run a command which dirties his repo is a bad
-# doc.
+# The two servers' own stdout AND stderr. atlas-mcp and atlas-webapp are
+# started by hand, and a doc that tells him to run a command which dirties his
+# repo is a bad doc.
+#
+# mcp.err joined them 2026-09-10: starting the door with PowerShell's
+# -RedirectStandardError splits stderr into its own file, and the door writes
+# a failed env_open there (engine.go's Registry.Open). That line is the thing
+# that finally made a hung boot diagnosable -- so the file earns its place on
+# disk and has no business in the record.
 line/mcp.log
+line/mcp.err
 webapp/web.log
+webapp/web.err
 
 # The webapp's own store. Written at runtime, never authored.
 webapp/data/
@@ -36,3 +44,10 @@ SEAT_LOG.md
 # Fetched, never authored.
 node_modules/
 .venv/
+
+# Python's own build output. THE BALL (tests/prove.py) imports nothing, but it
+# RUNS twenty-seven cutters and six workflow scripts, and every one of those
+# leaves a __pycache__ beside itself. Added 2026-09-10, the first time the
+# whole battery was run in one command and the tree came back dirty for it.
+__pycache__/
+*.py[cod]

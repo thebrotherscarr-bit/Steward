@@ -68,7 +68,10 @@ const (
 	// KeptEvents bounds what a run remembers. Tokens are counted, never kept.
 	KeptEvents = 400
 	// OpenTimeout covers boot: declarations, the rack check, a cold model warm.
-	OpenTimeout = 300 * time.Second
+	// CUT FROM 300s 2026-09-10. A healthy engine emits `opened` in ~31s on this
+	// ground; 300 meant five minutes of a frozen glass before anyone was told
+	// anything, and today that happened nine sittings running.
+	OpenTimeout = 120 * time.Second
 	// ShutdownGrace is how long `close` gets to write `ended` and pay the toll
 	// before the process is killed.
 	ShutdownGrace = 60 * time.Second
@@ -667,8 +670,15 @@ func (e *Engine) Alive() bool {
 // ---------------------------------------------------------------------
 
 type Registry struct {
-	mu   sync.Mutex
-	open map[string]*Engine
+	mu   sync.Mutex // guards `open` ONLY -- held for map access, never a spawn
+	// SPAWNS ARE SERIALISED ON THEIR OWN LOCK (2026-09-10). C2 below needs two
+	// opens never to race; it does NOT need every reader to queue behind one.
+	// Holding `mu` across the boot made Get() -- and so /run/state, which the
+	// whole glass polls -- block for the entire OpenTimeout. Measured today: a
+	// failed boot froze the dashboard for 300s, the page repolled every 15s,
+	// and the hung calls piled up until atlas-webapp held 2.4GB and a core.
+	openMu sync.Mutex
+	open   map[string]*Engine
 }
 
 func NewRegistry() *Registry { return &Registry{open: map[string]*Engine{}} }
@@ -693,19 +703,28 @@ func (r *Registry) Get(ground string) (*Engine, bool) {
 // one append-only ledger. Serialising opens costs a queued caller a few
 // seconds; the alternative is a forked record.
 func (r *Registry) Open(name, ground, coreCmd string) (*Engine, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if e, ok := r.open[ground]; ok {
-		if e.Alive() {
-			return e, nil
-		}
-		delete(r.open, ground)
+	// Already standing: the map lock only, so this stays instant.
+	if e, ok := r.Get(ground); ok {
+		return e, nil
+	}
+	// One spawn at a time (C2), on the spawn lock -- readers are not behind it.
+	r.openMu.Lock()
+	defer r.openMu.Unlock()
+	if e, ok := r.Get(ground); ok { // another caller won the race and it lived
+		return e, nil
 	}
 	e, err := Open(name, ground, coreCmd)
 	if err != nil {
+		// SAY IT WHERE SOMEONE CAN READ IT. This error names exactly what went
+		// wrong, including the engine's own stderr -- and until today it was
+		// returned over RPC and discarded by the glass, so a boot that failed
+		// for five minutes left no trace anywhere on disk.
+		fmt.Fprintln(os.Stderr, "env_open "+name+": "+err.Error())
 		return nil, err
 	}
+	r.mu.Lock()
 	r.open[ground] = e
+	r.mu.Unlock()
 	return e, nil
 }
 
