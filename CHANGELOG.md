@@ -12,6 +12,52 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The first strokes on the MCP, and two bugs they caught immediately
+
+ADR-006 measured the door and found the thing that explains a two-day failure
+streak: `internal/httpserver` is 800 lines, it is what makes atlas-mcp an MCP
+server rather than a pile of functions, and it had **zero tests**. The tool
+bodies behind it carry 755 strokes; the wire in front of them carried none.
+Twelve strokes now stand there, hermetic — a real registry over a real temp
+tenant that deliberately does NOT look like manjuel, asserting only what the
+wire says.
+
+- **A tool's own words outrank the Go error** (ADR-006 item 1). The tools/call
+  error branch discarded `out` one line before it would have been sent and
+  returned `err.Error()` instead — which for anything shelling a subprocess is
+  the bare string `exit status 1`. `verify_chain` exposed it: it captures the
+  Rust spine's `CombinedOutput` INTO `out`, so the diagnosis was in hand and
+  thrown away. **Protocol-level**: every tool that errored was losing whatever
+  it had written. `isError` still tells the caller it failed; it now also says
+  why.
+- **THE REGRESSION STROKE WAS WORTHLESS UNTIL IT WASN'T.** It passed with the
+  fix reverted, which means it proved nothing. The reason was a second bug, in
+  the resolver written earlier the same day: `findAtlas` walked from `"."`, and
+  `filepath.Dir(".")` is `"."` — so that root broke out of the walk on its
+  first step and never climbed. The door never noticed because its own
+  executable path walks fine; a TEST binary lives in a build temp dir, where
+  that root was the only one that could reach the tree and it was the one doing
+  nothing. So the spine was never found, `out` was empty, and both branches
+  produced identical text. Fixed to walk from an absolute cwd. **The stroke now
+  fails with the fix reverted** (`the caller got only "exit status 1"`) and
+  passes with it applied, which is the only thing that makes it a test.
+
+**What the twelve pin:** the protocol version is a promise to every client
+(`2025-06-18`); a notification is answered with silence; every advertised tool
+carries a description and an inputSchema and never requires a property it does
+not declare; `-32601` for an unknown method and `-32602` for an unknown tool,
+each naming what it did not know; `-32700` for a malformed line; the id comes
+back; a tool's refusal is `isError` and NOT a transport error, because a client
+that retries transport errors would retry a refusal forever.
+
+**And one the review found that the ADR missed:** `GET /tools` and `tools/list`
+are two copies of the same 28-line rendering. A stroke now holds them
+byte-identical, because a REST caller and an MCP caller disagreeing about what
+a tool takes is the worst kind of quiet.
+
+17 Go packages green, 0 failing.
+
+
 ### The spine is found, not assumed
 
 `verify_chain` was dead on every machine where the Rust spine had been built

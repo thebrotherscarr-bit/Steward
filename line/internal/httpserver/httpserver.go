@@ -266,9 +266,25 @@ func (s *Server) handle(line []byte) any {
 		}
 		out, err := s.tools.Call(s.tenants, req.Params.Name, req.Params.Arguments)
 		if err != nil {
+			// THE TOOL'S OWN WORDS OUTRANK THE GO ERROR. `out` was discarded
+			// here, one line before it would have been sent, and the caller
+			// got err.Error() instead — which for anything shelling a
+			// subprocess is the bare string "exit status 1".
+			//
+			// verify_chain is the one that exposed it: it captures the Rust
+			// spine's CombinedOutput INTO `out`, so the real diagnosis was in
+			// hand and thrown away. This is protocol-level; every tool that
+			// errors was losing whatever it had written.
+			//
+			// isError stays true either way, so the caller still knows the
+			// call failed — it now also learns why.
+			text := out
+			if text == "" {
+				text = err.Error()
+			}
 			return resultResponse(req.ID, map[string]any{
 				"isError": true,
-				"content": []map[string]any{{"type": "text", "text": err.Error()}},
+				"content": []map[string]any{{"type": "text", "text": text}},
 			})
 		}
 		return resultResponse(req.ID, map[string]any{

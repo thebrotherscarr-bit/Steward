@@ -51,3 +51,21 @@ node_modules/
 # whole battery was run in one command and the tree came back dirty for it.
 __pycache__/
 *.py[cod]
+
+# RUNTIME STATE AND DEBUG LEAVINGS, untracked 2026-09-11 at the operator's
+# word. Every one of these is WRITTEN BY A RUNNING ATLAS, so a tracked copy
+# means the first session on a fresh clone dirties the tree and the next pull
+# conflicts on files no human edits — the same fault the core's own ruling of
+# 2026-09-08 fixed for sessions/, SEAT_LOG.md and memory.md.
+#
+# state/ is the tenant's own append-only record (chat.go: "one append-only
+# file per tenant home"). The PROVERS do not read these: prove.go builds its
+# homes with os.MkdirTemp and the golden it compares against lives at
+# tests/fixtures/rack_open_ground/state/rack_ledger.jsonl, which stays tracked.
+#
+# data/ is NOT ignored and data/master.db STAYS TRACKED on purpose: prove.rs
+# and prove.ps1 both copy it as their base and store/src/enroll.rs needs its
+# agents table (the P0 seed). It is a seed a fresh clone needs, not state.
+state/
+line/http_*.txt
+tests/e2e/*_results.json

@@ -162,7 +162,16 @@ func findAtlas(flagVal, home string) string {
 	if exe, err := os.Executable(); err == nil {
 		roots = append(roots, filepath.Dir(exe))
 	}
-	roots = append(roots, home, ".")
+	// ABSOLUTE, NOT ".". filepath.Dir(".") is "." — so a relative root breaks
+	// out of the walk below on its first step and never climbs at all. The
+	// door never noticed because its own executable path walks fine; a TEST
+	// binary lives in a build temp dir, so this root was the only one that
+	// could reach the tree, and it was the one that did nothing. Found
+	// 2026-09-11 by the first stroke written against it.
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd)
+	}
+	roots = append(roots, home)
 	for _, root := range roots {
 		if root == "" {
 			continue
