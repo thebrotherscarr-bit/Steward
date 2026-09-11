@@ -117,6 +117,29 @@ const Flows = {
     return L;
   },
 
+  // THE LAST JARGON ON THE PAGE, and a first cut left half of it standing.
+  //
+  // git's porcelain code is TWO columns, not one: X is what is staged and Y
+  // is what is changed since. Translating `code.trim()` against a map of
+  // single letters worked for " M" and "?? " and then printed a raw **MM**
+  // for a file that was both staged and changed again -- which is exactly the
+  // kind of two-letter shrug this page exists to stop. Both columns are read
+  // now, and anything genuinely unrecognised says so in words rather than
+  // showing its code.
+  said(xy) {
+    const x = xy[0] || ' ', y = xy[1] || ' ';
+    if (x === '?' ) return 'never saved before';
+    if (x === '!' ) return 'deliberately ignored';
+    if (x === 'U' || y === 'U') return 'two versions disagree — needs your decision';
+    const word = { M: 'changed', A: 'newly added', D: 'deleted',
+                   R: 'renamed', C: 'copied', T: 'type changed' };
+    const staged = word[x], after = word[y];
+    if (staged && after) return `${staged}, and ${after} again since`;
+    if (staged) return `${staged}, ready to save`;
+    if (after) return after;
+    return 'changed somehow';
+  },
+
   async repos() {
     const box = document.getElementById('repo-watch');
     if (!box) return;
@@ -145,14 +168,8 @@ const Flows = {
       // The two-letter code is git's porcelain contract, and it is the last
       // jargon on this page, so it is translated here and nowhere shown raw.
       const files = (g.files || []).map(f => {
-        const code = f.slice(0, 2).trim();
         const path = f.slice(2).trim();
-        const what = code === '??' ? 'never saved before'
-          : code === 'M' ? 'changed'
-          : code === 'A' ? 'newly added'
-          : code === 'D' ? 'deleted'
-          : code === 'R' ? 'renamed'
-          : code;
+        const what = this.said(f.slice(0, 2));
         return `<div class="chat-session repo-file" data-w="${escHtml(w)}" data-f="${escHtml(path)}">`
           + `<span class="muted" style="display:inline-block;min-width:150px">${escHtml(what)}</span>`
           + escHtml(path) + `</div>`;
