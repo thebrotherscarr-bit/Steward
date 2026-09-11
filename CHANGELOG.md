@@ -40,7 +40,11 @@ under, because they are the record of what happened.
   repainted only on a run event, so a save or a send made from that very page
   left the panel showing the count from before the act — the one moment the
   number is most obviously being watched. Seen live: research pushed, the page
-  said *in step*, the badge still read 7.
+  said *in step*, the badge still read 7. It repaints that badge ALONE
+  (`paintOwed`, the same shape as `paintProof(box, only)`): it is the only one
+  an act on that page can move, and doing all four costs six tool calls in a
+  row — long enough that the first cut still showed the stale number when the
+  eye went looking for it.
 
 ### The readers are proven too
 - **15 more strokes on `internal/tools`**, on the three tools that READ the

@@ -134,7 +134,18 @@ const App = {
     // shows. A first cut read the default world alone and said 2 while atlas
     // sat clean beside it -- a true number about one world, standing in for
     // two, which is the shape of every wrong count this console has removed.
-    const owed = await quiet(async () => {
+    await this.paintOwed();
+  },
+
+  // THE OWED BADGE ON ITS OWN, because it is the only one an act on Version
+  // control can change, and repainting all four costs six tool calls in a row
+  // — long enough that the panel visibly kept the old number for several
+  // seconds after a save. Same shape as paintProof(box, only).
+  async paintOwed() {
+    const el = document.getElementById('badge-flows');
+    if (!el) return;
+    let owed = null;
+    try {
       const m = await this.tool('muster', {});
       const worlds = (m || '').split(String.fromCharCode(10))
         .map(s => s.trim()).filter(s => s && !s.endsWith(':'));
@@ -145,9 +156,12 @@ const App = {
           if (g.is_repo) n += (g.changed || 0) + (g.untracked || 0) + (g.ahead || 0);
         } catch { /* one unreadable world must not blank the others */ }
       }
-      return n;
-    });
-    put('flows', owed || null, owed > 0);
+      owed = n;
+    } catch { owed = null; }
+    if (!owed) { el.hidden = true; return; }
+    el.textContent = String(owed);
+    el.className = 'nav-badge warn';
+    el.hidden = false;
   },
 
   async loadHealth() {

@@ -279,7 +279,7 @@ const Flows = {
     // It used to repaint only on a run event, which meant a save or a send
     // made from this very page left the panel showing the count from before
     // the act — the one moment the number is most obviously watched.
-    if (App.paintBadges) App.paintBadges();
+    if (App.paintOwed) App.paintOwed();
     say(answer);
   },
 
