@@ -68,3 +68,9 @@ __pycache__/
 state/
 line/http_*.txt
 tests/e2e/*_results.json
+#
+# flows/ is the same shape as state/ above: the workflow engine's per-ground
+# store (internal/flow/flow.go, flowsDir) -- specs, their folded history, and
+# runs.jsonl -- written when a flow is saved or fired. The provers build their
+# own homes in temp dirs and never read it.
+flows/

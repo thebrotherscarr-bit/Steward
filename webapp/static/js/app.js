@@ -209,6 +209,11 @@ const App = {
       case 'chat': await Chat.render(el); break;
       case 'playground': await Play.render(el); break;
       case 'flows': await Flows.render(el); break;
+      // The DAG builder, back on the panel 2026-09-11 at his word. It is a
+      // SEPARATE page from Version control on purpose: /flows is the git
+      // overwatch he uses every day, and taking that route back would cost
+      // him the one he actually stands on.
+      case 'workflows': await Workflows.render(el); break;
       case 'messages': await this.renderMessages(el); break;
       case 'settings': await this.renderSettings(el); break;
       default: el.innerHTML = '<div class="empty"><div class="empty-icon">?</div><div class="empty-text">Page not found</div></div>';

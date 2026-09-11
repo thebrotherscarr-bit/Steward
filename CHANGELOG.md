@@ -12,6 +12,54 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The workflow builder gets its face back
+
+The DAG builder came off the panel 2026-09-10 — "not used, wipe it" — and
+`/flows` became Version control. What was wiped was THE PAGE. The engine was
+never touched, and this is what was sitting behind the missing page the whole
+time: `internal/flow` at 1,140 lines with 455 lines of strokes, ten `flow_*`
+tools on the door, nine handlers, all nine routes wired in `server.go`, and a
+method in `api.js` for every one of them. Proven live before a line of the page
+was written: save -> list -> get -> run -> status, a real llama3.2 call,
+receipts, budget bar, verdict COMPLETE.
+
+So nothing here rebuilds a workflow system. `static/js/workflows.js` DRAWS the
+one that was already there, and every button is a call the LINE already answers.
+
+THE PATTERNS, in this engine's own terms (his reference,
+workflowbuilder.io/blog/agentic-workflow-patterns):
+
+    prompt chaining     nodes joined by `always` edges; topo order is the chain
+    routing             an `eval` node, then `pass` / `fail` edges off it
+    parallelization     branches declared, run sequentially -- one card, one
+                        rack queue, and interleaved model output cannot be read
+    reflection          unrolled into fixed passes, because Validate REFUSES
+                        cycles. That is what the article recommends anyway.
+    human-in-the-loop   a `gate` node: the run stops at PAUSED and waits
+
+All seven node kinds are offered and no eighth is, because `Kinds` is a closed
+set and anything else is refused by name at save. The page does not pre-judge a
+spec: Validate lives in the LINE, its refusals name the node and the reason, and
+a second opinion drawn here is how two validators drift apart. A gate offers
+exactly the two moves the engine accepts, and neither is the default.
+
+ITS OWN PAGE, NOT THE OLD ROUTE. `/flows` stays Version control — that is the
+git overwatch he uses every day, and taking the route back would cost him the
+page he actually stands on. The builder is `/workflows`, its own line on the
+panel.
+
+Proven from the browser, not from curl: a two-step flow built in the UI, folded
+to v1, fired, `COMPLETE · fired 2 · 57290ms` with a receipt per node.
+
+**Restart required** — the webapp embeds its static files (`go:embed`), so
+`:8091` does not carry this until it is rebuilt and restarted. Tested on a
+scratch binary on `:8099`; his running server was not touched.
+
+- **`flows/` is ignored.** The engine writes `<home>/flows/` the moment a flow
+  is saved or fired — specs, their folded history, `runs.jsonl`. Runtime state,
+  the same shape as `state/` beside it, and the provers build their own homes in
+  temp dirs rather than reading it.
+
 ### The seat log travels, so a clone can prove itself
 
 `atlas/SEAT_LOG.md` was gitignored and never reached a clone, so `cargo test

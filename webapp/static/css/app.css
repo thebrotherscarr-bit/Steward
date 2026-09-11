@@ -1476,6 +1476,66 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .repo-what { white-space: nowrap; }
 .repo-path { overflow-wrap: anywhere; }
 
+/* ---- THE WORKFLOW BUILDER -----------------------------------------------
+   The builder's own furniture. Nothing here declares a colour of its own:
+   every value is a token off :root, so the page follows the Aurora scheme
+   the rest of the console follows and cannot drift from it.
+
+   Placed ABOVE the utilities block on purpose — see the note below it. */
+
+.wf-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); padding: var(--s3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.wf-row:last-child { border-bottom: 0; }
+.wf-row-main { display: flex; align-items: center; gap: var(--s3); min-width: 0; flex-wrap: wrap; }
+.wf-name { color: var(--text); font-weight: 600; }
+
+.wf-head {
+  color: var(--text-2); font-size: 12px; letter-spacing: .08em;
+  text-transform: uppercase; margin-bottom: var(--s3);
+}
+
+/* A step is a block, not a table row: its fields change with its kind, and a
+   grid that must reshape per row reads worse than a card that simply grows. */
+.wf-node {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: var(--s3); margin-bottom: var(--s3);
+  background: var(--bg-2);
+}
+.wf-node-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.wf-inline { max-width: 220px; }
+.wf-blurb { font-size: 12px; }
+.wf-field { margin-top: var(--s3); }
+
+.wf-edge {
+  display: flex; align-items: center; gap: var(--s3);
+  flex-wrap: wrap; padding: var(--s2) 0;
+}
+.wf-arrow { color: var(--text-3); }
+
+/* The waterfall comes back as aligned text from flow_status. It is already a
+   table; wrapping it would destroy the alignment that makes it readable. */
+.wf-pre {
+  white-space: pre; overflow-x: auto;
+  font-family: var(--font); font-size: 12px;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: var(--s3); margin: 0;
+}
+
+/* A gate is the one place the page asks for a decision, so it is the one
+   place that gets the seal colour. */
+.wf-gate {
+  border: 1px solid var(--yellow); border-radius: 6px;
+  padding: var(--s3); background: var(--bg-2);
+}
+.wf-gate-title { color: var(--yellow); font-weight: 600; margin-bottom: var(--s2); }
+
+.wf-ok  { color: var(--green); }
+.wf-bad { color: var(--red); }
+
 /* ---- UTILITIES, LAST ----------------------------------------------------
    Anything below here does ONE job and is meant to win when it is worn. They
    sit at the foot of the file because that is what makes them do so: at one
