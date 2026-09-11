@@ -45,6 +45,12 @@ under, because they are the record of what happened.
   an act on that page can move, and doing all four costs six tool calls in a
   row — long enough that the first cut still showed the stale number when the
   eye went looking for it.
+- **Settings stopped scrolling sideways.** A `1fr` grid column is
+  `minmax(auto, 1fr)`, and `auto` there means MIN-CONTENT, so one long
+  unbreakable line inside a card — the team-bridge readout — made the column
+  refuse to narrow and pushed the whole page. Measured: 737px of content in a
+  595px main. `min-width: 0` on the grid children, and `pre` scrolls in its
+  own box rather than shoving the page.
 
 ### The readers are proven too
 - **15 more strokes on `internal/tools`**, on the three tools that READ the

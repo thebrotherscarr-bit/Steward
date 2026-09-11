@@ -629,6 +629,15 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 /* Grid helpers */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+/* A GRID CHILD MUST BE ALLOWED TO SHRINK. `1fr` is minmax(auto, 1fr), and
+   `auto` there means MIN-CONTENT — so one long unbreakable line inside a card
+   (the team-bridge readout on Settings was the one that showed it) makes the
+   column refuse to narrow, and the whole page scrolls sideways. Settings at
+   815px was 737px of content in a 595px main. The cure is the well-known one:
+   min-width: 0 on the children, and the long thing scrolls in its own box
+   rather than shoving the page. */
+.grid-2 > *, .grid-3 > *, .stats > *, .agent-grid > * { min-width: 0; }
+pre { overflow-x: auto; max-width: 100%; }
 .flex { display: flex; gap: 8px; align-items: center; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .mt-16 { margin-top: 16px; }
