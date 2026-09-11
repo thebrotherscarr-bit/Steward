@@ -26,13 +26,13 @@
 - [ ] `go test ./...` passes 92+ tests
 - [ ] `atlas-mcp --prove` reports the surface carries 78 tools
 - [ ] `atlas-mcp --version` prints `0.1.2`
-- [ ] `atlas-mcp --prove` 58 strokes PASS
+- [ ] `atlas-mcp --prove` 125 strokes PASS
 - [ ] `atlas-town --prove` 11 strokes PASS
 - [ ] `atlas-door --prove` 13 strokes PASS
 - [ ] `atlas-tui --version` prints `atlas-tui 0.1.2`
 
 ### GOLDEN (Python)
-- [ ] All 17 cutters `--verify` byte-identical
+- [ ] The 24 cutters answering `--verify`: byte-identical, or ABSENT naming `ATLAS_ORACLE_ROOT`
 - [ ] `fold_agents.py --verify` byte-identical
 - [ ] `check_trade_parity.py` cross-impl match
 
@@ -43,7 +43,7 @@
 - [ ] Covenant hash `1512741580b7239b` in all 40
 - [ ] `reports_to` resolves for all 40
 - [ ] Undeclared actor refused by name
-- [ ] 40 doc files in `agents/docs/`
+- [ ] 41 doc files in `agents/docs/`
 - [ ] 3 skill files in `skills/`
 
 ### OLLAMA (Integration)

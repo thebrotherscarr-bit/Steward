@@ -12,6 +12,36 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The criteria documents, measured rather than remembered
+
+`docs/ACCEPTANCE.md` and `docs/PIPELINES.md` are what a stranger reads to learn
+what PASS looks like here, so a stale number in them is not cosmetic — it is a
+gate reporting the wrong verdict. Every count in both was run rather than read:
+
+    atlas-mcp --prove         said 58 strokes        is 125        CORRECTED
+    cutters answering verify  said "all 17 pass"     is 24 legs:   CORRECTED
+                                                     12 byte-identical,
+                                                     12 ABSENT (oracle)
+    agents/docs/*.md          said 40 doc files      is 41         CORRECTED
+    atlas-town --prove        said 11 strokes        is 11         held
+    atlas-door --prove        said 13 strokes        is 13         held
+    agents/*.us               said 40                is 40         held
+    agents/modules/*.us       said 4                 is 4          held
+    skills/*/SKILL.md         said 3                 is 3          held
+    go test ./...             said 92+               is 138 across 19 pkgs, held
+
+The cutter line was wrong twice over, which is why it did not become "all 24
+pass". Half of them cannot verify on any machine but the one they were cut from:
+twelve re-cut byte-identical and twelve report ABSENT naming `ATLAS_ORACLE_ROOT`,
+because the private oracle ground does not ship and never will. A gate that says
+"all pass" over that is unpassable by construction, the same defect as the
+`--describe` row fixed earlier today. It now states both verdicts, which is the
+three-verdict doctrine this repo already holds everywhere else.
+
+Untouched on purpose: `DELIVERABLE.md` is dated 2026-09-08 and carries its own
+"verified 2026-09-08" table and a frozen git-history block — a release snapshot,
+not a living description, and its numbers are the record of that day.
+
 ### Two checks stop naming a command that cannot answer them
 
 `docs/ACCEPTANCE.md` and `docs/PIPELINES.md` both gated on `atlas-mcp

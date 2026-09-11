@@ -56,7 +56,7 @@
 | vet-webapp | `cd webapp && go vet ./...` | clean |
 | mcp-tools | `cd line && go run ./cmd/atlas-mcp --prove` | surface carries 78 tools |
 | mcp-version | `cd line && go run ./cmd/atlas-mcp --version` | 0.1.2 |
-| mcp-prove | `cd line && go run ./cmd/atlas-mcp --prove` | 58 strokes PASS |
+| mcp-prove | `cd line && go run ./cmd/atlas-mcp --prove` | 125 strokes PASS |
 | town-prove | `cd line && go run ./cmd/atlas-town --prove` | 11 strokes PASS |
 | door-prove | `cd line && go run ./cmd/atlas-door --prove` | 13 strokes PASS |
 | tui-version | `cd line && go run ./cmd/atlas-tui --version` | atlas-tui 0.1.2 |
@@ -92,7 +92,7 @@
 | verify-us | `python tools/cut_us_vectors.py --verify` | byte-identical |
 | fold-agents | `python tools/fold_agents.py` | fold applied |
 | verify-fold | `python tools/fold_agents.py --verify` | byte-identical |
-| all-cutters | `for f in tools/cut_*.py; do python "$f" --verify; done` | all 17 pass |
+| all-cutters | `for f in tools/cut_*.py; do python "$f" --verify; done` | 12 byte-identical, 12 ABSENT (oracle) |
 | trade-parity | `python tools/check_trade_parity.py` | cross-impl match |
 
 ### Artifacts
@@ -125,7 +125,7 @@
 | covenant-hash | `grep -r "1512741580b7239b" agents/` | 40 matches |
 | reports-to | Verify all reports_to resolve | no orphans |
 | refused-actor | Attempt enroll of undeclared actor | refused by name |
-| docs-check | `ls agents/docs/*.md \| wc -l` | 40 doc files |
+| docs-check | `ls agents/docs/*.md \| wc -l` | 41 doc files |
 | skill-check | `ls skills/*/SKILL.md \| wc -l` | 3 skills |
 
 ### Artifacts
