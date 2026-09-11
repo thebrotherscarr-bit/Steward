@@ -225,8 +225,18 @@ def leg_goldens():
             continue
         need = absent_dependency(text)
         if need:
+            # NAME THE DIAL, not just the missing file. The goldens themselves
+            # are committed and travel with the repo; only the RE-CUT needs the
+            # oracle it was cut from, and that ground is private and does not
+            # ship. Until 2026-09-11 this said "oracle not in this ground" and
+            # pointed at a path that has never existed on any machine — the
+            # cutters resolved it relative to atlas's parent, which stopped
+            # being the oracle ground at the 2026-09-10 split. ABSENT was the
+            # right verdict for the wrong reason, with no way to act on it.
             out.append(Leg("GOLDENS", name, ABSENT,
-                           "oracle not in this ground", need, secs))
+                           "oracle not in this ground "
+                           "(set ATLAS_ORACLE_ROOT to the ground holding it)",
+                           need, secs))
         else:
             out.append(Leg("GOLDENS", name, FAIL, tail(text), "", secs))
     return out

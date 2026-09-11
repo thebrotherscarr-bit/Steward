@@ -394,3 +394,135 @@ func TestTheRegistryAgreesWithWhatEachToolDoes(t *testing.T) {
 		}
 	}
 }
+
+// ---- ADR-006: the tier contract ------------------------------------------
+
+// EVERY CORE TOOL STANDS ALONE. ADR-006's whole claim is that the door is a
+// product: point it at any directory on any machine and 75 of its 78 tools
+// answer. This stroke is what makes that a fact rather than a sentence.
+//
+// It calls every tool declaring TierCore against a bare temp tenant with NO
+// engine wired and NO Rust binary configured, and refuses to accept a failure
+// whose CAUSE is one of those two. A core tool may absolutely refuse -- for a
+// missing argument, an absent file, a path outside the wall -- it just may not
+// refuse because the estate's own machinery is not there.
+//
+// The tier is the zero value, so a new tool is CORE until it says otherwise.
+// This is the thing that catches the one that should have said otherwise.
+func TestEveryCoreToolStandsAlone(t *testing.T) {
+	home := t.TempDir()
+	tr := tenant.NewRegistry()
+	if err := tr.Add("t", home); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.SetDefault("t"); err != nil {
+		t.Fatal(err)
+	}
+	// THE SPINE IS DENIED, NOT MERELY UNCONFIGURED. Options{} leaves
+	// AtlasBin empty, but findAtlas then walks the tree and FINDS the real
+	// binary on any machine where cargo has run — so verify_chain succeeded
+	// here and the stroke reported it core. Pointing ATLAS_BIN at a path that
+	// cannot exist is what makes "needs nothing" mean it.
+	t.Setenv("ATLAS_BIN", filepath.Join(home, "NO-SUCH-SPINE.exe"))
+
+	// Options{} on purpose: no CoreCmd, no AtlasBin. A tenant that looks
+	// nothing like manjuel -- no agents/, no pipelines.md, no sessions/.
+	reg := Build(tr, Options{})
+
+	// A real file, so a tool given a path reaches its body rather than
+	// bouncing off "no such file".
+	if err := os.WriteFile(filepath.Join(home, "probe.txt"),
+		[]byte("a probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The cause a core tool may never fail for. Matched on the message the
+	// caller would actually see.
+	forbidden := []string{
+		"no engine wired",
+		"--manjuel",
+		"was started without",
+		`exec: "atlas"`,
+		"atlas-bin",
+		"ATLAS_BIN",
+		"NO-SUCH-SPINE",
+		// run_start refuses with "no engine is open ... env_open first",
+		// which names none of the above. A first cut missed it entirely and
+		// reported an engine tool as core.
+		"no engine is open",
+		"env_open first",
+		"nothing to wake",
+	}
+
+	for _, tool := range reg.All() {
+		if tool.Tier != TierCore {
+			continue
+		}
+		t.Run(tool.Name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("a core tool panicked against a bare tenant: %v", r)
+				}
+			}()
+			_, err := reg.Call(tr, tool.Name, argsFor(tool, home))
+			if err == nil {
+				return // answered; nothing more to ask of it
+			}
+			msg := err.Error()
+			for _, bad := range forbidden {
+				if strings.Contains(msg, bad) {
+					t.Errorf("declares TierCore but failed because the estate's "+
+						"machinery is absent.\n  refusal: %s\n  "+
+						"Either mark it TierEngine/TierSpine, or stop it "+
+						"reaching for what a core tool may not need.", msg)
+					return
+				}
+			}
+		})
+	}
+}
+
+// A TIER IS A PROMISE AND MUST BE ONE OF THE THREE. A tool carrying a tier
+// nobody defined would sort into "core" by String()'s default and quietly
+// claim a contract it never made.
+func TestEveryToolCarriesAKnownTier(t *testing.T) {
+	reg := Build(tenant.NewRegistry(), Options{})
+	for _, tool := range reg.All() {
+		switch tool.Tier {
+		case TierCore, TierSpine, TierEngine:
+		default:
+			t.Errorf("%s carries tier %d, which is not one of core/spine/engine",
+				tool.Name, int(tool.Tier))
+		}
+	}
+}
+
+// argsFor fills a tool's OWN declared arguments so the call reaches the tool's
+// body instead of bouncing off its argument check. A first cut passed only
+// {"project": "t"} -- and run_start and verify_chain both refused for a
+// missing argument BEFORE they ever reached for the engine or the spine, so
+// the stroke reported them clean when they were not. Reading the declaration
+// is what makes the classification honest.
+func argsFor(tool Tool, home string) map[string]any {
+	args := map[string]any{"project": "t"}
+	for _, a := range tool.Args {
+		name := strings.TrimRight(a, "?")
+		if name == "" || name == "project" {
+			continue
+		}
+		switch {
+		case strings.Contains(name, "path") || strings.Contains(name, "file"):
+			args[name] = "probe.txt" // a real file, written below
+		case name == "name" || name == "document" || name == "doc":
+			args[name] = "probe.txt"
+		case name == "kind":
+			args[name] = "record"
+		case strings.Contains(name, "content") || strings.Contains(name, "text") ||
+			strings.Contains(name, "message") || strings.Contains(name, "body"):
+			args[name] = "a probe from TestEveryCoreToolStandsAlone"
+		default:
+			args[name] = "probe"
+		}
+	}
+	return args
+}

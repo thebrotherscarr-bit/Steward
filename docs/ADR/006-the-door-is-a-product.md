@@ -1,7 +1,8 @@
 # ADR-006: The Door Is a Product — `atlas-mcp` as a Standalone MCP Server
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
+**Accepted:** 2026-09-11 by the operator's word
 **Decider:** Operator (Kyle Carr)
 **Supersedes:** nothing. **Cites:** ADR-001 (polyglot seam), ADR-004 (socket-free kernels)
 
@@ -37,9 +38,17 @@ what their bodies actually reach for:
 
 | Depends on | Count | Which |
 |---|---|---|
-| the engine (`--manjuel`) | 2 | `env_open`, `run_start` |
+| the engine (`--manjuel`) | 6 | `env_open`, `env_close`, `run_start`, `run_answer`, `run_cancel`, `ask_steward` |
 | the Rust spine (`--atlas-bin`) | 1 | `verify_chain` |
-| neither | 75 | everything else |
+| neither | **71** | everything else |
+
+*Corrected 2026-09-11 by the stroke that enforces it.* This table first read
+2 / 1 / 75, classified by grepping the tool bodies. `TestEveryCoreToolStandsAlone`
+calls every tool declaring core against a bare tenant with the engine unwired
+AND the spine denied, and found **four more** the grep had missed —
+`env_close`, `run_answer`, `run_cancel` and `ask_steward`, three of which refuse
+with *"no engine is open"* rather than any phrase the grep was looking for. The
+conclusion is unchanged and the number is now measured rather than estimated.
 
 **And the coupling is file-scoped, not smeared.** `internal/tools` is 4,987
 lines; the manjuel-shaped part of it is three files:
@@ -79,7 +88,7 @@ Every tool belongs to exactly one tier, declared in its registration:
 
 | Tier | Needs | Contract |
 |---|---|---|
-| **CORE** | nothing but a directory | Must work against any tenant, on any machine. 75 tools today. |
+| **CORE** | nothing but a directory | Must work against any tenant, on any machine. 71 tools today. |
 | **SPINE** | the Rust binary | May refuse if unbuilt — but must say *which binary* and *how to build it*. |
 | **ENGINE** | `--manjuel` | May refuse if unwired — but must name the missing flag. |
 
@@ -174,7 +183,7 @@ hand can still reach across it.
 
 ## Trade-off Analysis
 
-The decisive number is **75 of 78**. The door is not entangled with manjuel; it
+The decisive number is **71 of 78**. The door is not entangled with manjuel; it
 is a general-purpose MCP over a filesystem, a git repo and a record, with three
 tools that reach into the estate's own machinery. Option B pays a repo-split
 price for a separation that already exists in the code. Option A keeps paying
@@ -203,7 +212,7 @@ estate arrived on the dashboard on 2026-09-11.
 
 ## Consequences
 
-**Easier:** a second consumer can point any MCP client at the door and get 75
+**Easier:** a second consumer can point any MCP client at the door and get 71
 working tools against any directory. A CORE tool that reaches for the engine is
 caught by its own test. A refusal tells the caller what to do about it.
 

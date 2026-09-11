@@ -32,11 +32,9 @@ package tools
 //      dial is shut. The wall is read, never opened, from here.
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -48,18 +46,12 @@ import (
 // said. Unlike gitstate's helper this keeps stderr: a refused push explains
 // itself there, and swallowing it would turn a nameable failure into a shrug.
 func gitRun(t tenant.Tenant, timeout time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = t.Home
-	if devnull, err := os.Open(os.DevNull); err == nil {
-		cmd.Stdin = devnull
-		defer devnull.Close()
-	}
-	// Never let git stop for a human this process cannot show to anyone.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat")
-	out, err := cmd.CombinedOutput()
-	return strings.TrimRight(string(out), "\r\n"), err
+	// Through the one spawn contract (ADR-006 item 5). This seam already had
+	// the discipline — closed stdin, a bound, hardened env, stderr kept —
+	// and it was the ONLY one of the four that had all of it. What was local
+	// here is now what every seam gets.
+	res := spawn("git", args, spawnOpts{Dir: t.Home, Timeout: timeout, Env: gitEnv()})
+	return strings.TrimRight(res.Combined, "\r\n"), res.Err
 }
 
 func isRepo(t tenant.Tenant) bool {

@@ -35,6 +35,34 @@ BALL just makes every leg answer the same way.
 
 ---
 
+## The oracle ground, and why 14 legs are ABSENT on a fresh clone
+
+**The goldens travel. The cutters do not.** Every golden in
+`tests/fixtures/` is committed, and the Rust implementation is proved against
+them on any machine. What needs the oracle is the RE-CUT — the leg that asks
+whether the golden still matches the reference implementation it was cut from.
+Those references live in a private ground that does not ship and never will
+(CLAUDE.md RULE 1: the Archive never goes on GitHub, ever).
+
+So on a fresh clone those 14 legs report **ABSENT**, and that is correct. They
+are not failures and they are not skips — the battery says what it could not
+ask and refuses to count it as an answer.
+
+**Set `ATLAS_ORACLE_ROOT`** to the ground holding the oracles and they run:
+
+    $env:ATLAS_ORACLE_ROOT = "<the ground with estate\ and secondbrain\>"
+    python tests\prove.py --check
+
+Unset, the cutters still try their historical location, so nothing that
+worked stops working.
+
+**This was wrong until 2026-09-11.** Every cutter computed its oracle root as
+`ATLAS.parent`. Before the 2026-09-10 split that was true — atlas sat beside
+the grounds it was folded from. After the split the parent is the manjuel
+core, so the legs reported ABSENT naming paths that **have never existed on
+any machine**. Right verdict, phantom reason, and nothing a reader could act
+on. ADR-006 item 6.
+
 ## The eight legs
 
 | # | Leg | What it proves | Costs | Needs |

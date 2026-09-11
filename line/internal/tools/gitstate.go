@@ -1,10 +1,8 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -34,20 +32,16 @@ func toolGit(t tenant.Tenant, _ map[string]any) (string, error) {
 	out := map[string]any{"world": t.Name}
 
 	run := func(args ...string) (string, bool) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = t.Home
-		devnull, err := os.Open(os.DevNull)
-		if err == nil {
-			cmd.Stdin = devnull
-			defer devnull.Close()
-		}
-		b, err := cmd.Output()
-		if err != nil {
+		// Through the one spawn contract (ADR-006 item 5). This seam DISCARDED stderr, so a git failure here was a shrug; now it is kept and the caller chooses.
+		//
+		// res.Stdout, NOT res.Combined: callers PARSE this. Folding
+		// stderr in would put a warning line into a branch name.
+		res := spawn("git", args, spawnOpts{Dir: t.Home,
+			Timeout: 5 * time.Second, Env: gitEnv()})
+		if res.Err != nil {
 			return "", false
 		}
-		return strings.TrimSpace(string(b)), true
+		return strings.TrimSpace(res.Stdout), true
 	}
 
 	if _, ok := run("rev-parse", "--is-inside-work-tree"); !ok {
@@ -229,20 +223,16 @@ func toolGitDiff(t tenant.Tenant, args map[string]any) (string, error) {
 	rel := strings.TrimSpace(str(args, "file"))
 
 	run := func(a ...string) (string, bool) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "git", a...)
-		cmd.Dir = t.Home
-		// stdin closed, every call -- the rule this file already states.
-		if devnull, err := os.Open(os.DevNull); err == nil {
-			cmd.Stdin = devnull
-			defer devnull.Close()
-		}
-		b, err := cmd.Output()
-		if err != nil {
+		// Through the one spawn contract (ADR-006 item 5). This one already closed stdin.
+		//
+		// res.Stdout, NOT res.Combined: callers PARSE this. Folding
+		// stderr in would put a warning line into a branch name.
+		res := spawn("git", a, spawnOpts{Dir: t.Home,
+			Timeout: 10 * time.Second, Env: gitEnv()})
+		if res.Err != nil {
 			return "", false
 		}
-		return string(b), true
+		return string(res.Stdout), true
 	}
 
 	if _, ok := run("rev-parse", "--is-inside-work-tree"); !ok {

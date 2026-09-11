@@ -12,6 +12,65 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### ADR-006 accepted, and items 2 through 6 built
+
+**Item 2 — the tier is a field, and the stroke corrected the ADR.** `Tool`
+carries a `Tier`: CORE (nothing but a directory), SPINE (the Rust binary),
+ENGINE (`--manjuel`). The zero value is CORE, so the common case is free and
+the declaration stays honest rather than ceremonial.
+`TestEveryCoreToolStandsAlone` calls every tool claiming CORE against a bare
+temp tenant with the engine unwired AND the spine denied — and **found four
+the ADR's grep had missed**. The table said 2 engine tools; there are **6**
+(`env_open`, `env_close`, `run_start`, `run_answer`, `run_cancel`,
+`ask_steward`), three of which refuse with *"no engine is open"*, a phrase the
+grep was not looking for. The real split is **71 core / 6 engine / 1 spine**,
+and the ADR was corrected to the measured number. Denying the spine mattered
+too: `verify_chain` passed as CORE until `ATLAS_BIN` was pointed at a path that
+cannot exist, because on a machine where cargo has run the walk simply finds
+the binary.
+
+**Item 4 — first strokes on `tenant` (288 lines, zero) and `ground` (200
+lines, zero).** `ground` is the package that carried a world from outside the
+estate onto the dashboard, and nothing was broken in it — Detect and Siblings
+both did exactly what they were written to do. What was missing was any stroke
+stating what that IS, so the blast radius of a launch directory was
+discoverable only by suffering it. Now pinned: nearest ground wins; a `.us`
+module outranks a folder name; Siblings scans **exactly one level** and a
+grandchild is never carried; the attic and the vendored trees are never
+grounds. And for `tenant`: an unknown project refuses BY NAME and hands a
+stranger no context; case and space cannot fork a tenant; Home is absolute,
+because every wall check downstream is a prefix test against it.
+
+**Item 5 — one spawn contract.** Four seams, four different answers to the
+same four questions. Two that actually bit: `gitstate` DISCARDED stderr, so a
+git failure there was a shrug, and the spine call had **no timeout at all**, so
+a wedged Rust binary hung the tool call and through it the door, forever
+(ESTATE LAW 7 is bounded everything). `spawn()` closes stdin at one place,
+bounds every child, keeps both streams whether it succeeded or failed, and
+names a timeout as a timeout instead of "signal: killed".
+
+Two of the six seams are deliberately left, and say why in the source:
+`internal/engine` spawns over `StdinPipe` because that pipe IS the wire, and a
+helper that closes stdin would break it by doing its job; and `cmd/atlas-door`
+is a different binary whose sharing would need a new leaf package, because
+`internal/tools` already imports `internal/engine`. A new package is a new
+folder and folders are the operator's to place (RULE 8) — so it was named
+here rather than invented.
+
+**Item 6 — the oracle ground is nameable.** Every cutter computed its source
+as `ATLAS.parent`. Before the 2026-09-10 split that was true; after it, the
+parent is the manjuel core, so 14 legs reported ABSENT naming paths that **have
+never existed on any machine**. Right verdict, phantom reason, nothing to act
+on. They now take `ATLAS_ORACLE_ROOT`, falling back to the historical location
+so nothing that worked stops working, and the ABSENT line names the dial. The
+distinction that makes atlas standalone is written into `tests/PROVING.md`:
+**the goldens travel, the cutters do not** — every golden is committed and the
+Rust implementation is proved against them anywhere; only the RE-CUT needs the
+private ground, and that ground never ships.
+
+19 Go packages green, 0 failing. THE BALL: 21 held, 14 absent, 0 broke.
+
+
 ### The door names what it carries
 
 It printed `carried 2`. A count cannot be checked against intent — two is two

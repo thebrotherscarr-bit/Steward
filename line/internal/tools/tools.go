@@ -54,12 +54,48 @@ var askLock sync.Mutex
 
 type Fn func(t tenant.Tenant, args map[string]any) (string, error)
 
+// Tier is what a tool needs BEYOND a tenant's directory. ADR-006 accepted
+// 2026-09-11: the door is a product, and a product publishes what it requires.
+//
+// The zero value is TierCore, so a tool is CORE unless it says otherwise. That
+// is deliberate — 75 of 78 tools are CORE, and making the common case free
+// keeps the declaration honest instead of ceremonial. A tool that claims CORE
+// and then reaches for the engine or the spine is caught by
+// TestEveryCoreToolStandsAlone, not by a reviewer's memory.
+type Tier int
+
+const (
+	// TierCore needs nothing but a directory. It must answer, or refuse for
+	// a reason of its own, against ANY tenant on ANY machine — no engine
+	// wired, no Rust binary built, no manjuel layout present.
+	TierCore Tier = iota
+	// TierSpine shells the Rust binary. May refuse when it is unbuilt, but
+	// must name the binary and how to build it.
+	TierSpine
+	// TierEngine needs a Manjuel process wired with --manjuel. May refuse
+	// when it is unwired, but must name the missing flag.
+	TierEngine
+)
+
+func (t Tier) String() string {
+	switch t {
+	case TierSpine:
+		return "spine"
+	case TierEngine:
+		return "engine"
+	default:
+		return "core"
+	}
+}
+
 type Tool struct {
 	Name        string
 	Description string
 	Writes      bool
-	Args        []string
-	Fn          Fn
+	// Tier is what this tool needs beyond a directory. Zero value is core.
+	Tier Tier
+	Args []string
+	Fn   Fn
 }
 
 type Registry struct {
@@ -230,7 +266,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "verify_chain", Writes: false,
+		Name: "verify_chain", Writes: false, Tier: TierSpine,
 		Description: "chain verdict via the Rust spine: EMPTY|INTACT|FLIP|TAMPER",
 		Args:        []string{"path", "project?"},
 		Fn: func(t tenant.Tenant, args map[string]any) (string, error) {
@@ -248,10 +284,15 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 			// through. findAtlas() is that walk, moved to the one place that
 			// actually shells the binary so every caller gets it.
 			bin := findAtlas(opts.AtlasBin, t.Home)
-			cmd := exec.Command(bin, "chain", "verify", path)
-			cmd.Dir = t.Home
-			out, err := cmd.CombinedOutput()
-			return string(out), err
+			// Through the one spawn contract (ADR-006 item 5). This seam had NO
+			// TIMEOUT — a wedged Rust binary hung the tool call, and through it
+			// the door, forever. ESTATE LAW 7 is bounded everything; it is bounded
+			// now, and the spine's own words still come back whole because a
+			// refusal that names only its exit status is the thing ADR-006 item 1
+			// was written to stop.
+			res := spawn(bin, []string{"chain", "verify", path},
+				spawnOpts{Dir: t.Home, Timeout: 30 * time.Second})
+			return res.Combined, res.Err
 		},
 	})
 
@@ -384,7 +425,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "ask_steward", Writes: true,
+		Name: "ask_steward", Writes: true, Tier: TierEngine,
 		Description: "the weighed ruling with receipts, never raw model output; one-shot under the ask lock",
 		Args:        []string{"question", "project?"},
 		Fn:          toolAskSteward,
@@ -775,7 +816,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	// one Router, the dedup, the claim check and the recompose all apply --
 	// because the run happens inside Manjuel, not beside it.
 	r.add(Tool{
-		Name: "env_open", Writes: true,
+		Name: "env_open", Writes: true, Tier: TierEngine,
 		Description: "open the Manjuel engine inside a world; refuses a world already being sat in",
 		Args:        []string{"project?"},
 		Fn: func(t tenant.Tenant, _ map[string]any) (string, error) {
@@ -793,7 +834,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "env_close", Writes: true,
+		Name: "env_close", Writes: true, Tier: TierEngine,
 		Description: "close the world's sitting properly and reap its engine",
 		Args:        []string{"project?"},
 		Fn: func(t tenant.Tenant, _ map[string]any) (string, error) {
@@ -844,7 +885,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "run_start", Writes: true,
+		Name: "run_start", Writes: true, Tier: TierEngine,
 		Description: "run one objective through the council; the delivery with what actually ran",
 		Args:        []string{"objective", "project?", "feed?", "method?"},
 		Fn: func(t tenant.Tenant, args map[string]any) (string, error) {
@@ -865,7 +906,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "run_answer", Writes: true,
+		Name: "run_answer", Writes: true, Tier: TierEngine,
 		Description: "answer what the run asked; the gate crossing the wire, never a default",
 		Args:        []string{"text", "project?"},
 		Fn: func(t tenant.Tenant, args map[string]any) (string, error) {
@@ -882,7 +923,7 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 	})
 
 	r.add(Tool{
-		Name: "run_cancel", Writes: false,
+		Name: "run_cancel", Writes: false, Tier: TierEngine,
 		Description: "interrupt the turn in flight; the sitting stays open",
 		Args:        []string{"project?"},
 		Fn: func(t tenant.Tenant, _ map[string]any) (string, error) {
@@ -2280,26 +2321,23 @@ func toolAskSteward(t tenant.Tenant, args map[string]any) (string, error) {
 	cmdArgs := append(append([]string{}, fields[1:]...), q)
 	askLock.Lock()
 	defer askLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), askTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, fields[0], cmdArgs...)
-	cmd.Dir = t.Home
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
+	// Through the one spawn contract (ADR-006 item 5). The bound, the
+	// closed stdin and the kept streams all come from there now; what stays
+	// local is the only part that is this tool's own -- the WORDS of the
+	// refusal, which name the engine rather than the exit code.
+	res := spawn(fields[0], cmdArgs, spawnOpts{Dir: t.Home, Timeout: askTimeout})
+	if res.TimedOut {
 		return "", fmt.Errorf("REFUSED — the weighing did not finish inside %d seconds; the engine may be cold. Nothing is claimed.", int(askTimeout.Seconds()))
 	}
-	if err != nil {
-		tail := strings.Split(strings.TrimRight(stderr.String(), "\r\n"), "\n")
+	if res.Err != nil {
+		tail := strings.Split(strings.TrimRight(res.Stderr, "\r\n"), "\n")
 		last := ""
 		if len(tail) > 0 {
 			last = tail[len(tail)-1]
 		}
-		return "", fmt.Errorf("REFUSED — the engine did not answer (exit %v): %s", err, last)
+		return "", fmt.Errorf("REFUSED — the engine did not answer (exit %v): %s", res.Err, last)
 	}
-	out := strings.TrimSpace(stdout.String())
+	out := strings.TrimSpace(res.Stdout)
 	if out == "" {
 		return "", fmt.Errorf("REFUSED — the engine said nothing")
 	}

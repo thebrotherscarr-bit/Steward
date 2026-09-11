@@ -30,7 +30,20 @@ import sys
 from pathlib import Path
 
 ATLAS = Path(__file__).resolve().parent.parent
-ARCHIVE = ATLAS.parent
+# THE ORACLE ROOT IS NAMEABLE. ADR-006 item 6, 2026-09-11.
+#
+# This was `ATLAS.parent` outright. Before the 2026-09-10 split atlas sat
+# beside its source grounds, so the parent WAS the ground holding the oracle.
+# After the split the parent is the manjuel core, and this resolves to a path
+# that has never existed on any machine — so `tests/prove.py` reported the
+# re-cut legs ABSENT naming a phantom. ABSENT was the right verdict for the
+# wrong reason.
+#
+# The goldens themselves ARE committed and DO travel; only the RE-CUT needs
+# the oracle. Set ATLAS_ORACLE_ROOT to the ground that holds it. Unset, the
+# old location is still tried, so nothing that worked stops working.
+import os
+ARCHIVE = Path(os.environ.get("ATLAS_ORACLE_ROOT") or ATLAS.parent)
 ORACLE_PATH = ARCHIVE / "estate" / "Neiro" / "lib" / "us_read.py"
 OUT = ATLAS / "tests" / "fixtures" / "canon" / "us_vectors.json"
 

@@ -26,7 +26,19 @@ import sys
 
 SCRIPT = os.path.dirname(os.path.abspath(__file__))
 ATLAS = os.path.normpath(os.path.join(SCRIPT, ".."))
-ARCHIVE = os.path.normpath(os.path.join(ATLAS, ".."))
+# THE ORACLE ROOT IS NAMEABLE. ADR-006 item 6, 2026-09-11.
+#
+# This was `ATLAS.parent` outright. Before the 2026-09-10 split atlas sat
+# beside its source grounds, so the parent WAS the ground holding the oracle.
+# After the split the parent is the manjuel core, and this resolves to a path
+# that has never existed on any machine — so `tests/prove.py` reported the
+# re-cut legs ABSENT naming a phantom. ABSENT was the right verdict for the
+# wrong reason.
+#
+# The goldens themselves ARE committed and DO travel; only the RE-CUT needs
+# the oracle. Set ATLAS_ORACLE_ROOT to the ground that holds it. Unset, the
+# old location is still tried, so nothing that worked stops working.
+ARCHIVE = os.environ.get("ATLAS_ORACLE_ROOT") or os.path.normpath(os.path.join(ATLAS, ".."))
 ORACLE = os.path.join(ARCHIVE, "secondbrain", "SecondBrain-collab",
                       "demo_vault", "attic", "folded",
                       "2026-08-24-manjuel-app-mirror", "5.0", "manjuel5",
