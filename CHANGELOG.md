@@ -12,6 +12,31 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The console says where you are, and what moved
+- **A crumb, painted once by the router.** Every page but the Dashboard now
+  opens with `ATLAS / <page>`, and a detail view carries its third step
+  (`ATLAS / Agents / steward`) because there the depth is a fact. It lives
+  above the routed content rather than inside each page's header: the router
+  is the only thing that knows where you are, and fourteen hand-written copies
+  of one line is fourteen chances for one to be wrong. The page's NAME is read
+  off its own nav link, so the relabel to *Version control* reached the crumb
+  without a second edit.
+- **The standup card carries a delta.** `+1 vs last`, read from
+  `run_history.jsonl`, which holds every prior live run. It is the ONLY card
+  that gets one: nothing else on that row has a second measurement to compare
+  against, and an unchanged reading and a never-measured-twice reading are
+  different claims. A card with nothing to compare shows no delta rather than
+  a zero.
+- **Fields are styled by the element, not only by the class.** Ten inputs in
+  this console were written without `class="input"` and came out as the
+  browser's white box with black text — the save-message field on Version
+  control was a bare white slab sitting on a dark card. Classing the ten by
+  hand fixes the ten and not the eleventh, so the rule now binds to `input`,
+  `select` and `textarea` themselves, with `:not()` guards keeping it off the
+  controls that are not fields. The placeholder took the ground's own muted
+  colour in the same stroke; it had been inheriting a grey that read nearly as
+  loud as a typed value.
+
 ### The readers are proven too
 - **15 more strokes on `internal/tools`**, on the three tools that READ the
   estate's own record — where a quiet wrong answer does the most damage. Every

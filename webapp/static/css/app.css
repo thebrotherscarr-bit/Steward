@@ -150,21 +150,88 @@ body {
 }
 
 /* Logo */
+/* ---- THE SIDEBAR'S HEAD -------------------------------------------------
+   A lockup, the one action worth pinning, and the palette made visible. The
+   nav used to start at the top of the panel with nothing above it, so the
+   most-pressed thing in the console (boot) was three cards down a page and
+   the keyboard path was invisible. */
 .logo {
-  padding: 20px;
-  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
 }
-.logo h1 {
-  font-size: var(--t-xl);
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 1px;
+/* A mark, not a logo: two strokes that read as a door. It carries the accent
+   so the eye has one fixed point when the nav highlight moves around it. */
+.logo-mark {
+  width: 26px; height: 26px; flex: 0 0 26px; border-radius: 7px;
+  background: linear-gradient(140deg, var(--accent), var(--purple));
+  position: relative;
 }
-.logo span {
-  font-size: var(--t-xs);
-  color: var(--text-3);
-  font-family: var(--font-mono);
+.logo-mark::after {
+  content: ''; position: absolute; inset: 8px 10px 8px 8px;
+  border-left: 2px solid var(--bg); border-top: 2px solid var(--bg);
+  border-bottom: 2px solid var(--bg); border-radius: 2px 0 0 2px;
 }
+.logo-words { display: flex; flex-direction: column; line-height: 1.25; }
+.logo-words b { font-size: var(--t-base); font-weight: 600; letter-spacing: 0.06em; }
+.logo-words span { font-size: var(--t-xs); color: var(--muted); font-family: var(--mono); }
+
+.side-primary {
+  display: block; width: calc(100% - var(--s4) * 2);
+  margin: 0 var(--s4) var(--s2);
+  padding: var(--s2) var(--s3);
+  border: 0; border-radius: var(--radius);
+  background: var(--purple); color: var(--bg);
+  font-family: var(--font); font-size: var(--t-md); font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--transition);
+}
+.side-primary:hover { filter: brightness(1.08); }
+.side-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* It looks like a field and it is a button, because the palette owns the
+   input. Pretending otherwise would mean two places to type. */
+.side-search {
+  display: flex; align-items: center; justify-content: space-between;
+  width: calc(100% - var(--s4) * 2);
+  margin: 0 var(--s4) var(--s3);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border-2); border-radius: var(--radius);
+  background: var(--bg); color: var(--muted);
+  font-family: var(--font); font-size: var(--t-md);
+  cursor: pointer; text-align: left;
+}
+.side-search:hover { border-color: var(--accent); color: var(--text-2); }
+.side-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.side-search kbd {
+  font-family: var(--mono); font-size: var(--t-xs);
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; color: var(--muted);
+}
+
+/* ---- THE NAV, IN SECTIONS ----------------------------------------------
+   Eight flat links asked the eye to read all eight every time. Three groups
+   name what each is FOR, so the scan is to a group and then to a line. */
+.nav-section {
+  padding: var(--s3) var(--s4) var(--s1);
+  font-size: var(--t-xs); font-weight: 600;
+  color: var(--text-3); letter-spacing: 0.06em;
+}
+.nav-section:first-child { padding-top: var(--s1); }
+
+/* A BADGE IS A NUMBER THE RECORD CAN PROVE, or it is not shown. Same rule
+   the dashboard is held to (SPEC 3 invariant 10): these are filled from the
+   tools -- seats, records, git, the registry -- and stay hidden until one
+   answers. A decorative count would be the one lie on the furniture. */
+.nav-badge {
+  margin-left: auto;
+  font-family: var(--mono); font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-4); color: var(--muted);
+  border-radius: 10px; padding: 1px 7px;
+}
+.nav-link.active .nav-badge { background: rgba(137,180,250,0.18); color: var(--accent); }
+/* Unsent work is the one badge that is a WARNING rather than a count. */
+.nav-badge.warn { background: rgba(249,226,175,0.16); color: var(--yellow); }
 
 /* Navigation */
 .nav { flex: 1; padding: 12px 0; overflow-y: auto; }
@@ -349,6 +416,16 @@ td code {
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 
 /* Forms */
+/* THE FIELD RULE IS ON THE ELEMENT, NOT ONLY ON THE CLASS. Ten inputs in
+   this console were written without class="input" and came out in the
+   browser's own white box with black text -- the save-message field on
+   Version control was the loud one, a bare white slab under a dark card.
+   Classing the ten by hand fixes the ten and not the eleventh, so the rule
+   is bound to the element and .input is kept as the explicit spelling of the
+   same thing. The :not() guards keep it off the controls that are not fields
+   (buttons, and the checkboxes and radios nothing uses yet). */
+input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select, textarea,
 .input, .select, .textarea {
   padding: 8px 12px;
   background: var(--bg);
@@ -360,10 +437,14 @@ td code {
   transition: border-color var(--transition);
   width: 100%;
 }
+input:focus, select:focus, textarea:focus,
 .input:focus, .select:focus, .textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
+/* The placeholder was inheriting the browser's grey, which on this ground
+   read almost as loud as a typed value. */
+input::placeholder, textarea::placeholder { color: var(--text-3); }
 .textarea { min-height: 80px; resize: vertical; font-family: var(--font-mono); }
 .form-group { margin-bottom: 12px; }
 .form-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: 6px; font-weight: 600; }
@@ -972,3 +1053,52 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .empty-text { font-size: var(--t-md); color: var(--text-2); line-height: 1.6;
               padding: var(--s5) var(--s4); text-align: center; }
 .empty-text b { color: var(--text); }
+
+/* ---- THE STAT CARD, WITH A FACE ----------------------------------------
+   Five flat boxes of the same weight. The reference this was measured
+   against gives each one a tint and a delta, and the tint is not decoration:
+   it is the SAME colour the value already carries, so green/red/amber read
+   twice -- once in the figure and once in the ground behind it -- and a red
+   card is visible before the number is read.
+
+   The tint is drawn from the card's own tone class rather than a per-card
+   colour, so there is one place a tone is defined and a sixth card cannot
+   invent a seventh colour. */
+.stat { position: relative; overflow: hidden; }
+.stat::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(120% 100% at 100% 0%, var(--tint, transparent), transparent 62%);
+  pointer-events: none;
+}
+.stat > * { position: relative; }
+.stat:has(.stat-value.green)  { --tint: rgba(166,227,161,0.10); border-color: rgba(166,227,161,0.22); }
+.stat:has(.stat-value.red)    { --tint: rgba(243,139,168,0.12); border-color: rgba(243,139,168,0.28); }
+.stat:has(.stat-value.yellow) { --tint: rgba(249,226,175,0.10); border-color: rgba(249,226,175,0.22); }
+.stat:has(.stat-value.blue)   { --tint: rgba(137,180,250,0.10); border-color: rgba(137,180,250,0.22); }
+.stat:has(.stat-value.purple) { --tint: rgba(203,166,247,0.10); border-color: rgba(203,166,247,0.22); }
+
+/* The label row carries the delta, so the eye lands on WHAT and HOW IT MOVED
+   in one pass instead of reading down to a note. */
+.stat-head { display: flex; align-items: center; justify-content: space-between;
+             gap: var(--s2); }
+.stat-delta {
+  font-family: var(--mono); font-size: var(--t-xs); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: 10px; padding: 1px 7px;
+  background: var(--bg-4); color: var(--muted);
+}
+.stat-delta.up   { background: rgba(166,227,161,0.14); color: var(--green); }
+.stat-delta.down { background: rgba(243,139,168,0.14); color: var(--red); }
+.stat-note { font-size: var(--t-sm); color: var(--text-2); margin-top: var(--s1);
+             line-height: 1.45; }
+
+/* ---- THE BREADCRUMB ----------------------------------------------------
+   Where you are, above the page's own name. Two levels is all this console
+   has, so it says the estate and the page and stops -- a crumb trail that
+   invents depth is furniture. */
+.crumb { display: flex; align-items: center; gap: var(--s2);
+         font-size: var(--t-sm); color: var(--muted); margin-bottom: var(--s3); }
+.crumb a { color: var(--muted); text-decoration: none; }
+.crumb a:hover { color: var(--text-2); }
+.crumb .sep { opacity: 0.5; }
+.crumb .here { color: var(--text-2); }

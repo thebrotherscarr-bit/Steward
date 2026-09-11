@@ -16,6 +16,8 @@ const App = {
     this.loadHealth();
     // Ctrl+K / Cmd+K, anywhere. The one global key this console binds.
     Palette.bind();
+    this.bindSidebar();
+    this.paintBadges();
     API.sse((e) => this.onEvent(e));
     // Every page follows a turn started in another browser, not just the
     // one that asked for it. Idempotent: mirror() returns at once if it is
@@ -31,7 +33,121 @@ const App = {
     document.querySelectorAll('.nav-link').forEach(a => {
       a.classList.toggle('active', a.dataset.page === this.currentPage);
     });
+    this.paintCrumb();
     this.render();
+  },
+
+  // THE CRUMB SAYS THE ESTATE AND THE PAGE, AND STOPS -- unless the path
+  // really is deeper, which is the only case where a third step is a fact
+  // rather than furniture. The page's NAME comes off the nav link itself, so
+  // a label renamed in the panel (Flows -> Version control, 2026-09-10) is
+  // renamed here in the same stroke and cannot drift.
+  paintCrumb() {
+    const el = document.getElementById('crumb');
+    if (!el) return;
+    const link = document.querySelector(`.nav-link[data-page="${this.currentPage}"]`);
+    // A page off the panel (traces, messages, playground) still routes, so it
+    // still gets a crumb -- titled from the path when the nav has no line.
+    const name = link
+      ? (link.childNodes[0].textContent || '').trim()
+      : this.currentPage.charAt(0).toUpperCase() + this.currentPage.slice(1);
+    const home = this.currentPage === 'dashboard';
+    const parts = [`<a href="/" onclick="event.preventDefault();history.pushState(null,'','/');App.router();">ATLAS</a>`];
+    if (!home) {
+      parts.push('<span class="sep">/</span>');
+      if (this.pageParam) {
+        const back = '/' + this.currentPage;
+        parts.push(`<a href="${back}" onclick="event.preventDefault();history.pushState(null,'','${back}');App.router();">${escHtml(name)}</a>`);
+        parts.push('<span class="sep">/</span>');
+        parts.push(`<span class="here">${escHtml(decodeURIComponent(this.pageParam))}</span>`);
+      } else {
+        parts.push(`<span class="here">${escHtml(name)}</span>`);
+      }
+    }
+    el.innerHTML = parts.join('');
+    el.hidden = home;
+  },
+
+  // The two buttons above the nav. The primary one is context-aware, and it
+  // reads Run's LIVE state each time rather than a remembered one -- a button
+  // offering to close a sitting that already closed is the class of lie this
+  // console keeps removing.
+  bindSidebar() {
+    const search = document.getElementById('side-search');
+    if (search) search.onclick = () => Palette.show();
+    const prim = document.getElementById('side-primary');
+    if (prim) prim.onclick = () => {
+      history.pushState(null, '', '/');
+      this.router();
+      setTimeout(() => (Run.engineOpen ? Home.closeSitting() : Home.boot()), 60);
+    };
+    // Repainted on every run event, because a turn can open or close a sitting
+    // and the button must not go on offering the thing that already happened.
+    if (!this._sideBound) {
+      this._sideBound = true;
+      Run.on(() => this.paintSidebar());
+    }
+    this.paintSidebar();
+  },
+
+  paintSidebar() {
+    const prim = document.getElementById('side-primary');
+    if (!prim) return;
+    prim.textContent = Run.engineOpen ? 'Close the sitting' : 'Boot an engine';
+    prim.title = Run.engineOpen
+      ? 'pays its toll and reaps the engine · sitting ' + (Run.sitting || '?')
+      : 'opens a sitting on ' + (Run.world || 'this world');
+  },
+
+  // A BADGE IS A NUMBER THE RECORD CAN PROVE. Each is read from the tool that
+  // owns it and stays hidden until that tool answers; a count this page worked
+  // out for itself would be the same fault the dashboard carried until P0-11.
+  // Each is allowed to fail on its own -- one silent tool must not blank three
+  // true numbers.
+  async paintBadges() {
+    const put = (page, text, warn) => {
+      const el = document.getElementById('badge-' + page);
+      if (!el) return;
+      if (text == null) { el.hidden = true; return; }
+      el.textContent = String(text);
+      el.className = 'nav-badge' + (warn ? ' warn' : '');
+      el.hidden = false;
+    };
+    const quiet = async (fn) => { try { return await fn(); } catch { return null; } };
+
+    put('agents', await quiet(async () => {
+      const d = JSON.parse(await this.tool('seats', {}));
+      return (d.seats || []).length || null;
+    }));
+    put('records', await quiet(async () => {
+      const d = JSON.parse(await this.tool('records', {}));
+      return d.count || null;
+    }));
+    put('tools', await quiet(async () => {
+      const r = await API.tools();
+      return (r.tools || []).length || null;
+    }));
+    // UNSENT WORK IS A WARNING, not a tally: it is the one number here that
+    // means something is OWED rather than something exists.
+    //
+    // ACROSS EVERY CARRIED WORLD, because that is what the page it badges
+    // shows. A first cut read the default world alone and said 2 while atlas
+    // sat clean beside it -- a true number about one world, standing in for
+    // two, which is the shape of every wrong count this console has removed.
+    const owed = await quiet(async () => {
+      const m = await this.tool('muster', {});
+      const worlds = (m || '').split(String.fromCharCode(10))
+        .map(s => s.trim()).filter(s => s && !s.endsWith(':'));
+      let n = 0;
+      for (const w of worlds) {
+        try {
+          const g = JSON.parse(await this.tool('git', { project: w }));
+          if (g.is_repo) n += (g.changed || 0) + (g.untracked || 0) + (g.ahead || 0);
+        } catch { /* one unreadable world must not blank the others */ }
+      }
+      return n;
+    });
+    put('flows', owed || null, owed > 0);
   },
 
   async loadHealth() {
@@ -765,11 +881,19 @@ const App = {
     }
 
     const cards = [];
-    const card = (label, value, tone, note, src) => cards.push(
-      `<div class="stat"><div class="stat-label">${escHtml(label)}</div>
-       <div class="stat-value ${tone || ''}">${value}</div>
-       ${note ? `<div class="stat-note">${note}</div>` : ''}
-       <div class="brief-src">${escHtml(src)}</div></div>`);
+    // `delta` is OPTIONAL and is only ever passed where the record holds a
+    // previous value to compare against. A card with nothing to compare shows
+    // no delta rather than a zero -- "unchanged" and "never measured twice"
+    // are different claims, and the second is the true one here.
+    const card = (label, value, tone, note, src, delta) => cards.push(
+      `<div class="stat">
+         <div class="stat-head">
+           <div class="stat-label">${escHtml(label)}</div>
+           ${delta ? `<span class="stat-delta ${delta.dir}">${escHtml(delta.text)}</span>` : ''}
+         </div>
+         <div class="stat-value ${tone || ''}">${value}</div>
+         ${note ? `<div class="stat-note">${note}</div>` : ''}
+         <div class="brief-src">${escHtml(src)}</div></div>`);
 
     // ---- the suites, as they stamped themselves ----------------------
     const su = p.suites || {};
@@ -793,10 +917,21 @@ const App = {
     } else {
       const last = runs[runs.length - 1];
       const greens = runs.filter(r => r.green).length;
+      // THE ONE HONEST DELTA IN THIS CONSOLE. run_history.jsonl holds every
+      // prior live run, so the move from the previous one is read, not
+      // guessed. Nothing else here has a second measurement to compare
+      // against, so nothing else gets a delta.
+      let move = null;
+      if (runs.length > 1) {
+        const prev = runs[runs.length - 2];
+        const d = (last.passed || 0) - (prev.passed || 0);
+        if (d !== 0) move = { dir: d > 0 ? 'up' : 'down',
+                              text: (d > 0 ? '+' : '') + d + ' vs last' };
+      }
       card('standup', `${last.passed}<span class="muted">/${last.total}</span>`,
            last.green ? 'green' : 'red',
            (last.green ? 'green' : 'RED — ' + ((last.failed || []).join(', ') || '?')) +
-           ' · ' + when(last.at), 'tests/run_history.jsonl');
+           ' · ' + when(last.at), 'tests/run_history.jsonl', move);
       card('standups run', `${greens}<span class="muted">/${runs.length}</span>`,
            greens === runs.length ? 'green' : 'yellow',
            'green of all live runs on record', 'tests/run_history.jsonl');

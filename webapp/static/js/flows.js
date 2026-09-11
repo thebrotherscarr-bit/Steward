@@ -225,7 +225,7 @@ const Flows = {
           : `Take the ${g.behind} save${g.behind === 1 ? '' : 's'} GitHub has`;
 
     return `<div class="mt-16">
-      <input type="text" id="msg-${q}" placeholder="say what this save is, in your own words" />
+      <input type="text" class="input mb-16" id="msg-${q}" placeholder="say what this save is, in your own words" />
       <div class="flex">
         <button class="btn btn-sm" data-act="save" data-w="${q}"
           title="Save every change in this world under the message above">Save the work</button>
@@ -312,7 +312,7 @@ const Flows = {
     box.innerHTML = `<div class="card-title mt-16">Lines of work</div>`
       + `<table>${rows}</table>`
       + `<div class="flex mt-16">`
-      + `<input type="text" id="newline-${escHtml(w)}" placeholder="name a new line, e.g. fix/the-door" />`
+      + `<input type="text" class="input mb-16" id="newline-${escHtml(w)}" placeholder="name a new line, e.g. fix/the-door" />`
       + `<button class="btn btn-sm" data-line="new" data-w="${escHtml(w)}">Start a new line</button></div>`
       + `<div id="lineout-${escHtml(w)}" class="muted"></div>`;
 

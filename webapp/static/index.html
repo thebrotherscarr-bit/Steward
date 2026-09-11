@@ -11,9 +11,23 @@
   <div class="app">
     <nav class="sidebar" id="sidebar">
       <div class="logo">
-        <h1>ATLAS</h1>
-        <span id="version">loading...</span>
+        <span class="logo-mark" aria-hidden="true"></span>
+        <span class="logo-words"><b>ATLAS</b><span id="version">loading...</span></span>
       </div>
+
+      <!-- THE ONE ACTION, PINNED. Booting is the most-pressed thing in this
+           console and it lived three cards down a page. It is context-aware:
+           with an engine standing it becomes Close, because closing PAYS THE
+           TOLL and that is the act the record depends on. -->
+      <button class="side-primary" id="side-primary" type="button">Boot an engine</button>
+
+      <!-- THE PALETTE, MADE VISIBLE. Ctrl+K has worked since it was built and
+           nothing on screen said so, which is the same as not having it. This
+           is a button that looks like a search field because that is what it
+           does; the palette itself is the input. -->
+      <button class="side-search" id="side-search" type="button">
+        <span>Search</span><kbd>Ctrl K</kbd>
+      </button>
       <div class="nav" id="nav">
         <!-- data-icon is GONE from these lines. It carried six characters
              from four different Unicode families (BLACK SQUARE, PENCIL,
@@ -23,25 +37,28 @@
              come from css/icons.css, keyed off data-page, one grid and one
              stroke, masked over currentColor so they take the link's own
              colour through idle, hover and active. -->
+        <div class="nav-section">Work</div>
         <a href="/" class="nav-link active" data-page="dashboard">Dashboard</a>
         <a href="/chat" class="nav-link" data-page="chat">Chat</a>
-        <a href="/agents" class="nav-link" data-page="agents">Agents</a>
+        <a href="/agents" class="nav-link" data-page="agents">Agents<span class="nav-badge" id="badge-agents" hidden></span></a>
+        <div class="nav-section">Record</div>
         <a href="/evals" class="nav-link" data-page="evals">Evals</a>
-        <a href="/records" class="nav-link" data-page="records">Records</a>
+        <a href="/records" class="nav-link" data-page="records">Records<span class="nav-badge" id="badge-records" hidden></span></a>
         <!-- The LABEL is Version control; the route and data-page stay
              "flows" on purpose -- the route is what every existing link,
              bookmark and history entry points at, and data-page is the key
              css/icons.css draws the glyph from. Renaming the label is the
              operator's word (2026-09-10); renaming the route would break
              things for a word. -->
-        <a href="/flows" class="nav-link" data-page="flows">Version control</a>
+        <a href="/flows" class="nav-link" data-page="flows">Version control<span class="nav-badge" id="badge-flows" hidden></span></a>
         <!-- TOOLS IS BACK, 2026-09-10, at the operator's word: the skills
              ARE the useful part, and this is "a platform for writing stuff
              up as markdown skills". Its route, page and handler never left.
              Traces and Playground stay parked by the same ruling in the
              same breath -- Traces has no job yet ("i dont know what that
              would even be"), and Playground waits on the coding space. -->
-        <a href="/tools" class="nav-link" data-page="tools">Tools</a>
+        <div class="nav-section">System</div>
+        <a href="/tools" class="nav-link" data-page="tools">Tools<span class="nav-badge" id="badge-tools" hidden></span></a>
         <a href="/settings" class="nav-link" data-page="settings">Settings</a>
         <!-- FLOWS IS BACK ON THE PANEL, 2026-09-10, at the operator's word
              ("flows.. put it in there"). Version control IS a flow, and the
@@ -67,8 +84,15 @@
         <div class="covenant">covenant: 1512741580b7239b</div>
       </div>
     </nav>
-    <main class="main" id="content">
-      <div class="loading">Loading...</div>
+    <main class="main">
+      <!-- ONE CRUMB, PAINTED BY THE ROUTER. It lives here rather than in each
+           page's own header because the router is the only thing that knows
+           where you are, and fourteen hand-written copies of the same line is
+           fourteen chances for one of them to be wrong. -->
+      <div class="crumb" id="crumb" hidden></div>
+      <div id="content">
+        <div class="loading">Loading...</div>
+      </div>
     </main>
   </div>
   <div id="toast" class="toast"></div>
