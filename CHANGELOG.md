@@ -12,6 +12,50 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The rule that kept winning arguments it was not in
+
+`.covenant` being declared twice was one instance of something; this is the
+rest of it, found by measuring instead of by eye. Two audits were written
+against the stylesheet: one for the same selector declared twice, one for the
+shape that actually did the damage — two DIFFERENT classes worn on one element
+where the later one silently takes a property.
+
+**The culprit is `.muted`, and it has now ambushed three things.** It is worn
+as a colour utility, 62 times across this console, but it also sets a
+`font-size` and a `margin-top`, and at one class of specificity the later rule
+wins. It took the hero verdict from 40px down to 12px this morning. It was
+also cutting Version control's footnote — *"Every button here is your hand,
+not the machine's"* — from 16px of top margin to 6px, which is why that line
+has been sitting closer to the buttons than it was written to.
+
+- **The spacing utilities moved to the foot of the file.** A utility exists to
+  set one property and `.mt-16` was losing that property to a colour class.
+  Utilities come last; that is the whole reason they are a category. Measured
+  after: the footnote gets its 16px.
+- **The hazard is written down at `.muted`'s own definition**, in the terms a
+  hand needs: wearing it beside any class that sets `font-size` or
+  `margin-top` means `.muted` wins unless that class is declared after it.
+  Stripping the two extra properties would resize all 62 uses, which is a
+  change nobody asked for, so the rule stands and the trap is documented where
+  it is stepped in.
+- **`.seat-open` declared `color: inherit` and never got it** — `.card-title`
+  is later and sets the colour. What the link actually wanted was to look like
+  every other card title, which is what it was already doing, so the dead
+  declaration is gone and the hover stays (a pseudo-class outranks a bare
+  class). Measured: the seat name renders at `--accent-2`, identical to a
+  title that is not a link.
+- **`.sidebar-footer`'s `font-size: 11px`** was re-stated verbatim as
+  `var(--t-xs)` further down and never read.
+
+**What the audits say now.** Three pairs still collide and all three are the
+INTENDED rule winning: `.btn-sm` over `.btn`, `.home-box` over `.card`,
+`.chat-foot` over `.muted`. Three more — `.empty-text`, `.textarea`, `th` — hold
+an earlier value a later rule deliberately refines, which is a cascade doing
+its job rather than a defect. No ambushes remain.
+
+Swept afterwards across all eight pages: none scrolls sideways, and the crumb
+is hidden on the Dashboard and present everywhere else.
+
 ### The Aurora scheme
 
 The operator pointed at a console he built for an earlier version of this

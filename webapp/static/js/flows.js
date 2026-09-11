@@ -183,9 +183,13 @@ const Flows = {
       const files = (g.files || []).map(f => {
         const path = f.slice(2).trim();
         const what = this.said(f.slice(0, 2));
+        // TWO COLUMNS, NOT A MIN-WIDTH. The label was an inline-block with
+        // min-width:150px, which is a floor and not a ceiling: "changed,
+        // ready to save" is wider than that in the mono face and ran
+        // straight into the filename with no gap at all.
         return `<div class="chat-session repo-file" data-w="${escHtml(w)}" data-f="${escHtml(path)}">`
-          + `<span class="muted" style="display:inline-block;min-width:150px">${escHtml(what)}</span>`
-          + escHtml(path) + `</div>`;
+          + `<span class="repo-what muted">${escHtml(what)}</span>`
+          + `<span class="repo-path">${escHtml(path)}</span></div>`;
       }).join('');
       cards.push(`<div class="mt-16"><b>${escHtml(w)}</b>`
         + `<table style="margin-top:6px">${rows}</table>`

@@ -310,7 +310,10 @@ body {
           display: flex; flex-direction: column; }
 /* A seat's name opens it. It reads as a title until you go near it, because
    on a page of fourteen cards a row of blue links is a row of noise. */
-.seat-open { color: inherit; text-decoration: none; }
+.seat-open { text-decoration: none; }   /* `color: inherit` was dead here —
+   .card-title is declared later and sets it, which is what this link wanted
+   anyway: to look like every other card title until you go near it. The hover
+   below still wins, because a pseudo-class outranks a bare class. */
 /* A SYSTEM PROMPT IS PROSE, so it wraps. It is written in a mono face because
    it is a declared artifact and every character in it counts, but the base
    `pre` rule now scrolls anything too wide, and a paragraph you have to drag
@@ -561,7 +564,6 @@ body {
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
   color: var(--text-3);
   display: flex;
   flex-direction: column;
@@ -966,8 +968,10 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 pre { overflow-x: auto; max-width: 100%; }
 .flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
-.mt-16 { margin-top: 16px; }
-.mb-16 { margin-bottom: 16px; }
+/* .mt-16 / .mb-16 MOVED TO THE FOOT OF THIS FILE. A spacing utility exists
+   to set one property and it was losing that property to .muted, which is
+   declared later and also sets margin-top. Utilities come last — that is the
+   whole reason they are a category. */
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -1008,6 +1012,20 @@ pre { overflow-x: auto; max-width: 100%; }
 .chat-session { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; word-break: break-all; }
 .chat-session:hover { background: var(--bg); }
 .chat-session.active { border: 1px solid var(--accent); }
+/* .muted DOES THREE JOBS AND HAS AMBUSHED SOMETHING WITH EACH OF THEM.
+   It is worn as a colour utility — 62 times across this console — but it also
+   sets a font-size and a margin, and at one class of specificity the later
+   rule wins. Twice today: it took the hero verdict down from 40px to 12px
+   (`.hero-verdict muted`), and it cut `.muted .mt-16` from 16px of top margin
+   to 6px on Version control. Stripping the extra two properties would resize
+   all 62 uses, which is a change he did not ask for, so the rule stands and
+   the hazard is written down instead:
+
+       WEARING .muted BESIDE ANY CLASS THAT SETS font-size OR margin-top
+       MEANS .muted WINS, unless that class is declared after this line or
+       carries more than one selector's worth of specificity.
+
+   The spacing utilities below are moved past it for exactly that reason. */
 .muted { color: var(--text-3); font-size: 12px; margin-top: 6px; }
 
 /* The standing report. One row per organ; each says where it was read from.
@@ -1441,3 +1459,21 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .crumb a:hover { color: var(--text-2); }
 .crumb .sep { opacity: 0.5; }
 .crumb .here { color: var(--text-2); }
+
+/* A CHANGED FILE IS A LABEL AND A PATH, in two columns that cannot touch.
+   The label column takes what it needs up to a cap and the path takes the
+   rest; a long path wraps rather than pushing the card. */
+.repo-file { display: grid; grid-template-columns: minmax(150px, max-content) 1fr;
+             gap: var(--s4); align-items: baseline; }
+.repo-what { white-space: nowrap; }
+.repo-path { overflow-wrap: anywhere; }
+
+/* ---- UTILITIES, LAST ----------------------------------------------------
+   Anything below here does ONE job and is meant to win when it is worn. They
+   sit at the foot of the file because that is what makes them do so: at one
+   class of specificity the cascade is decided by source order, and a utility
+   that loses its one property is furniture. `.mt-16` was losing 16px to
+   `.muted`'s 6px on Version control's footnote for exactly this reason. JS
+   writes these class names, so they are aliased to the scale, not orphaned. */
+.mt-16 { margin-top: var(--s4); }
+.mb-16 { margin-bottom: var(--s4); }
