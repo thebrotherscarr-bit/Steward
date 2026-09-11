@@ -24,7 +24,9 @@
 // not shown (SPEC 3 invariant 10).
 const Home = {
   brief: null,
-  recent: [],
+  // An objective staged from another page (Version control's Recent), waiting
+  // for the next render to put it in the box. Never run on its own.
+  pending: '',
 
   bound: false,
 
@@ -91,10 +93,8 @@ const Home = {
            with the other github stuff". Flows already carries the per-world
            overwatch, so every git surface is now on one page. -->
 
-      <div class="card" id="home-recent-card" hidden>
-        <div class="card-title">Recent</div>
-        <div id="home-recent"></div>
-      </div>`;
+      <!-- Recent MOVED TO VERSION CONTROL, 2026-09-10, with the repository
+           card it sat under. -->`;
 
     const form = document.getElementById('home-form');
     const input = document.getElementById('home-input');
@@ -103,13 +103,15 @@ const Home = {
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.go(); }
     });
+    // A recent objective clicked on Version control lands here, in the box,
+    // unrun. Cleared as it is taken so a later visit is not haunted by it.
+    if (this.pending) { input.value = this.pending; this.pending = ''; }
     input.focus();
     document.getElementById('home-mic').onclick = () => this.mic();
     // The thread renders before anything is asked, so a conversation
     // survives navigating away and back.
     this.thread();
 
-    this.paintRecent();
     // The scores, and the turn's own step-by-step. Both are App's renderers:
     // one `proofs` read and one `paintRun`, shared with Records and with
     // whatever else asks -- never a second copy that can drift.
@@ -327,7 +329,6 @@ const Home = {
       this.block('');
       const input = document.getElementById('home-input');
       if (input) input.focus();      // the loop: he can answer without reaching
-      this.paintRecent();
       // A turn can commit, or open a sitting, or close one, and it can turn a
       // suite green. The panels that read those follow it -- a score still
       // saying RED after the run that fixed it is the two halves disagreeing.
@@ -862,26 +863,9 @@ const Home = {
     });
   },
 
-  // ---- recent -------------------------------------------------------------
+  // ---- recent ----------------------------------------------------------
+  // MOVED TO VERSION CONTROL, 2026-09-10, at the operator's word -- it sat
+  // under the repository card and went with it. It still reads Chat's own
+  // thread, so the two pages cannot disagree about what was said.
 
-  // Read off Chat's own thread, so it cannot disagree with what he can scroll
-  // back and read for himself.
-  paintRecent() {
-    const said = (Chat.thread || []).filter(m => m.who === 'him').slice(-5).reverse();
-    const card = document.getElementById('home-recent-card');
-    const box = document.getElementById('home-recent');
-    if (!card || !box) return;
-    card.hidden = !said.length;
-    box.innerHTML = said.map(m => `
-      <div class="home-recent-row" data-say="${escHtml(m.text)}">
-        <span class="home-recent-text">${escHtml(m.text)}</span>
-      </div>`).join('');
-    box.querySelectorAll('[data-say]').forEach(r => {
-      r.onclick = () => {
-        const i = document.getElementById('home-input');
-        i.value = r.dataset.say;
-        i.focus();
-      };
-    });
-  }
 };

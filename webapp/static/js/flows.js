@@ -12,10 +12,8 @@ const Flows = {
 
   async render(el) {
     el.innerHTML = `
-      <!-- The nav calls this Flows, so the page does too. It holds version
-           control now and nothing else; renaming the nav is the operator's. -->
-      <div class="page-header"><div><div class="page-title">Flows</div>
-      <div class="page-subtitle">Version control — what is saved, what is not, and every way to move it</div></div></div>
+      <div class="page-header"><div><div class="page-title">Version control</div>
+      <div class="page-subtitle">What is saved, what is not, and every way to move it</div></div></div>
 
       <div class="card"><div class="card-title">The repositories — what is saved, what is not, and what you can do about it</div>
         <div id="repo-watch"><div class="loading">Reading both grounds...</div></div>
@@ -37,9 +35,51 @@ const Flows = {
           <span class="flex" id="flow-council-controls"></span>
         </div>
         <div id="flow-council"></div>
+      </div>
+
+      <!-- Recent came with the repository card (2026-09-10). It reads Chat's
+           own thread, so it cannot disagree with what he can scroll back and
+           read for himself. -->
+      <div class="card" id="flow-recent-card" hidden>
+        <div class="card-title">Recent</div>
+        <div id="flow-recent"></div>
       </div>`;
     await this.repos();
     await this.readGit();
+    // THE THREAD IS RESTORED BEFORE IT IS READ. Chat.thread is per-tab and
+    // empty on a fresh load; the Dashboard refills it from the settings store
+    // on render, so Recent was full there and blank here for anyone who landed
+    // on this page first. Home's own restore is reused rather than copied --
+    // it is a no-op when the thread is already held, and its render guard
+    // means the dashboard element it usually paints is simply not found.
+    await Home.showKeptThread();
+    this.paintRecent();
+  },
+
+  // The last few things he asked for, read off Chat's own thread.
+  //
+  // CLICKING ONE STILL FILLS THE BOX, and the box is on the Dashboard now.
+  // It used to write straight into `home-input`, which does not exist on this
+  // page -- so the objective is stashed on Home and the router is sent there,
+  // and Home's render picks it up. Nothing is RUN by a click: it lands in the
+  // box for him to read and press, exactly as it did before it moved.
+  paintRecent() {
+    const said = (Chat.thread || []).filter(m => m.who === 'him').slice(-5).reverse();
+    const card = document.getElementById('flow-recent-card');
+    const box = document.getElementById('flow-recent');
+    if (!card || !box) return;
+    card.hidden = !said.length;
+    box.innerHTML = said.map(m => `
+      <div class="home-recent-row" data-say="${escHtml(m.text)}">
+        <span class="home-recent-text">${escHtml(m.text)}</span>
+      </div>`).join('');
+    box.querySelectorAll('[data-say]').forEach(r => {
+      r.onclick = () => {
+        Home.pending = r.dataset.say;
+        history.pushState(null, '', '/');
+        App.router();
+      };
+    });
   },
 
   // THE OVERWATCH, IN PLAIN LANGUAGE (the operator, 2026-09-10: "all the

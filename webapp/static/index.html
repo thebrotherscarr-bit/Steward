@@ -28,7 +28,13 @@
         <a href="/agents" class="nav-link" data-page="agents">Agents</a>
         <a href="/evals" class="nav-link" data-page="evals">Evals</a>
         <a href="/records" class="nav-link" data-page="records">Records</a>
-        <a href="/flows" class="nav-link" data-page="flows">Flows</a>
+        <!-- The LABEL is Version control; the route and data-page stay
+             "flows" on purpose -- the route is what every existing link,
+             bookmark and history entry points at, and data-page is the key
+             css/icons.css draws the glyph from. Renaming the label is the
+             operator's word (2026-09-10); renaming the route would break
+             things for a word. -->
+        <a href="/flows" class="nav-link" data-page="flows">Version control</a>
         <!-- TOOLS IS BACK, 2026-09-10, at the operator's word: the skills
              ARE the useful part, and this is "a platform for writing stuff
              up as markdown skills". Its route, page and handler never left.

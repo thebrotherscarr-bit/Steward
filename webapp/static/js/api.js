@@ -139,8 +139,23 @@ function timeAgo(d) {
   return Math.floor(s/86400) + 'd ago';
 }
 
+// THE QUOTES MUST GO TOO, and for months they did not.
+//
+// textContent -> innerHTML escapes & < > and NOTHING ELSE -- a double quote
+// comes back through untouched. That is fine in a text position and WRONG in
+// an attribute, and this file's callers build 17 attributes with it. Measured
+// 2026-09-10: a Recent row for the objective
+//     git commit: "a test of the recent card"
+// rendered as data-say="git commit: " -- the attribute ended at the operator's
+// own quote and the rest of his sentence became stray markup. Clicking it
+// refilled the box with half a command.
+//
+// Escaped here rather than at seventeen call sites, because a rule that has to
+// be remembered at every use is a rule that gets forgotten at the eighteenth.
+// &quot; and &#39; render as " and ' in a text position too, so the 209 uses
+// that are NOT attributes are unaffected.
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
-  return d.innerHTML;
+  return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

@@ -13,6 +13,21 @@ under, because they are the record of what happened.
 ## [Unreleased]
 
 ### The console is rearranged around what you actually look at
+- **Recent moved with it**, and the nav item is **Version control** now. The
+  route and `data-page` stay `flows`: the route is what every link, bookmark and
+  history entry points at, and `data-page` is the key `css/icons.css` draws the
+  glyph from. Clicking a recent objective still fills the box — the box is on
+  the Dashboard, so it stages on `Home.pending` and the router goes there.
+  Nothing is run by a click.
+- **`escHtml` did not escape quotes, and seventeen attributes were built with
+  it.** `textContent -> innerHTML` escapes `&`, `<` and `>` and nothing else, so
+  a double quote passed through untouched — fine in a text position, wrong in an
+  attribute. Found by moving Recent: the objective `git commit: "a test of the
+  recent card"` rendered as `data-say="git commit: "`, the attribute ending at
+  the operator's own quote with the rest of his sentence loose as markup.
+  Escaped at the source rather than at seventeen call sites, because a rule that
+  must be remembered at every use is forgotten at the eighteenth; `&quot;`
+  renders as `"` in a text position, so the other 209 uses are unaffected.
 - **The Dashboard opens with the scores.** strokes, smoke, standup, standups run
   and parity moved off Records, where they were a page you had to go to, and now
   head the launchpad. They answer *is the build sound* — the question worth
