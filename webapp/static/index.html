@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ATLAS — Sovereign Agent Harness</title>
   <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/icons.css">
 </head>
 <body>
   <div class="app">
@@ -14,13 +15,28 @@
         <span id="version">loading...</span>
       </div>
       <div class="nav" id="nav">
-        <a href="/" class="nav-link active" data-page="dashboard" data-icon="&#9632;">Dashboard</a>
-        <a href="/chat" class="nav-link" data-page="chat" data-icon="&#9998;">Chat</a>
-        <a href="/agents" class="nav-link" data-page="agents" data-icon="&#9673;">Agents</a>
-        <a href="/evals" class="nav-link" data-page="evals" data-icon="&#10003;">Evals</a>
-        <a href="/records" class="nav-link" data-page="records" data-icon="&#9776;">Records</a>
-        <a href="/settings" class="nav-link" data-page="settings" data-icon="&#9883;">Settings</a>
-        <a href="/flows" class="nav-link" data-page="flows" data-icon="&#9783;">Flows</a>
+        <!-- data-icon is GONE from these lines. It carried six characters
+             from four different Unicode families (BLACK SQUARE, PENCIL,
+             FISHEYE, CHECK MARK, TRIGRAM FOR HEAVEN, ATOM SYMBOL), each
+             drawn by whatever font owned it, at its own weight and baseline
+             -- which is why they never looked like a set. The glyphs now
+             come from css/icons.css, keyed off data-page, one grid and one
+             stroke, masked over currentColor so they take the link's own
+             colour through idle, hover and active. -->
+        <a href="/" class="nav-link active" data-page="dashboard">Dashboard</a>
+        <a href="/chat" class="nav-link" data-page="chat">Chat</a>
+        <a href="/agents" class="nav-link" data-page="agents">Agents</a>
+        <a href="/evals" class="nav-link" data-page="evals">Evals</a>
+        <a href="/records" class="nav-link" data-page="records">Records</a>
+        <a href="/flows" class="nav-link" data-page="flows">Flows</a>
+        <!-- TOOLS IS BACK, 2026-09-10, at the operator's word: the skills
+             ARE the useful part, and this is "a platform for writing stuff
+             up as markdown skills". Its route, page and handler never left.
+             Traces and Playground stay parked by the same ruling in the
+             same breath -- Traces has no job yet ("i dont know what that
+             would even be"), and Playground waits on the coding space. -->
+        <a href="/tools" class="nav-link" data-page="tools">Tools</a>
+        <a href="/settings" class="nav-link" data-page="settings">Settings</a>
         <!-- FLOWS IS BACK ON THE PANEL, 2026-09-10, at the operator's word
              ("flows.. put it in there"). Version control IS a flow, and the
              kinds already say so: a `gate` node holds the six proofs and
@@ -35,8 +51,8 @@
              stand; each line below is one uncomment from being back. -->
         <!-- <a href="/messages" class="nav-link" data-page="messages" data-icon="&#9993;">Messages</a>  (off the panel 2026-09-09 at the operator's word: "we can talk about what they are for later"; the pages and their routes are untouched) -->
         <!-- <a href="/traces" class="nav-link" data-page="traces" data-icon="&#9656;">Traces</a>  (off the panel 2026-09-09 at the operator's word: "we can talk about what they are for later"; the pages and their routes are untouched) -->
-        <!-- <a href="/tools" class="nav-link" data-page="tools" data-icon="&#9881;">Tools</a>  (off the panel 2026-09-09 at the operator's word: "we can talk about what they are for later"; the pages and their routes are untouched) -->
-        <!-- <a href="/playground" class="nav-link" data-page="playground" data-icon="&#9874;">Playground</a>  (off the panel 2026-09-09 at the operator's word: "we can talk about what they are for later"; the pages and their routes are untouched) -->
+        <!-- Tools came back on 2026-09-10 and now sits above, before Settings. -->
+        <!-- <a href="/playground" class="nav-link" data-page="playground" data-icon="&#9874;">Playground</a>  (parked 2026-09-09; kept parked 2026-09-10: "playground could be the coding space, once that is built") -->
         <!-- Flows came back on 2026-09-10 and now sits above, with Settings. -->
       </div>
       <div class="sidebar-footer">

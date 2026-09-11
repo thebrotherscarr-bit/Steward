@@ -190,13 +190,9 @@ body {
   background: rgba(137,180,250,0.08);
   border-left-color: var(--accent);
 }
-.nav-link::before {
-  content: attr(data-icon);
-  font-size: 14px;
-  width: 20px;
-  text-align: center;
-  opacity: 0.7;
-}
+/* The nav glyph now lives in css/icons.css -- one grid, one stroke, masked
+   over currentColor. What stood here rendered `attr(data-icon)`, six
+   characters from four Unicode families at four optical weights. */
 
 /* Sidebar footer */
 .sidebar-footer {
@@ -474,16 +470,24 @@ td code {
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-/* Toast */
+/* Toast
+   IT MUST READ AS FLOATING, OR IT READS AS A ROW. Same box colour as a card,
+   a 1px border and a flat drop at the bottom-right put "New trace recorded"
+   directly on top of a Records table row, styled closely enough to be
+   mistaken for part of it. Lifted off the corner, given a real shadow and
+   the raised surface, so it is obviously in front of the page rather than
+   in it. */
 .toast {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
-  padding: 12px 20px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  bottom: var(--s6);
+  right: var(--s6);
+  max-width: 380px;
+  padding: var(--s3) var(--s4);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
   border-radius: var(--radius);
-  font-size: 13px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4);
+  font-size: var(--t-md);
   z-index: 1000;
   opacity: 0;
   transform: translateY(10px);
@@ -800,3 +804,75 @@ td code {
 .home-gate { border-color: #f9e2af; background: rgba(249,226,175,0.10); }
 .home-bad { border-color: #f38ba8; }
 
+
+/* ---- THREE CARD WEIGHTS ------------------------------------------------
+   Every card on every page was the same box: same surface, same border, same
+   weight. On a screen holding one failure and four quiet facts, the failure
+   had nothing to make it arrive first -- the eye had to READ its way to the
+   important thing, which is the one job a console has.
+
+   This does not add colour. The palette already says what is wrong; what was
+   missing was RANK. A critical card sits forward and carries the accent it
+   already earned; a reference card sits back. Cards say which they are, and
+   a card that says nothing stays exactly as it was, so nothing restyles by
+   accident. */
+.card-critical {
+  border-color: var(--red);
+  background: linear-gradient(var(--bg-2), var(--bg-2)) padding-box;
+  box-shadow: 0 0 0 1px rgba(243,139,168,0.18), 0 8px 28px rgba(0,0,0,0.45);
+}
+.card-critical > .card-header,
+.card-critical > .card-title { color: var(--red); }
+
+.card-wait {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px rgba(249,226,175,0.16), 0 8px 28px rgba(0,0,0,0.40);
+}
+.card-wait > .card-header,
+.card-wait > .card-title { color: var(--yellow); }
+
+/* Reference: present, readable, and plainly not asking for anything. */
+.card-quiet {
+  background: transparent;
+  border-color: var(--border);
+  box-shadow: none;
+}
+.card-quiet > .card-title { color: var(--muted); }
+
+/* ---- FOCUS IS VISIBLE ---------------------------------------------------
+   Nothing in this console showed a focus ring. `:focus` on the inputs cleared
+   the outline and set a border colour; every button, link and nav item showed
+   nothing at all, which makes keyboard navigation a guessing game on a tool
+   meant to be lived in all day.
+
+   :focus-visible, not :focus -- a ring on every mouse click is noise, and it
+   is the reason the outline was removed in the first place. */
+.btn:focus-visible,
+.nav-link:focus-visible,
+.chat-session:focus-visible,
+.tab:focus-visible,
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible,
+[data-act]:focus-visible,
+[data-line]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* ---- THE SIDEBAR FOOTER EARNS ITS SPACE --------------------------------
+   `active` and the covenant hash are the estate's identity, rendered at 10px
+   in the dimmest colour the palette has -- the treatment you give a legal
+   footer you hope nobody reads. The covenant is the precondition of every
+   identity operation in the spine. It can be quiet without being furtive. */
+.sidebar-footer { font-size: var(--t-xs); gap: var(--s1); }
+.covenant {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
