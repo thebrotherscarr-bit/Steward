@@ -36,7 +36,6 @@ webapp/data/
 # makes the ground DIRTY before he types a word. Operator's ruling 2026-09-08:
 # "dont git track them." It stays on disk as the record; git holds the code and
 # the docs.
-SEAT_LOG.md
 
 # Keys are silent (LAW 9).
 .env

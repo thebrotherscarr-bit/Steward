@@ -12,6 +12,13 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The seat log travels, so a clone can prove itself
+
+`atlas/SEAT_LOG.md` was gitignored and never reached a clone, so `cargo test
+--workspace` failed there on the `orient-pack` stroke (`LOG=false`) while
+passing on the ground. CI never saw it: the gate runs `prove.py --check`, which
+skips the cargo leg. Untracked from `.gitignore` on his word, 2026-09-11.
+
 ### The criteria documents, measured rather than remembered
 
 `docs/ACCEPTANCE.md` and `docs/PIPELINES.md` are what a stranger reads to learn
