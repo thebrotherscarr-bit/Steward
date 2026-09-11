@@ -12,6 +12,35 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The readers are proven too
+- **15 more strokes on `internal/tools`**, on the three tools that READ the
+  estate's own record — where a quiet wrong answer does the most damage. Every
+  one of those three exists because an earlier page counted the webapp's own
+  SQLite store instead of asking the record and showed four zeros on a full
+  estate; nothing had ever held them to it. **34 strokes in the package now.**
+- **`records`**: sorted by what a document *is*, with the law above the seats
+  (alphabetical would invert that), `law/` marked sealed, only markdown served,
+  and the sha256 receipt matching the bytes actually handed over. The path
+  stroke is the one worth reading — **a name is matched against the listing and
+  never joined onto Home**, so `../.env`, an absolute path and `law/../.env` are
+  not *defended against*, they simply are not in the list and cannot resolve.
+- **`proofs`**: a closing sitting line folds over its opening one (get that
+  wrong and every sitting counts twice), a half-written last line — what a
+  killed process leaves — is dropped without losing the lines before it, one
+  absent file never blanks the other two, and the counts the core owns are
+  *named* rather than recounted.
+- **`seats`**: fields are whatever a declaration carries, including one invented
+  tomorrow, because the core's own parser names no field either; the colon comes
+  off a key; a `System Prompt` with an empty value takes the body beneath it and
+  stops being counted twice.
+- **The registry contract is pinned.** A tool that writes must declare it —
+  that flag is what the review-only table refuses by, so a mislabelled tool
+  would hand counsel a hand instead of eyes.
+- **`runstream.go` stays uncovered, deliberately**, and is named as such in
+  `tests/PROVING.md`. `RunStream`, `AnswerStream` and `ListenStream` all need a
+  live engine on an open sitting; a mock there would prove the mock.
+
+
 ### The console takes a keyboard
 - **Ctrl+K / Cmd+K opens a palette.** Every page and the engine's verbs, three
   letters and Enter. Checked on the event rather than the platform, because a

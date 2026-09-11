@@ -107,13 +107,30 @@ never a pass.
 `go test ./...` says `[no test files]` sixteen times. That is not an absence
 — it is untested code.
 
-**`internal/tools` came off this list on 2026-09-10** with 19 strokes
-(`gitctl_test.go`) — the wall's one-level-up reading and its bound, branch
-names that would become flags, path jailing, credential-free remote hosts,
-saves that refuse without a message, sending and fetching that refuse by
-name through a shut wall, and a line of work that refuses to be closed while
-it holds work found nowhere else. Every one is hermetic: its own repository
-in `t.TempDir()`, nothing touching the record, no network.
+**`internal/tools` came off this list on 2026-09-10**, and is now the
+best-covered package in THE LINE with **34 strokes**:
+
+- `gitctl_test.go` (19) — the wall's one-level-up reading and its bound, branch
+  names that would become flags, path jailing, credential-free remote hosts,
+  saves that refuse without a message, sending and fetching that refuse by name
+  through a shut wall, and a line of work that refuses to be closed while it
+  holds work found nowhere else.
+- `tools_test.go` (15) — the three READERS, where a quiet wrong answer does the
+  most damage: `records` sorting by what a document is and keeping the law above
+  the seats, law marked sealed, **a name matched against the listing and never
+  joined onto a path** (so `../.env` is not defended against — it simply is not
+  in the list), only markdown served, the sha256 receipt matching the bytes;
+  `proofs` folding a closing sitting line over its opening one, surviving the
+  half-written last line a killed process leaves, and naming the counts the core
+  owns rather than recounting them; `seats` reading whatever fields a
+  declaration carries rather than a schema that would drift.
+
+Every one is hermetic: its own ground in `t.TempDir()`, nothing touching the
+record, no network.
+
+**`runstream.go` is still uncovered, deliberately.** `RunStream`, `AnswerStream`
+and `ListenStream` all need a live engine on an open sitting, which is not a
+thing a hermetic stroke can stand up. A mock there would prove the mock.
 
 **THE LINE (8):**
 
@@ -136,9 +153,10 @@ Ranked by what would hurt most if it broke silently:
 3. `webapp/db` — the face's persistence
 4. the rest
 
-`internal/tools` still has only its git verbs covered — the other five files
-(`records`, `proofs`, `seats`, `runstream`, and the bulk of `tools.go`) carry
-no strokes yet.
+`internal/tools` now covers its git verbs and all three readers. What is left
+there is `runstream.go` (needs a live engine) and the bulk of `tools.go`'s own
+handlers — though the registry contract itself is now pinned: a tool that
+writes must declare it, which is the flag the read-only table refuses by.
 
 ---
 
