@@ -412,9 +412,16 @@ const App = {
       `<span class="badge badge-blue" title="${escHtml(st.note || '')}">${escHtml(st.pipeline)}
        <span class="muted">#${st.step}</span>${st.when ? ' · ' + escHtml(st.when) : ''}</span>`).join(' ');
 
+    // THE NAME IS THE WAY IN. /agents/<file stem> existed for months with
+    // nothing on this page pointing at it, which is most of why it was left
+    // reading a table nobody writes: a route nobody can reach is a route
+    // nobody notices is broken.
+    const stem = String(s.file || '').replace(/\.md$/i, '');
     return `<div class="card seat-card" data-seat="${escHtml((s.name || '').toLowerCase())}">
       <div class="card-header">
-        <span class="card-title">${escHtml(s.name)}</span>
+        <a class="card-title seat-open" href="/agents/${escHtml(stem)}"
+           title="The declaration whole, with the file and its receipt"
+           onclick="event.preventDefault();history.pushState(null,'','/agents/${escHtml(stem)}');App.router();">${escHtml(s.name)}</a>
         <span class="flex">
           ${f['Model Target'] ? `<code class="seat-model">${escHtml(f['Model Target'])}</code>` : ''}
           ${s.prompt ? `<button class="btn btn-sm" data-prompt="${i}">prompt</button>` : ''}
@@ -444,51 +451,104 @@ const App = {
     });
   },
 
+  // ONE SEAT, WHOLE. Reached by clicking its name on /agents.
+  //
+  // THIS ROUTE WAS AN ORPHAN AND A LIE. Nothing on the seats page linked to
+  // it, so the only way in was to type the URL -- and when you did, it read
+  // `API.getAgent`, which queries the WEBAPP'S OWN SQLite `agents` table.
+  // Nothing writes that table. The list beside it reads agents/*.md through
+  // the `seats` tool, so a ground with fourteen declared seats answered 404
+  // for every one of them, and the fields it was built to show (office,
+  // reports_to, mode, permissions) do not exist in a declaration at all.
+  // Fourth instance of a page counting the webapp's store instead of asking
+  // the record, and the last one standing.
+  //
+  // THE KEY IS THE FILE STEM, not a name. `deep_researcher` is stable,
+  // unique, url-safe and is already what the record calls the document;
+  // a display name ("Deep Researcher") is none of those.
+  //
+  // WHAT THE DETAIL ADDS over the card: the declaration in full with nothing
+  // folded, the system prompt open rather than behind a toggle, and THE FILE
+  // ITSELF with its sha256 -- served by `records`, the same receipt the
+  // Records page hands out. The card is the summary; this is the document.
   async renderAgentDetail(el) {
-    el.innerHTML = '<div class="loading">Loading agent...</div>';
+    el.innerHTML = '<div class="loading">Reading the seat...</div>';
+    const stem = String(this.pageParam || '');
+    let seats;
     try {
-      const data = await API.getAgent(this.pageParam);
-      const a = data.agent;
-      const traces = data.traces || [];
-      el.innerHTML = `
-        <div class="page-header">
-          <div>
-            <div class="page-title">${escHtml(a.id)}</div>
-            <div class="page-subtitle">${escHtml(a.office || '')} — ${escHtml(a.mode || '')}</div>
-          </div>
-          <a href="/agents" class="btn" onclick="event.preventDefault();history.pushState(null,'','/agents');App.router();">Back</a>
-        </div>
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header"><span class="card-title">Declaration</span></div>
-            <table>
-              <tr><td>ID</td><td><code>${escHtml(a.id)}</code></td></tr>
-              <tr><td>Office</td><td>${escHtml(a.office || '—')}</td></tr>
-              <tr><td>Reports To</td><td><code>${escHtml(a.reports_to || '—')}</code></td></tr>
-              <tr><td>Mode</td><td><span class="badge ${a.mode === 'primary' ? 'badge-blue' : 'badge-muted'}">${escHtml(a.mode || '—')}</span></td></tr>
-              <tr><td>Role</td><td>${escHtml(a.role || '—')}</td></tr>
-              <tr><td>Permissions</td><td><pre style="font-size:11px;color:var(--text-2);white-space:pre-wrap">${escHtml(a.permissions || '—')}</pre></td></tr>
-            </table>
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">Recent Traces</span><span class="badge badge-purple">${traces.length}</span></div>
-            ${traces.length === 0
-              ? '<div class="empty"><div class="empty-text">No traces for this agent yet.</div></div>'
-              : '<div class="timeline">' + traces.slice(0, 15).map(t => `
-                <div class="timeline-entry" onclick="location.href='/traces/${t.id}'">
-                  <div class="timeline-header">
-                    <span class="timeline-title"><code>${escHtml(t.tool)}</code></span>
-                    <span class="timeline-time">${timeAgo(t.created_at)}</span>
-                  </div>
-                  <div class="timeline-detail">${escHtml(t.status)} — ${t.duration_ms}ms</div>
-                  <div class="timeline-hash">${escHtml(t.hash || '')}</div>
-                </div>
-              `).join('') + '</div>'}
-          </div>
-        </div>
-      `;
+      seats = (JSON.parse(await this.tool('seats', {})).seats) || [];
     } catch (e) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">!</div><div class="empty-text">${escHtml(e.message)}</div></div>`;
+      el.innerHTML = `<div class="empty"><div class="empty-icon">!</div>
+        <div class="empty-text">The seats could not be read: ${escHtml(e.message || 'refused')}</div></div>`;
+      return;
+    }
+    const stemOf = (f) => String(f || '').replace(/\.md$/i, '');
+    const s = seats.find(x => stemOf(x.file) === stem);
+    if (!s) {
+      // AN ABSENT NAME IS DENIED HONESTLY, and the denial names what IS here.
+      el.innerHTML = `<div class="empty"><div class="empty-icon">!</div>
+        <div class="empty-text">No seat is declared as <code>${escHtml(stem)}.md</code> in
+        <code>agents/</code>. The ${seats.length} that are:
+        ${seats.map(x => `<a href="/agents/${escHtml(stemOf(x.file))}"
+          onclick="event.preventDefault();history.pushState(null,'','/agents/${escHtml(stemOf(x.file))}');App.router();"><code>${escHtml(stemOf(x.file))}</code></a>`).join(' ')}
+        </div></div>`;
+      return;
+    }
+
+    const f = s.fields || {};
+    const order = s.field_order || Object.keys(f);
+    const rows = order.filter(k => (f[k] || '').trim() && k !== 'System Prompt')
+      .map(k => `<tr><td>${escHtml(k)}</td><td>${escHtml(f[k])}</td></tr>`).join('');
+    const stands = (s.stands_in || []).map(st =>
+      `<div class="seat-row"><span class="seat-k">${escHtml(st.pipeline)}
+        <span class="muted">step ${escHtml(String(st.step))}</span></span>
+       <span class="seat-v">${escHtml(st.when || st.note || '')}</span></div>`).join('');
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">${escHtml(s.name || stem)}</div>
+          <div class="page-subtitle">Declared in <code>agents/${escHtml(s.file)}</code>${
+            f['Model Target'] ? ` · runs on <code>${escHtml(f['Model Target'])}</code>` : ''}</div>
+        </div>
+        <a href="/agents" class="btn" onclick="event.preventDefault();history.pushState(null,'','/agents');App.router();">All seats</a>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><span class="card-title">The declaration</span></div>
+          ${rows ? `<div class="table-wrap"><table>${rows}</table></div>`
+                 : '<div class="empty-text">This declaration carries no fields.</div>'}
+          <div class="brief-src">seats · agents/${escHtml(s.file)}</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Where it stands</span>
+            <span class="badge badge-blue">${(s.stands_in || []).length}</span></div>
+          ${stands || `<div class="empty-text">Stands in no pipeline — racked, and
+            summoned only when its flag is raised.</div>`}
+          <div class="brief-src">pipelines.md</div>
+        </div>
+      </div>
+      <div class="card mt-16">
+        <div class="card-header"><span class="card-title">System prompt</span>
+          <span class="muted">${s.prompt_chars || (s.prompt || '').length} characters</span></div>
+        ${s.prompt ? `<pre class="seat-prompt">${escHtml(s.prompt)}</pre>`
+                   : `<div class="empty-text">No system prompt is declared. The seat runs on
+                      the pipeline's own framing.</div>`}
+      </div>
+      <div class="card mt-16" id="seat-file"><div class="loading">Reading the file...</div></div>`;
+
+    // THE DOCUMENT ITSELF, with the receipt. Asked for separately so a seat
+    // still renders whole when the records hold cannot serve the file.
+    const box = document.getElementById('seat-file');
+    try {
+      const d = JSON.parse(await this.tool('records', { name: 'agents/' + s.file }));
+      box.innerHTML = `<div class="card-header"><span class="card-title">The file, as it is on disk</span>
+          <span class="muted">${d.bytes} bytes</span></div>
+        <pre class="seat-prompt">${escHtml(d.text || '')}</pre>
+        <div class="brief-src">records · sha256 ${escHtml(String(d.sha256 || '').slice(0, 16))}</div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="eng-row eng-warn">The file could not be served:
+        ${escHtml(e.message || 'refused')}<span class="brief-src">records</span></div>`;
     }
   },
 
@@ -1025,9 +1085,141 @@ const App = {
         `</div>` : '';
 
     const scores = `<div class="stats">${cards.join('')}</div>`;
-    box.innerHTML = only === 'scores' ? scores
+    box.innerHTML = only === 'deck' ? this.deck(p)
+                  : only === 'scores' ? scores
                   : only === 'estate' ? estate + standups
                   : estate + scores + standups;
+    // THE DECK CREATES THE HERO'S SLOTS, SO THE DECK FILLS THEM. This read is
+    // async and lands after Home.read() has already painted the engine once,
+    // into elements this line then replaced -- the hero came up with its
+    // kicker and nothing under it. Calling from here rather than from each of
+    // the three sites that ask for a deck makes the order right by
+    // construction instead of by remembering.
+    // `window.Home` is NOT how to ask. Home is declared `const` at the top of
+    // home.js, and a top-level const in a classic script binds in the global
+    // LEXICAL scope, never as a property of window -- so `window.Home` was
+    // undefined and this line silently did nothing. The hero came up with its
+    // kicker and an empty body, which looked exactly like a failed read.
+    if (only === 'deck' && typeof Home !== 'undefined' && Home.paintEngine) Home.paintEngine();
+  },
+
+  // THE DECK -- the Dashboard's top third, and the page's answer to the only
+  // two questions that gate the next move.
+  //
+  // WHAT THIS PAGE IS FOR, worked out from what he actually does on it. He
+  // sits down and asks, in this order: can I work at all, what do I want
+  // done, what is happening, is the ground sound, is anything waiting on me.
+  // The page answered them in almost the reverse order -- the scores held the
+  // top-left, and the ENGINE CARD, which gates every other thing on the page,
+  // sat BELOW the box it gates. Nothing typed into that box runs without an
+  // engine, and the card saying so was three scrolls down.
+  //
+  // SO THE HERO IS THE SITTING. Open or not, on which world, how long it has
+  // stood, and the one button that changes it. The engine card is folded in
+  // here and gone as a card -- its whole content was one sentence, which is
+  // the complaint its own comment made about the card above it.
+  //
+  // WITH ONE OVERRIDE: A RED BUILD OUTRANKS AN UNOPENED ENGINE. Booting onto
+  // a broken build without being told is worse than not knowing the engine is
+  // shut, so red anywhere flips the hero to the verdict and NAMES what fell.
+  // A measure that was never run is not green either: "nothing failed" and
+  // "nothing was tried" are different claims and only the first is good news.
+  //
+  // THE PROOF DROPS TO THE LEDGER beside it -- rows, not cards. Five cards of
+  // identical weight made the eye do the ranking; a ruled list puts the values
+  // in one column where they can be compared in a single sweep, which is the
+  // only reason to show them together at all.
+  deck(p) {
+    const su = p.suites || {};
+    const runs = p.standups || [];
+    const last = runs.length ? runs[runs.length - 1] : null;
+    const par = p.parity || [];
+
+    const red = [], absent = [];
+    for (const name of ['strokes', 'smoke']) {
+      const r = su[name];
+      if (!r) { absent.push(name); continue; }
+      if (!r.green) red.push(name);
+    }
+    if (!last) absent.push('the live standup');
+    else if (!last.green) red.push('the live standup');
+
+    // The alarm is rendered ONLY when the build is not wholly proven. A green
+    // build says nothing here; the ledger beside it already carries the
+    // numbers, and a banner that is always on is a banner nobody reads.
+    let alarm = '';
+    if (red.length) {
+      const which = red.join(red.length === 2 ? ' and ' : ', ');
+      const fell = (su.strokes && !su.strokes.green && (su.strokes.failures || [])[0])
+                || (last && !last.green && (last.failed || [])[0]) || '';
+      alarm = `<div class="hero-alarm red"><b>RED</b> ${escHtml(which)} did not pass`
+            + (fell ? ` · first to fall: <code>${escHtml(fell)}</code>` : '') + `</div>`;
+    } else if (absent.length) {
+      alarm = `<div class="hero-alarm yellow"><b>PARTLY PROVEN</b> `
+            + `${escHtml(absent.join(' and '))} `
+            + `${absent.length === 1 ? 'has' : 'have'} never run here. `
+            + `Not-tried is not the same as passed.</div>`;
+    }
+
+    const rows = [];
+    const row = (k, note, v, tone, delta) => rows.push(
+      `<div class="led-row">
+         <div class="led-k">${escHtml(k)}<span class="led-note">${escHtml(note)}</span></div>
+         <div class="led-v ${tone || ''}">${v}${delta
+           ? `<span class="led-delta ${delta.dir}">${escHtml(delta.text)}</span>` : ''}</div>
+       </div>`);
+    const frac = (r) => `${r.passed}<span class="muted">/${r.total}</span>`;
+    const none = '<span class="muted">—</span>';
+
+    for (const name of ['strokes', 'smoke']) {
+      const r = su[name];
+      row(name, r ? when(r.at) : (p.suites_error || 'never run'),
+          r ? frac(r) : none, r ? (r.green ? 'green' : 'red') : '');
+    }
+
+    if (last) {
+      // THE ONE HONEST DELTA. run_history.jsonl holds every prior live run, so
+      // the move from the previous one is read, not guessed. Nothing else here
+      // has a second measurement to compare against, so nothing else gets one.
+      let move = null;
+      if (runs.length > 1) {
+        const d = (last.passed || 0) - (runs[runs.length - 2].passed || 0);
+        if (d !== 0) move = { dir: d > 0 ? 'up' : 'down', text: (d > 0 ? '+' : '') + d };
+      }
+      row('live standup', when(last.at), frac(last), last.green ? 'green' : 'red', move);
+      const greens = runs.filter(r => r.green).length;
+      row('runs green', 'of every live run on record',
+          `${greens}<span class="muted">/${runs.length}</span>`,
+          greens === runs.length ? 'green' : 'yellow');
+    } else {
+      row('live standup', p.standups_error || 'a dry run does not count', none, '');
+    }
+
+    if (par.length) {
+      const lp = par[par.length - 1];
+      row('parity', `${lp.scored ?? '?'} of ${lp.cases ?? '?'} cases · ${when(lp.at)}`,
+          String(lp.mean ?? '—'), 'blue');
+    } else {
+      row('parity', p.parity_error || 'chain against bare calls', none, '');
+    }
+
+    // THE IDS INSIDE THE HERO ARE THE ENGINE CARD'S OWN. Home.paintEngine
+    // writes into #home-engine and #home-engine-controls and is driven by a
+    // run-state event, not by this read -- so the sitting repaints on every
+    // boot, turn and close without re-reading `proofs` each time.
+    return `<div class="deck">
+      <div class="hero">
+        <div class="hero-kicker">The sitting</div>
+        <div id="home-engine" class="hero-body"></div>
+        <div id="home-engine-controls" class="hero-acts"></div>
+        ${alarm}
+      </div>
+      <div class="ledger">
+        <div class="led-head">What this build has proved</div>
+        ${rows.join('')}
+        <div class="led-foot"><span class="brief-src">proofs · read, never counted here</span></div>
+      </div>
+    </div>`;
   },
 
   // === RECORDS ===

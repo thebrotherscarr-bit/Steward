@@ -12,6 +12,92 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The Dashboard answers the question it is actually asked
+
+Rebuilt against what the console is FOR, at the operator's word: *"think about
+what the dashboard is used for and what would make sense to put where
+functionally"*, and against a read of what dashboards do now.
+
+**The order was wrong, and it was wrong in the one way that costs something.**
+He sits down and asks, in this order: *can I work at all — what do I want done
+— what is happening — is the ground sound — is anything waiting on me.* The
+page answered them almost backwards. The ENGINE CARD, which gates every other
+thing here — nothing typed into that box runs without an engine — sat BELOW
+the box it gates, three scrolls down. Meanwhile the five score cards, which
+move perhaps twice a day, held the top-left quadrant.
+
+- **The hero is the sitting now.** Open or not, on which world, since when,
+  with the one button that changes it. The engine card is folded into it and
+  gone as a card; its whole content was one sentence, which is the exact
+  complaint its own comment made about the card it had replaced.
+- **With one override: a red build outranks an unopened engine.** Booting onto
+  a broken build without being told is worse than not knowing the engine is
+  shut, so red anywhere raises an alarm in the hero that NAMES what fell and
+  the first thing to fall. A measure that was never run raises a yellow one:
+  *not-tried is not the same as passed*, and only one of those is good news.
+- **The proof drops to a ledger beside it** — rows, not cards. Five cards of
+  identical weight made the eye do the ranking; a ruled list puts every value
+  in one column where they can be compared in a single sweep, which is the
+  only reason to show them together. Three elements above the fold now
+  (the sitting, the ledger, the box) where there were nine.
+- **The brief rose above the box, and green went actually silent.** It is the
+  interrupt channel — a gate waiting, a refusal, an engine running code older
+  than the ground — and it arrived UNDER the box it should have changed what
+  he typed into. When nothing needs him it now renders nothing at all; the
+  page subtitle still carries the all-clear, which is where a quiet statement
+  belongs.
+
+**What the market read gave us, and what it did not.** The 2026 consensus
+across the tools this one sits beside is decision-first rather than KPI-grid:
+one north-star answer in the top-left, four to six supporting measures, and
+nothing above the fold that does not change the next move — with Nielsen
+Norman's finding as the hard edge, that a reader scans in a Z and gives up
+past about seven competing elements. That is the shape taken. What was NOT
+taken: sparklines, donuts, and an "AI summary" of numbers the record already
+states plainly. Every line still names the file it was read from, which is
+this console's own law and worth more than any chart.
+
+### The seat page stops being a lie
+
+- **`/agents/:id` was an orphan AND wrong.** Nothing on the seats page linked
+  to it, so the only way in was to type the URL — and when you did it read
+  `API.getAgent`, which queries the webapp's own SQLite `agents` table. Nothing
+  writes that table. The list beside it reads `agents/*.md` through the `seats`
+  tool, so a ground holding fourteen declared seats answered **404 for every
+  one of them**, and the fields it was built to show (office, reports_to, mode,
+  permissions) do not exist in a declaration at all. Fourth instance of a page
+  counting the webapp's store instead of asking the record, and the last one
+  standing. A route nobody can reach is a route nobody notices is broken.
+- **It reads the record now**, keyed on the file stem — stable, unique,
+  url-safe, and already what the record calls the document. It carries what
+  the card cannot: the declaration with nothing folded, the system prompt open
+  rather than behind a toggle, every pipeline placement with its step and
+  condition, and **the file itself with its sha256**, served by `records`.
+  `/agents/steward` went from HTTP 404 to seven fields, five placements and a
+  3422-character prompt.
+- **An absent name is denied honestly** and the denial lists the fourteen that
+  are there, each one a link — the same doctrine `read_doctrine` already held
+  itself to.
+- **A seat's name is the way in.** It reads as a title until you go near it:
+  on a page of fourteen cards, a row of blue links is a row of noise.
+
+### Three that were silently wrong
+
+- **`.hero-verdict muted` came out at 12px.** `.muted` further down the file
+  sets a font-size and a margin, has the same specificity, and is later — so
+  it won. A utility class used as a state name is a collision waiting for
+  whichever rule happens to be written last. The state has its own name now.
+- **`window.Home` is not a thing.** `Home` is declared `const` at the top of
+  home.js, and a top-level `const` in a classic script binds in the global
+  LEXICAL scope, never as a property of `window`. The guard was always false,
+  so the hero came up with its kicker and an empty body — which looks exactly
+  like a failed read.
+- **A system prompt is prose, so it wraps.** The base `pre` rule now scrolls
+  anything too wide, and a paragraph you have to drag sideways is not served
+  whole in any sense that matters. Link-buttons stopped underlining in the
+  same stroke: several buttons here are `<a>`, and they were carrying the
+  browser's underline through the button's own chrome.
+
 ### The console says where you are, and what moved
 - **A crumb, painted once by the router.** Every page but the Dashboard now
   opens with `ATLAS / <page>`, and a detail view carries its third step

@@ -49,7 +49,14 @@ const Home = {
            Records. -->
       <div id="home-proof"></div>
 
-      <div class="card home-box mt-16">
+      <!-- THE BRIEF, ABOVE THE BOX. It is the interrupt channel -- a gate
+           waiting, a refusal, an engine running code older than the ground --
+           and it arrived UNDER the box it should have changed what he typed
+           into. When nothing needs him it now renders nothing at all: green
+           is silence, and the hero above already says the estate stands. -->
+      <div id="home-brief" hidden></div>
+
+      <div class="card home-box">
         <div id="home-thread" class="home-thread" hidden></div>
         <form id="home-form" class="chat-form">
           <button class="btn btn-mic" type="button" id="home-mic" title="Speak (local whisper, nothing leaves this machine)">&#127908;</button>
@@ -74,20 +81,15 @@ const Home = {
         <div id="ev-run" class="chat-log council-log"></div>
       </div>
 
-      <!-- THE ENGINE, LOWER. It opened the page and crowded it: a card whose
-           whole content is one sentence, above everything you came here to do.
-           It is still above the brief, because nothing below it runs until an
-           engine is open. -->
-      <div class="card" id="home-engine-card">
-        <div class="card-header">
-          <span class="card-title">The engine</span>
-          <span class="flex" id="home-engine-controls"></span>
-        </div>
-        <div id="home-engine"></div>
-        <pre id="home-boot" class="home-boot" hidden></pre>
-      </div>
-
-      <div id="home-brief" class="card home-brief"></div>
+      <!-- THE ENGINE CARD IS GONE, folded into the deck's hero above. It
+           gated every other thing on this page -- nothing typed into the box
+           runs without one -- and it sat BELOW that box, three scrolls down.
+           Its whole content was one sentence, which is the exact complaint
+           its own comment made about the card it replaced. #home-engine and
+           #home-engine-controls now live in the hero (App.deck) and
+           paintEngine writes into them unchanged.
+           The boot transcript stays here, under the run it explains. -->
+      <pre id="home-boot" class="home-boot" hidden></pre>
 
       <!-- The repository card MOVED TO FLOWS (2026-09-10): "this needs to go
            with the other github stuff". Flows already carries the per-world
@@ -115,7 +117,7 @@ const Home = {
     // The scores, and the turn's own step-by-step. Both are App's renderers:
     // one `proofs` read and one `paintRun`, shared with Records and with
     // whatever else asks -- never a second copy that can drift.
-    App.paintProof('home-proof', 'scores');
+    App.paintProof('home-proof', 'deck');
     if (!App._runBound) { Run.on(() => App.paintRun()); App._runBound = true; }
     App.paintRun();
     const cancel = document.getElementById('ev-run-cancel');
@@ -333,7 +335,7 @@ const Home = {
       // suite green. The panels that read those follow it -- a score still
       // saying RED after the run that fixed it is the two halves disagreeing.
       // The repository card moved to Flows and is repainted there.
-      App.paintProof('home-proof', 'scores');
+      App.paintProof('home-proof', 'deck');
       // `this.readSittings()` stood here and HAS NOT EXISTED SINCE a014c77,
       // the pass that took the sittings strip off this page at his markup --
       // the function went, the call stayed. Every turn since has thrown a
@@ -454,31 +456,40 @@ const Home = {
     if (!box || !bar) return;
     const t = (iso) => { try { return new Date(iso).toLocaleTimeString(); } catch { return iso; } };
 
+    // THE HERO'S BODY. This is the Dashboard's top-left answer now, not a card
+    // three scrolls down, so it is written as the verdict it is: one word for
+    // the state, one line for what that means for the next thing he does, and
+    // the figures underneath. The ids are unchanged; only the shape moved.
     if (Run.unreachable) {
       this.age(false);
-      box.innerHTML = '<div class="eng-row eng-bad">The MCP door did not answer. ' +
-        'Nothing can be opened or closed until it does.' +
-        '<span class="brief-src">run/state</span></div>';
+      box.innerHTML = '<div class="hero-verdict red">Door silent</div>' +
+        '<div class="hero-says">The MCP door did not answer. Nothing can be ' +
+        'opened or closed until it does, and nothing below will run.</div>' +
+        '<div class="hero-foot"><span class="brief-src">run/state</span></div>';
       bar.innerHTML = '';
       return;
     }
     if (!Run.engineOpen) {
       this.age(false);
-      box.innerHTML = '<div class="eng-row eng-warn">No engine on <b>' +
-        escHtml(Run.world || 'this world') + '</b>. Nothing will run until one is open. ' +
-        'Booting starts a sitting; closing pays its toll.' +
-        '<span class="brief-src">run/state</span></div>';
-      bar.innerHTML = '<button class="btn btn-sm btn-primary" id="eng-boot">Boot</button>';
+      box.innerHTML = '<div class="hero-verdict off">No engine</div>' +
+        '<div class="hero-says">Nothing you type below will run until one is ' +
+        'open on <b>' + escHtml(Run.world || 'this world') + '</b>. Booting ' +
+        'starts a sitting; closing pays its toll.</div>' +
+        '<div class="hero-foot"><span class="brief-src">run/state</span></div>';
+      bar.innerHTML = '<button class="btn btn-primary" id="eng-boot">Boot an engine</button>';
       document.getElementById('eng-boot').onclick = () => this.boot();
       return;
     }
 
-    const rows = ['<div class="eng-row">Engine open on <b>' + escHtml(Run.world) +
-      '</b> — sitting <b>' + escHtml(Run.sitting || '?') + '</b>' +
-      (Run.session ? ' · session <code>' + escHtml(Run.session) + '</code>' : '') +
-      (Run.started ? '<span class="muted"> · started ' + escHtml(t(Run.started)) +
-        ' · <span id="eng-age"></span></span>' : '') +
-      '<span class="brief-src">run/state</span></div>'];
+    const rows = ['<div class="hero-verdict green">Open</div>' +
+      '<div class="hero-says">Standing on <b>' + escHtml(Run.world) + '</b>' +
+      (Run.session ? ' as <code>' + escHtml(Run.session) + '</code>' : '') +
+      '. Anything you say below runs in this sitting and is written into ' +
+      'the record under it.</div>' +
+      '<div class="hero-num">sitting ' + escHtml(String(Run.sitting || '?')) + '</div>' +
+      (Run.started ? '<div class="hero-when">since ' + escHtml(t(Run.started)) +
+        ' · <span id="eng-age"></span></div>' : '') +
+      '<div class="hero-foot"><span class="brief-src">run/state</span></div>'];
 
     // AN ENGINE OPEN AND DOING NOTHING IS THE MOST EXPENSIVE THING IN THE
     // RECORD, and until now nothing on this page said so. Measured across
@@ -503,7 +514,7 @@ const Home = {
     // and are deliberately NOT counted here -- an alarm over a doc edit would
     // teach him to ignore the one row that matters.
     if (Run.stale) {
-      rows.push('<div class="eng-row eng-warn">This engine is running code from before ' +
+      rows.push('<div class="hero-alarm yellow">This engine is running code from before ' +
         'your last edit — <code>' + escHtml(Run.staleFile || 'manjuel') + '</code> changed at ' +
         escHtml(t(Run.codeChanged)) + ', and this process started at ' +
         escHtml(t(Run.started)) + '. Reboot to pick it up. ' +
@@ -511,8 +522,8 @@ const Home = {
         '<span class="brief-src">run/state</span></div>');
     }
     box.innerHTML = rows.join('');
-    bar.innerHTML = '<button class="btn btn-sm" id="eng-close">Close sitting</button>' +
-      '<button class="btn btn-sm ' + (Run.stale ? 'btn-primary' : '') + '" id="eng-boot">Reboot</button>';
+    bar.innerHTML = '<button class="btn" id="eng-close">Close the sitting</button>' +
+      '<button class="btn ' + (Run.stale ? 'btn-primary' : '') + '" id="eng-boot">Reboot</button>';
     document.getElementById('eng-close').onclick = () => this.closeSitting();
     document.getElementById('eng-boot').onclick = () => this.boot();
   },
@@ -679,7 +690,7 @@ const Home = {
     this.readAt = Date.now();       // stamped so the quiet line cannot lie
     this.paint();
     this.paintEngine();
-    App.paintProof('home-proof', 'scores');
+    App.paintProof('home-proof', 'deck');
   },
 
   bad(v) { return v && typeof v === 'object'; },
@@ -823,29 +834,23 @@ const Home = {
     }
 
     if (!rows.length) {
-      // GREEN IS SILENCE: one line, and it names where it read that from.
-      const worlds = this.bad(this.brief.muster) ? '' :
-        (this.brief.muster || '').split('\n').slice(1).map(s => s.trim()).filter(Boolean).length;
+      // GREEN IS SILENCE, TAKEN LITERALLY. This printed one line -- "The
+      // estate is standing", plus which engine was open -- and two things
+      // have changed that make it noise. The hero above now states the
+      // sitting in words the size of a headline, and this band moved ABOVE
+      // the box, where a permanent all-is-well line is a permanent
+      // interruption. So when nothing needs him, nothing is drawn. The
+      // page subtitle still carries the all-clear, which is where a quiet
+      // statement belongs.
       if (sub) sub.textContent = 'Nothing is waiting on you.';
-      box.className = 'card home-brief quiet';
-      // IT SAYS WHAT IS TRUE, not one fixed sentence. This line hardcoded
-      // "engine open on X" and only ever ran while one WAS open, because the
-      // no-engine row above used to stop the page reaching it. That row moved
-      // to the engine card this pass, and the first paint afterwards read
-      // "The estate is standing. engine open on research, sitting —" with no
-      // engine open at all -- the exact class of lie this whole page was just
-      // fixed for.
-      const eng = Run.engineOpen
-        ? `engine open on <b>${escHtml(Run.world || '—')}</b>, sitting ${escHtml(Run.sitting || '—')}`
-        : 'no engine open — see the card above';
-      box.innerHTML = `<div class="brief-ok">The estate is standing.
-        <span class="muted">${eng}${worlds ? ` · ${worlds} worlds carried` : ''}</span>
-        <span class="brief-src">run/state · muster</span></div>`;
+      box.hidden = true;
+      box.innerHTML = '';
       return;
     }
 
     if (sub) sub.textContent = rows.some(r => r.tone === 'wait')
       ? 'Something is waiting on you.' : 'Something needs looking at.';
+    box.hidden = false;
     box.className = 'card home-brief';
     box.innerHTML = rows.map(r => `
       <div class="brief-row brief-${r.tone}">

@@ -87,6 +87,11 @@
   --t-xl:   18px;  /* section identity */
   --t-2xl:  22px;  /* one per page: the page's own name */
   --t-num:  28px;  /* the figures on Records, and nothing else */
+  --t-display: 40px; /* ONE use: the Dashboard's verdict. A ninth size earns
+                        its place only because the deck needs a step ABOVE the
+                        largest figure, and re-using --t-num there would have
+                        made the verdict the same weight as the numbers it is
+                        supposed to rank. */
 
   /* ---- ONE SPACING SCALE ---------------------------------------------
      Nineteen ad-hoc values became six on a 4px base. `.mt-16` stays for
@@ -150,6 +155,143 @@ body {
 }
 
 /* Logo */
+
+/* ---- THE DECK -----------------------------------------------------------
+   The Dashboard's top third, rebuilt 2026-09-10 at the operator's word
+   ("we need a proper dashboard... i want this thing to be sleek"), against
+   what the market actually does now.
+
+   WHAT THE MARKET DOES, AND WHAT WE TOOK. The 2026 consensus across Linear,
+   Vercel, Stripe and the monitoring tools is decision-first, not KPI-grid:
+   ONE north-star answer dominating the top-left, four to six supporting
+   measures beside it, nothing above the fold that does not change the next
+   move, and status carried by colour rather than decoration. Nielsen Norman's
+   finding is the hard part — a reader scans in a Z and gives up past about
+   seven competing elements above the fold. This page had nine: a header, five
+   equal stat cards, the box, the run card and the engine card. Five cards of
+   identical weight is a grid with no answer in it; the eye has to read all
+   five and do the ranking itself.
+
+   SO THE FIVE BECAME ONE AND FOUR. The verdict is the hero — the single
+   thing that says "is the estate sound" — and the measures that support it
+   sit beside it as a ledger, which is denser than cards and reads in one
+   sweep. Three elements above the fold now: the verdict, the ledger, the box
+   he types into.
+
+   WHAT WE DID NOT TAKE. No sparklines, no donut, no "AI summary" of numbers
+   the record already states plainly. Every line still names the file it came
+   from, which is this console's own law and is worth more than any chart. */
+.deck { display: grid; grid-template-columns: 1.6fr 1fr; gap: var(--s4);
+        margin-bottom: var(--s5); align-items: stretch; }
+.deck > * { min-width: 0; }
+
+/* THE HERO. The one place this page spends boldness. Its ground is tinted by
+   the verdict itself, so the answer is legible before a single word is read
+   — and the tint is driven by the value's own class, never set separately,
+   because two places deciding one colour is how a console starts lying. */
+.hero { position: relative; overflow: hidden;
+        background: var(--bg-2); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); padding: var(--s5) var(--s5) var(--s4);
+        display: flex; flex-direction: column; }
+.hero::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+                opacity: 0.5; }
+.hero:has(.hero-verdict.green)::before {
+  background: radial-gradient(120% 90% at 0% 0%, rgba(166,227,161,0.10), transparent 60%); }
+.hero:has(.hero-verdict.red)::before {
+  background: radial-gradient(120% 90% at 0% 0%, rgba(243,139,168,0.12), transparent 60%); }
+.hero:has(.hero-verdict.yellow)::before {
+  background: radial-gradient(120% 90% at 0% 0%, rgba(249,226,175,0.10), transparent 60%); }
+.hero > * { position: relative; }
+
+.hero-kicker { font-size: var(--t-xs); letter-spacing: 0.09em; text-transform: uppercase;
+               color: var(--text-3); font-weight: 600; }
+/* The body is written by Home.paintEngine on every run-state event, so it is
+   a container with no look of its own — everything visible in it is one of
+   the four classes below. */
+.hero-body { display: flex; flex-direction: column; flex: 1; }
+.hero-acts { display: flex; gap: var(--s2); margin-top: var(--s4); }
+/* THE ALARM IS THE EXCEPTION, so it is drawn only when there is one. A banner
+   that is always on is a banner nobody reads. */
+.hero-alarm { margin-top: var(--s4); padding: var(--s3) var(--s4);
+              border-radius: var(--radius); font-size: var(--t-sm);
+              line-height: 1.5; border: 1px solid transparent; }
+.hero-alarm b { letter-spacing: 0.04em; margin-right: var(--s2); }
+.hero-alarm.red { color: var(--red); background: rgba(243,139,168,0.08);
+                  border-color: rgba(243,139,168,0.25); }
+.hero-alarm.yellow { color: var(--yellow); background: rgba(249,226,175,0.07);
+                     border-color: rgba(249,226,175,0.22); }
+.hero-alarm code { color: inherit; }
+.hero-verdict { font-size: var(--t-display); line-height: 1.05; font-weight: 700;
+                letter-spacing: -0.02em; margin-top: var(--s3); }
+.hero-verdict.green { color: var(--green); }
+.hero-verdict.red { color: var(--red); }
+.hero-verdict.yellow { color: var(--yellow); }
+/* `.off`, NOT `.muted`. The neutral verdict was written `hero-verdict muted`
+   and came out at 12px: `.muted` further down this file sets a font-size and
+   a margin, it has the same specificity as `.hero-verdict`, and it is later,
+   so it won. A utility class used as a state name is a collision waiting for
+   whichever rule happens to be written last — the state gets its own name. */
+.hero-verdict.off { color: var(--text-3); }
+.hero-says { font-size: var(--t-base); color: var(--text-2); margin-top: var(--s2);
+             max-width: 46ch; }
+.hero-num { font-family: var(--mono); font-variant-numeric: tabular-nums;
+            font-size: var(--t-xl); color: var(--text-2); margin-top: var(--s4);
+            letter-spacing: -0.01em; }
+.hero-num .muted { color: var(--text-3); }
+.hero-unit { font-family: var(--font); font-size: var(--t-sm); color: var(--text-3);
+             margin-left: var(--s2); letter-spacing: 0; }
+.hero-when { font-size: var(--t-sm); color: var(--text-3); margin-top: var(--s1); }
+.hero-foot { margin-top: auto; padding-top: var(--s4); }
+
+/* THE LEDGER. Rows, not cards. Cards around four numbers spend a border and
+   twenty pixels of padding each to say nothing the alignment does not already
+   say; a ruled list puts the values in one column where they can be compared
+   at a glance, which is the only reason to show them together. */
+.ledger { background: var(--bg-2); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); padding: var(--s2) var(--s4) var(--s3);
+          display: flex; flex-direction: column; }
+/* A seat's name opens it. It reads as a title until you go near it, because
+   on a page of fourteen cards a row of blue links is a row of noise. */
+.seat-open { color: inherit; text-decoration: none; }
+/* A SYSTEM PROMPT IS PROSE, so it wraps. It is written in a mono face because
+   it is a declared artifact and every character in it counts, but the base
+   `pre` rule now scrolls anything too wide, and a paragraph you have to drag
+   sideways to read is not served whole in any sense that matters. */
+.seat-prompt { font-family: var(--mono); font-size: var(--t-md);
+               line-height: 1.6; color: var(--text-2);
+               white-space: pre-wrap; overflow-wrap: anywhere;
+               overflow-x: visible; margin: 0;
+               background: var(--bg); border: 1px solid var(--border);
+               border-radius: var(--radius); padding: var(--s4); }
+.seat-open:hover { color: var(--accent); text-decoration: underline;
+                   text-underline-offset: 3px; }
+.led-head { font-size: var(--t-xs); letter-spacing: 0.09em; text-transform: uppercase;
+            color: var(--text-3); font-weight: 600; padding: var(--s2) 0 var(--s1); }
+.led-row { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+           gap: var(--s3); padding: var(--s3) 0;
+           border-bottom: 1px solid var(--border); }
+.led-row:last-child { border-bottom: 0; }
+.led-k { font-size: var(--t-sm); color: var(--text-2); }
+.led-k .led-note { display: block; font-size: var(--t-xs); color: var(--text-3);
+                   margin-top: 2px; }
+.led-v { font-family: var(--mono); font-variant-numeric: tabular-nums;
+         font-size: var(--t-lg); color: var(--text); white-space: nowrap; }
+.led-v .muted { color: var(--text-3); }
+.led-v.green { color: var(--green); }
+.led-v.red { color: var(--red); }
+.led-v.yellow { color: var(--yellow); }
+.led-v.blue { color: var(--accent); }
+.led-delta { font-family: var(--mono); font-size: var(--t-xs); margin-left: var(--s2);
+             padding: 1px 6px; border-radius: 999px; }
+.led-delta.up { color: var(--green); background: rgba(166,227,161,0.12); }
+.led-delta.down { color: var(--red); background: rgba(243,139,168,0.12); }
+.led-foot { margin-top: auto; padding-top: var(--s3); }
+
+@media (max-width: 900px) {
+  .deck { grid-template-columns: 1fr; }
+  .hero-verdict { font-size: var(--t-num); }
+}
+
 /* ---- THE SIDEBAR'S HEAD -------------------------------------------------
    A lockup, the one action worth pinning, and the palette made visible. The
    nav used to start at the top of the panel with nothing above it, so the
@@ -407,8 +549,13 @@ td code {
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition);
+  /* Several buttons in this console are <a> — "All seats", "Back" — and they
+     were carrying the browser's link underline through the button's own
+     chrome. A button is a button whichever element it is built from. */
+  text-decoration: none;
 }
-.btn:hover { background: var(--bg-3); border-color: var(--accent); }
+.btn:hover { background: var(--bg-3); border-color: var(--accent);
+             text-decoration: none; }
 .btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .btn-primary:hover { opacity: 0.9; }
 .btn-danger { border-color: var(--red); color: var(--red); }
