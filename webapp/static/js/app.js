@@ -763,8 +763,13 @@ const App = {
             <div class="page-title">Evaluations</div>
             <div class="page-subtitle">${evals.length} scored evals, ${passed} passed, ${failed} failed. The last run, whole, is on the <a href="/" onclick="event.preventDefault();history.pushState(null,'','/');App.router();">Dashboard</a>; the suites, standups and sittings are on <a href="/records" onclick="event.preventDefault();history.pushState(null,'','/records');App.router();">Records</a>.</div>
           </div>
-          <div class="flex"><span id="ev-run-state" class="badge">—</span>
-            <button class="btn btn-sm" id="ev-run-cancel" type="button" hidden>Cancel</button></div>
+          <!-- #ev-run-state and #ev-run-cancel WERE HERE and were dead. The
+               run card moved to the Dashboard on 2026-09-10 and took the
+               ev-run element with it; paintRun returns at its first line when
+               that element is
+               absent, so this badge was never painted once. It sat in the
+               header of every visit showing a hardcoded em dash — a control
+               that looks like a reading and is a literal. -->
         </div>
         <div class="card">
           <div class="card-title">Scored evals <span class="muted">— written by the Add-an-eval flow, not by the suites</span></div>

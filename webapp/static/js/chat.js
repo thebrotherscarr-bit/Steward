@@ -131,6 +131,14 @@ const Chat = {
     // page may not have been present to hear.
     if (Run.running) this.tick(true);
     await Run.check();
+    // AND PAINT AGAIN ON WHAT THAT READ FOUND. `Run.check()` is where a turn
+    // kept from a previous visit comes back, and the only handler it fires is
+    // 'state', which repaints the badge alone — so the badge read
+    // "delivered — 54.3s" over a panel reading "nothing has run in this tab
+    // yet". Two places disagreeing about one fact, which is the fault this
+    // console keeps removing. The board is painted from whatever the read
+    // actually found.
+    this.paint();
     this.readPast();
   },
 

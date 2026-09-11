@@ -12,6 +12,65 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The Aurora scheme
+
+The operator pointed at a console he built for an earlier version of this
+estate and said what he wanted from it: *"i like the current dashboard layout,
+and the colors/flow of the one i sent."* So the layout is untouched — the
+deck, the hero, the ledger, the crumb all stand — and the palette and the
+flow devices are his.
+
+**The palette now means something.** This console was Catppuccin-adjacent: a
+neutral near-black under a cornflower blue. Aurora's ground is blue-GREEN at
+the root (`#05080a`), its text is teal-tinted rather than grey, and it runs a
+phosphor cyan with an amber second. The colours are not decoration — the
+**amber is what the estate calls SEALED**, the **phosphor is what it calls
+PROVEN**, and the orange marks a section of the record. Fifty-five hardcoded
+`rgba()` literals of the old palette were still scattered through the file
+behind the tokens; every one of them moved.
+
+- **Mono-first, as Aurora is.** Its whole console is one fixed pitch and that
+  is most of why it reads the way it does: every label, value, field and
+  control on one grid. The prose face is kept for the handful of places this
+  console carries real SENTENCES — a hero line, a page subtitle, the brief,
+  a delivery — where a fixed pitch costs more in reading than it earns.
+- **The glowing edge.** A 2px bar down the left of the panel the page is
+  about, with a 12px bloom off it, in the verdict's own colour — so the edge
+  says the same thing as the word beside it, or it says nothing.
+- **The section rule.** Aurora's headings are a tracked micro-label followed
+  by a hairline running to the panel's edge. That single device is what makes
+  its panels read as parts of one instrument rather than a stack of boxes;
+  every card header in this console now closes the same way.
+- **The washed ground**, a cyan bleed at top centre and an amber at top right,
+  fixed behind everything for one paint.
+- **The pinned action wears the seal.** Booting opens a sitting and closing
+  pays its toll: both move the record, so that one button is amber while cyan
+  stays the colour of reading.
+
+### Four that were wrong, found by looking at every page
+
+- **The Watchboard's badge read "delivered — 54.3s" over a panel reading
+  "nothing has run in this tab yet."** `Run.check()` is where a turn kept from
+  a previous visit comes back, and the only handler it fires is `state`, which
+  repaints the badge alone. The board now paints from what that read found.
+- **A dead badge on Evals.** The run card moved to the Dashboard and took its
+  log element with it; `paintRun` returns at its first line when that element
+  is absent, so `#ev-run-state` was never painted once and sat in the header
+  of every visit showing a hardcoded em dash — a control that looks like a
+  reading and is a literal.
+- **`.covenant` was declared twice** in one stylesheet, and the later rule won
+  silently. Two rules for one class is exactly how `.muted` came to steal the
+  hero verdict's font-size this morning. One rule now, and the hairline above
+  it does the lifting rather than the colour.
+- **Three tables were written bare**, and a bare table pushes its card, which
+  pushes the grid, which scrolls the page sideways: Settings was 601px of
+  content in a 595px main because of a badge reading `can_approve:false`.
+  Wrapping the three by hand fixes the three and not the fourth, so a table
+  in a card scrolls in its own box whether or not anyone remembered the
+  wrapper. Button labels stopped breaking mid-word in the same pass — the
+  mono face is wider, and a row of buttons wraps between buttons or it stops
+  reading as a row of controls.
+
 ### The watchboard: the council from the inside
 
 Chat was a second conversation — the same box as the launchpad, the same

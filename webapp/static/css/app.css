@@ -30,29 +30,55 @@
 }
 
 :root {
-  --bg: #0a0a0f;
-  --bg-2: #12121a;
-  --bg-3: #1a1a25;
-  --bg-4: #22222e;
-  --border: #1e1e2e;
-  --border-2: #2a2a3a;
-  --text: #e0e0e0;
-  --text-2: #a0a0b0;
-  --text-3: #6c7086;
-  --accent: #89b4fa;
-  --accent-2: #74c7ec;
-  --green: #a6e3a1;
-  --red: #f38ba8;
-  --yellow: #f9e2af;
-  --orange: #fab387;
-  --purple: #cba6f7;
+  /* ---- THE AURORA SCHEME ---------------------------------------------
+     Taken 2026-09-10 from the console the operator built for an earlier
+     version of this estate and pointed at himself: "i like the current
+     dashboard layout, and the colors/flow of the one i sent." So the LAYOUT
+     below is unchanged — the deck, the hero, the ledger, the crumb all stand
+     — and the PALETTE and the flow devices are his.
+
+     What changed and why it matters: this console was Catppuccin-adjacent,
+     a neutral near-black under a cornflower blue. Aurora's ground is
+     blue-GREEN at the root (#05080a), its text is teal-tinted rather than
+     grey, and its accent is a phosphor cyan with an amber second. Nothing
+     here is decoration: the amber is what the estate calls SEALED, the
+     phosphor is what it calls PROVEN, and the orange marks a section of the
+     record. A console whose colours mean something is the whole point. */
+  --bg: #05080a;        /* the ground, blue-green at the root */
+  --bg-2: #0c161a;      /* panel */
+  --bg-3: #0a1418;      /* solid: fields, wells, anything recessed */
+  --bg-4: #12232a;      /* raised: hover, the step above a panel */
+  --border: #16303a;
+  --border-2: #1e4450;
+  --text: #cfe8e6;      /* teal-tinted, not grey */
+  --text-2: #7fb3d5;    /* Aurora's --ground */
+  --text-3: #4a6068;    /* Aurora's --dim */
+  --accent: #4de0d0;    /* --mood: the signature */
+  --accent-2: #8fefb2;  /* --mood2 */
+  --green: #8fefb2;     /* --phos: proven */
+  --red: #e2685a;       /* --alert */
+  --yellow: #e8a544;    /* --seal: sealed, and what is owed */
+  --orange: #ff7a45;    /* --fire: a section of the record */
+  --purple: #c9a0ff;    /* --test */
   --pink: #f5c2e7;
-  --teal: #94e2d5;
-  --radius: 8px;
-  --radius-lg: 12px;
+  --teal: #4de0d0;
+  --glass: color-mix(in srgb, var(--accent) 8%, transparent);
+  --tint: rgba(77,224,208,0.03);   /* the faint accent wash under a row */
+  /* Aurora's radii are small and consistent: 4-6px, never a 12px pill beside
+     a 4px field. */
+  --radius: 5px;
+  --radius-lg: 7px;
   --shadow: 0 4px 24px rgba(0,0,0,0.3);
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  /* MONO-FIRST, as Aurora is. Its whole console is
+     `13px/1.5 "SF Mono", Consolas, Menlo, monospace` and that is most of why
+     it reads the way it does: every label, value, field and control on one
+     grid. The prose face is kept for the handful of places this console
+     carries real SENTENCES — the hero's line, a page subtitle, the brief,
+     a delivery — where a fixed pitch costs more in reading than it earns in
+     character. Everything structural is mono. */
+  --font: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
+  --font-prose: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
   --transition: 0.15s ease;
 
   /* ---- THE FOUR PHANTOM TOKENS --------------------------------------
@@ -69,7 +95,7 @@
      would have done nothing for them. */
   --muted: var(--text-3);                  /* was #6c7086 — identical */
   --surface: var(--bg-2);                  /* was #12121a — identical */
-  --accent-dim: rgba(137,180,250,0.14);    /* was the literal — identical */
+  --accent-dim: rgba(77,224,208,0.14);     /* now Aurora's cyan */
   --mono: var(--font-mono);                /* was `monospace` — THE REPAIR */
 
   /* ---- ONE TYPE SCALE ------------------------------------------------
@@ -122,11 +148,23 @@ body {
   font-family: var(--font);
   font-size: var(--t-base);
   line-height: 1.5;
-  background: var(--bg);
+  /* THE GROUND IS NOT FLAT. Aurora lays a cyan wash at the top centre and an
+     amber one at the top right before the flat colour — the two accents
+     bleeding in from off-screen. It is fixed, behind everything, and costs a
+     single paint. */
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(77,224,208,.06), transparent 60%),
+    radial-gradient(ellipse at 100% 0%, rgba(232,165,68,.07), transparent 40%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
+/* Sentences, and only sentences. */
+.page-subtitle, .hero-says, .brief-text, .brief-ok, .empty-text,
+.wb-delivery .wb-words, .notshown, .stat-note, .led-note,
+.chat-q, .chat-a, .home-said, .home-heard { font-family: var(--font-prose); }
 
 /* Layout */
 .app { display: flex; min-height: 100vh; }
@@ -196,12 +234,31 @@ body {
 .hero::before { content: ''; position: absolute; inset: 0; pointer-events: none;
                 opacity: 0.5; }
 .hero:has(.hero-verdict.green)::before {
-  background: radial-gradient(120% 90% at 0% 0%, rgba(166,227,161,0.10), transparent 60%); }
+  background: radial-gradient(120% 90% at 0% 0%, rgba(143,239,178,0.10), transparent 60%); }
 .hero:has(.hero-verdict.red)::before {
-  background: radial-gradient(120% 90% at 0% 0%, rgba(243,139,168,0.12), transparent 60%); }
+  background: radial-gradient(120% 90% at 0% 0%, rgba(226,104,90,0.12), transparent 60%); }
 .hero:has(.hero-verdict.yellow)::before {
-  background: radial-gradient(120% 90% at 0% 0%, rgba(249,226,175,0.10), transparent 60%); }
+  background: radial-gradient(120% 90% at 0% 0%, rgba(232,165,68,0.10), transparent 60%); }
 .hero > * { position: relative; }
+/* THE GLOWING EDGE — Aurora's signature, and the reason its panels read as
+   lit rather than drawn: a 2px bar down the left of a panel that matters, in
+   the accent, with a 12px bloom off it. It is not on every card. It is on the
+   one the page is about, and its colour is the verdict's, so the edge says
+   the same thing as the word beside it or it says nothing. */
+.hero::after {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); box-shadow: 0 0 12px var(--accent);
+}
+.hero:has(.hero-verdict.green)::after {
+  background: var(--green); box-shadow: 0 0 12px var(--green); }
+.hero:has(.hero-verdict.red)::after {
+  background: var(--red); box-shadow: 0 0 12px var(--red); }
+.hero:has(.hero-verdict.yellow)::after {
+  background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
+.hero:has(.hero-verdict.off)::after {
+  background: var(--text-3); box-shadow: none; }
+.hero-verdict { text-shadow: 0 0 18px currentColor; }
+.hero-verdict.off { text-shadow: none; }
 
 .hero-kicker { font-size: var(--t-xs); letter-spacing: 0.09em; text-transform: uppercase;
                color: var(--text-3); font-weight: 600; }
@@ -213,13 +270,14 @@ body {
 /* THE ALARM IS THE EXCEPTION, so it is drawn only when there is one. A banner
    that is always on is a banner nobody reads. */
 .hero-alarm { margin-top: var(--s4); padding: var(--s3) var(--s4);
-              border-radius: var(--radius); font-size: var(--t-sm);
-              line-height: 1.5; border: 1px solid transparent; }
+              border-radius: 0 var(--radius) var(--radius) 0;
+              font-size: var(--t-sm); line-height: 1.5;
+              border: 0; border-left: 2px solid currentColor; }
 .hero-alarm b { letter-spacing: 0.04em; margin-right: var(--s2); }
-.hero-alarm.red { color: var(--red); background: rgba(243,139,168,0.08);
-                  border-color: rgba(243,139,168,0.25); }
-.hero-alarm.yellow { color: var(--yellow); background: rgba(249,226,175,0.07);
-                     border-color: rgba(249,226,175,0.22); }
+.hero-alarm.red { color: var(--red); background: rgba(226,104,90,0.08);
+                  border-color: rgba(226,104,90,0.25); }
+.hero-alarm.yellow { color: var(--yellow); background: rgba(232,165,68,0.07);
+                     border-color: rgba(232,165,68,0.22); }
 .hero-alarm code { color: inherit; }
 .hero-verdict { font-size: var(--t-display); line-height: 1.05; font-weight: 700;
                 letter-spacing: -0.02em; margin-top: var(--s3); }
@@ -268,13 +326,16 @@ body {
 .led-head { font-size: var(--t-xs); letter-spacing: 0.09em; text-transform: uppercase;
             color: var(--text-3); font-weight: 600; padding: var(--s2) 0 var(--s1); }
 .led-row { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
-           gap: var(--s3); padding: var(--s3) 0;
-           border-bottom: 1px solid var(--border); }
+           gap: var(--s3); padding: var(--s3) var(--s3);
+           border-bottom: 1px solid var(--border);
+           background: var(--tint); border-radius: var(--radius);
+           margin-bottom: 2px; }
 .led-row:last-child { border-bottom: 0; }
 .led-k { font-size: var(--t-sm); color: var(--text-2); }
 .led-k .led-note { display: block; font-size: var(--t-xs); color: var(--text-3);
                    margin-top: 2px; }
-.led-v { font-family: var(--mono); font-variant-numeric: tabular-nums;
+.led-v { text-shadow: 0 0 14px currentColor;
+         font-family: var(--mono); font-variant-numeric: tabular-nums;
          font-size: var(--t-lg); color: var(--text); white-space: nowrap; }
 .led-v .muted { color: var(--text-3); }
 .led-v.green { color: var(--green); }
@@ -283,8 +344,8 @@ body {
 .led-v.blue { color: var(--accent); }
 .led-delta { font-family: var(--mono); font-size: var(--t-xs); margin-left: var(--s2);
              padding: 1px 6px; border-radius: 999px; }
-.led-delta.up { color: var(--green); background: rgba(166,227,161,0.12); }
-.led-delta.down { color: var(--red); background: rgba(243,139,168,0.12); }
+.led-delta.up { color: var(--green); background: rgba(143,239,178,0.12); }
+.led-delta.down { color: var(--red); background: rgba(226,104,90,0.12); }
 .led-foot { margin-top: auto; padding-top: var(--s3); }
 
 @media (max-width: 900px) {
@@ -321,7 +382,7 @@ body {
 /* A FAILURE IS NEVER FOLDED (LAW 5). It is loud, on the turn's own face. */
 .wb-bad { margin-top: var(--s3); padding: var(--s3) var(--s4); font-size: var(--t-sm);
           line-height: 1.55; color: var(--red); border-radius: var(--radius);
-          background: rgba(243,139,168,0.08); border: 1px solid rgba(243,139,168,0.25); }
+          background: rgba(226,104,90,0.08); border: 1px solid rgba(226,104,90,0.25); }
 .wb-bad .muted { color: var(--red); opacity: 0.75; }
 
 /* THE FLOOR -- a seat's own words, which is the whole reason this page exists */
@@ -361,7 +422,7 @@ body {
 
 /* THE GATE -- answered here, in a field, never a prompt() (RULE 6) */
 .wb-gate { padding: var(--s4); margin-bottom: var(--s3); border-radius: var(--radius);
-           background: rgba(249,226,175,0.06); border: 1px solid rgba(249,226,175,0.25); }
+           background: rgba(232,165,68,0.06); border: 1px solid rgba(232,165,68,0.25); }
 .wb-gate-title { font-weight: 600; color: var(--yellow); font-size: var(--t-md); }
 .wb-gate-prompt { white-space: pre-wrap; margin: var(--s2) 0 var(--s3);
                   font-size: var(--t-base); line-height: 1.55; }
@@ -386,8 +447,9 @@ body {
 /* A mark, not a logo: two strokes that read as a door. It carries the accent
    so the eye has one fixed point when the nav highlight moves around it. */
 .logo-mark {
-  width: 26px; height: 26px; flex: 0 0 26px; border-radius: 7px;
-  background: linear-gradient(140deg, var(--accent), var(--purple));
+  width: 26px; height: 26px; flex: 0 0 26px; border-radius: var(--radius-lg);
+  background: linear-gradient(140deg, var(--accent), var(--yellow));
+  box-shadow: 0 0 16px rgba(77,224,208,0.30);
   position: relative;
 }
 .logo-mark::after {
@@ -396,7 +458,12 @@ body {
   border-bottom: 2px solid var(--bg); border-radius: 2px 0 0 2px;
 }
 .logo-words { display: flex; flex-direction: column; line-height: 1.25; }
-.logo-words b { font-size: var(--t-base); font-weight: 600; letter-spacing: 0.06em; }
+/* Aurora's brand is tracked hard and lit: `.brand { letter-spacing:.28em;
+   text-shadow: 0 0 10px }`. At .28em a five-letter word becomes a device
+   rather than a word, which is the intent — it is the only place in this
+   console that is allowed to be styling. */
+.logo-words b { font-size: var(--t-base); font-weight: 700; letter-spacing: 0.22em;
+                color: var(--accent); text-shadow: 0 0 10px rgba(77,224,208,.5); }
 .logo-words span { font-size: var(--t-xs); color: var(--muted); font-family: var(--mono); }
 
 .side-primary {
@@ -404,7 +471,12 @@ body {
   margin: 0 var(--s4) var(--s2);
   padding: var(--s2) var(--s3);
   border: 0; border-radius: var(--radius);
-  background: var(--purple); color: var(--bg);
+  /* AMBER, NOT VIOLET. In Aurora the seal amber marks the acts that move the
+     record — it is the colour on Manjuel's orb and on every gate button —
+     while cyan is for reading. Booting opens a sitting and closing pays its
+     toll: both change the record, so the one pinned action wears the seal. */
+  background: var(--yellow); color: #0a0503;
+  box-shadow: 0 0 18px rgba(232,165,68,0.28);
   font-family: var(--font); font-size: var(--t-md); font-weight: 600;
   cursor: pointer;
   transition: filter var(--transition);
@@ -453,9 +525,9 @@ body {
   background: var(--bg-4); color: var(--muted);
   border-radius: 10px; padding: 1px 7px;
 }
-.nav-link.active .nav-badge { background: rgba(137,180,250,0.18); color: var(--accent); }
+.nav-link.active .nav-badge { background: rgba(77,224,208,0.18); color: var(--accent); }
 /* Unsent work is the one badge that is a WARNING rather than a count. */
-.nav-badge.warn { background: rgba(249,226,175,0.16); color: var(--yellow); }
+.nav-badge.warn { background: rgba(232,165,68,0.16); color: var(--yellow); }
 
 /* Navigation */
 .nav { flex: 1; padding: 12px 0; overflow-y: auto; }
@@ -478,7 +550,7 @@ body {
 }
 .nav-link.active {
   color: var(--accent);
-  background: rgba(137,180,250,0.08);
+  background: rgba(77,224,208,0.08);
   border-left-color: var(--accent);
 }
 /* The nav glyph now lives in css/icons.css -- one grid, one stroke, masked
@@ -496,17 +568,15 @@ body {
   gap: 4px;
 }
 .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-3);
-  display: inline-block;
-  margin-right: 6px;
-  vertical-align: middle;
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--green); box-shadow: 0 0 8px var(--green);
 }
 .status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
 .status-dot.red { background: var(--red); }
-.covenant { font-family: var(--font-mono); font-size: 10px; margin-top: 4px; }
+/* .covenant was declared TWICE in this file — here, and again under THE
+   SIDEBAR FOOTER below, which sets every one of the same properties and wins
+   on source order. The dead one is gone: two rules for one class is exactly
+   how `.muted` came to steal the hero verdict's font-size. */
 
 /* Page header */
 .page-header {
@@ -518,6 +588,7 @@ body {
 .page-title {
   font-size: var(--t-2xl);
   font-weight: 700;
+  letter-spacing: 0.04em;
   color: var(--text);
 }
 .page-subtitle {
@@ -552,19 +623,30 @@ body {
   padding: 20px;
   margin-bottom: 16px;
 }
+/* AURORA'S SECTION RULE. Its headings are a tracked-out micro-label followed
+   by a hairline running to the panel's edge — `.section::after { flex:1;
+   height:1px }`. That single device is what makes its panels read as parts
+   of one instrument rather than a stack of boxes. Here the rule fills the gap
+   between the title and whatever control sits on the right, so a header with
+   a button and one without both close the same way. */
 .card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: var(--s3);
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
+.card-header::after {
+  content: ''; order: 1; flex: 1; height: 1px; background: var(--border);
+}
+.card-header > .card-title { order: 0; flex-shrink: 0; }
+.card-header > *:not(.card-title) { order: 2; flex-shrink: 0; }
 .card-title {
-  font-size: var(--t-sm);
+  font-size: var(--t-xs);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-3);
+  letter-spacing: 0.15em;
+  color: var(--accent-2);
   font-weight: 600;
 }
 
@@ -579,16 +661,26 @@ body {
   font-weight: 600;
   font-family: var(--font-mono);
 }
-.badge-green { background: rgba(166,227,161,0.12); color: var(--green); }
-.badge-red { background: rgba(243,139,168,0.12); color: var(--red); }
-.badge-yellow { background: rgba(249,226,175,0.12); color: var(--yellow); }
-.badge-blue { background: rgba(137,180,250,0.12); color: var(--accent); }
-.badge-purple { background: rgba(203,166,247,0.12); color: var(--purple); }
-.badge-muted { background: rgba(108,112,134,0.12); color: var(--text-3); }
-.badge-orange { background: rgba(250,179,135,0.12); color: var(--orange); }
+.badge-green { background: rgba(143,239,178,0.12); color: var(--green); }
+.badge-red { background: rgba(226,104,90,0.12); color: var(--red); }
+.badge-yellow { background: rgba(232,165,68,0.12); color: var(--yellow); }
+.badge-blue { background: rgba(77,224,208,0.12); color: var(--accent); }
+.badge-purple { background: rgba(201,160,255,0.12); color: var(--purple); }
+.badge-muted { background: rgba(74,96,104,0.12); color: var(--text-3); }
+.badge-orange { background: rgba(255,122,69,0.12); color: var(--orange); }
 
 /* Tables */
+/* EVERY TABLE IN A CARD SCROLLS IN ITS OWN BOX, wrapper or no wrapper. Three
+   were written bare — Trace details, the seat declaration, Provenance — and
+   a bare one pushes its card, which pushes the grid, which scrolls the page
+   sideways: Settings was 601px of content in a 595px main because of a badge
+   reading `can_approve:false`. Wrapping the three by hand fixes the three and
+   not the fourth, the same lesson the input rule learned; `display:block` is
+   what lets a table scroll at all, and the inner width keeps its columns from
+   collapsing onto each other. */
 .table-wrap { overflow-x: auto; }
+.card > table { display: block; overflow-x: auto; max-width: 100%; }
+.card > table > tbody { display: table; width: 100%; }
 table { width: 100%; border-collapse: collapse; }
 th, td {
   text-align: left;
@@ -606,7 +698,7 @@ th {
   position: sticky;
   top: 0;
 }
-tr:hover td { background: rgba(137,180,250,0.03); }
+tr:hover td { background: rgba(77,224,208,0.03); }
 td code {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -631,6 +723,11 @@ td code {
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition);
+  /* A LABEL NEVER BREAKS MID-BUTTON. The mono face is wider than the sans it
+     replaced, and Version control's four buttons started splitting into
+     "Save the / work". A row of buttons wraps BETWEEN buttons; a button is
+     one word-group or it stops reading as one control. */
+  white-space: nowrap;
   /* Several buttons in this console are <a> — "All seats", "Back" — and they
      were carrying the browser's link underline through the button's own
      chrome. A button is a button whichever element it is built from. */
@@ -641,7 +738,7 @@ td code {
 .btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .btn-primary:hover { opacity: 0.9; }
 .btn-danger { border-color: var(--red); color: var(--red); }
-.btn-danger:hover { background: rgba(243,139,168,0.1); }
+.btn-danger:hover { background: rgba(226,104,90,0.1); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 
 /* Forms */
@@ -867,7 +964,7 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
    rather than shoving the page. */
 .grid-2 > *, .grid-3 > *, .stats > *, .agent-grid > * { min-width: 0; }
 pre { overflow-x: auto; max-width: 100%; }
-.flex { display: flex; gap: 8px; align-items: center; }
+.flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .mt-16 { margin-top: 16px; }
 .mb-16 { margin-bottom: 16px; }
@@ -903,7 +1000,7 @@ pre { overflow-x: auto; max-width: 100%; }
 
 /* Chat (N1) */
 .chat-log { max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px; }
-.chat-q { align-self: flex-end; background: var(--accent-dim, rgba(137,180,250,0.14)); border: 1px solid var(--border); border-radius: 10px 10px 2px 10px; padding: 8px 12px; max-width: 85%; white-space: pre-wrap; }
+.chat-q { align-self: flex-end; background: var(--accent-dim, rgba(77,224,208,0.14)); border: 1px solid var(--border); border-radius: 10px 10px 2px 10px; padding: 8px 12px; max-width: 85%; white-space: pre-wrap; }
 .chat-a { align-self: flex-start; background: var(--surface, #12121a); border: 1px solid var(--border); border-radius: 10px 10px 10px 2px; padding: 8px 12px; max-width: 90%; white-space: pre-wrap; }
 .chat-a.live { border-color: var(--accent); animation: pulse 2s ease-in-out infinite; }
 .chat-form { display: flex; gap: 8px; margin-top: 12px; }
@@ -963,7 +1060,7 @@ pre { overflow-x: auto; max-width: 100%; }
        background: var(--surface, #12121a); align-self: stretch; max-width: 100%;
        white-space: normal; word-break: break-word; }
 .cev code { font-size: 11px; }
-.cev-obj { border-left-color: var(--accent); background: rgba(137,180,250,0.10); font-weight: 600; }
+.cev-obj { border-left-color: var(--accent); background: rgba(77,224,208,0.10); font-weight: 600; }
 .cev-law { border-left-color: #cba6f7; }
 .cev-meta, .cev-note, .cev-other { border-left-color: var(--muted, #6c7086); color: var(--muted, #6c7086); }
 .cev-seat { border-left-color: #89dceb; }
@@ -971,21 +1068,21 @@ pre { overflow-x: auto; max-width: 100%; }
 .cev-report { border-left-color: var(--muted, #6c7086); font-family: var(--mono, monospace); }
 .cev-mark { font-size: 11px; color: var(--muted, #6c7086); }
 .cev-ok { border-left-color: #a6e3a1; }
-.cev-fail { border-left-color: #f38ba8; background: rgba(243,139,168,0.08); }
+.cev-fail { border-left-color: #f38ba8; background: rgba(226,104,90,0.08); }
 .cev-guard { border-left-color: #f9e2af; }
 .cev-tok { white-space: pre-wrap; margin-top: 4px; color: var(--text, #e0e0e0); }
 .cev-dots::after { content: '...'; animation: cevdots 1.2s steps(4, end) infinite; }
 @keyframes cevdots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
 
 /* the gate: the one row that is waiting on the operator */
-.cev-gate { border-left-color: #f9e2af; background: rgba(249,226,175,0.10); }
+.cev-gate { border-left-color: #f9e2af; background: rgba(232,165,68,0.10); }
 .cev-prompt { white-space: pre-wrap; margin-top: 6px; }
 
 /* the delivery, with what actually ran under it */
-.cev-delivery { border-left-color: #a6e3a1; background: rgba(166,227,161,0.06); }
+.cev-delivery { border-left-color: #a6e3a1; background: rgba(143,239,178,0.06); }
 .cev-text { white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
 .cev-notrun { border: 1px solid #f38ba8; border-radius: 6px; padding: 6px 8px; margin: 8px 0;
-              background: rgba(243,139,168,0.08); }
+              background: rgba(226,104,90,0.08); }
 .cev-steps { width: 100%; margin-top: 8px; font-size: 11px; }
 .cev-steps td, .cev-steps th { padding: 2px 6px; text-align: left; }
 
@@ -1013,12 +1110,12 @@ pre { overflow-x: auto; max-width: 100%; }
 
 /* the failures are never behind a click: an answer that ran on a failed tool
    says so on its face, or the page is lying by omission */
-.chat-notrun { border: 1px solid #f38ba8; background: rgba(243,139,168,0.08);
+.chat-notrun { border: 1px solid #f38ba8; background: rgba(226,104,90,0.08);
                border-radius: 6px; padding: 6px 8px; margin: 8px 0; font-size: 11px; }
 .chat-refused { border-color: #f38ba8; }
 
 /* the gate: the one bubble waiting on the operator */
-.chat-gate { border-color: #f9e2af; background: rgba(249,226,175,0.10); max-width: 100%; }
+.chat-gate { border-color: #f9e2af; background: rgba(232,165,68,0.10); max-width: 100%; }
 .chat-gate-title { font-weight: 600; color: #f9e2af; }
 .chat-gate-prompt { white-space: pre-wrap; margin: 6px 0; }
 
@@ -1042,9 +1139,9 @@ pre { overflow-x: auto; max-width: 100%; }
 .brief-text { flex: 1; font-size: 13px; line-height: 1.5; }
 .brief-side { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .brief-side .brief-src { float: none; }
-.brief-wait { border-left-color: #f9e2af; background: rgba(249,226,175,0.08); }
+.brief-wait { border-left-color: #f9e2af; background: rgba(232,165,68,0.08); }
 .brief-warn { border-left-color: #f9e2af; }
-.brief-bad  { border-left-color: #f38ba8; background: rgba(243,139,168,0.08); }
+.brief-bad  { border-left-color: #f38ba8; background: rgba(226,104,90,0.08); }
 
 .home-recent-row { padding: 7px 10px; border-radius: 6px; cursor: pointer;
                    font-size: 12px; color: var(--muted, #6c7086); }
@@ -1067,7 +1164,7 @@ pre { overflow-x: auto; max-width: 100%; }
 
 /* ---- the mic: local whisper, held by the engine, not the browser ---- */
 .btn-mic { font-size: 15px; line-height: 1; padding: 8px 11px; }
-.btn-mic.hot { border-color: #f38ba8; background: rgba(243,139,168,0.16);
+.btn-mic.hot { border-color: #f38ba8; background: rgba(226,104,90,0.16);
                animation: micpulse 1.4s ease-in-out infinite; }
 @keyframes micpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
@@ -1110,7 +1207,7 @@ pre { overflow-x: auto; max-width: 100%; }
 .home-more { font-size: 11px; color: var(--muted, #6c7086); text-align: center; }
 .home-said { align-self: flex-end; max-width: 85%; padding: 7px 12px; font-size: 13px;
              white-space: pre-wrap; border-radius: 10px 10px 2px 10px;
-             background: rgba(137,180,250,0.14); border: 1px solid var(--border); }
+             background: rgba(77,224,208,0.14); border: 1px solid var(--border); }
 .home-heard { align-self: flex-start; max-width: 92%; padding: 9px 13px; font-size: 13px;
               line-height: 1.55; white-space: pre-wrap; border-radius: 10px 10px 10px 2px;
               background: var(--bg); border: 1px solid var(--border); }
@@ -1119,8 +1216,8 @@ pre { overflow-x: auto; max-width: 100%; }
                   color: var(--muted, #6c7086); border-top: 1px solid var(--border); }
 .home-bad-note { margin-top: 8px; padding: 6px 8px; font-size: 11px;
                  border: 1px solid #f38ba8; border-radius: 6px;
-                 background: rgba(243,139,168,0.08); }
-.home-gate { border-color: #f9e2af; background: rgba(249,226,175,0.10); }
+                 background: rgba(226,104,90,0.08); }
+.home-gate { border-color: #f9e2af; background: rgba(232,165,68,0.10); }
 .home-bad { border-color: #f38ba8; }
 
 
@@ -1138,14 +1235,14 @@ pre { overflow-x: auto; max-width: 100%; }
 .card-critical {
   border-color: var(--red);
   background: linear-gradient(var(--bg-2), var(--bg-2)) padding-box;
-  box-shadow: 0 0 0 1px rgba(243,139,168,0.18), 0 8px 28px rgba(0,0,0,0.45);
+  box-shadow: 0 0 0 1px rgba(226,104,90,0.18), 0 8px 28px rgba(0,0,0,0.45);
 }
 .card-critical > .card-header,
 .card-critical > .card-title { color: var(--red); }
 
 .card-wait {
   border-color: var(--yellow);
-  box-shadow: 0 0 0 1px rgba(249,226,175,0.16), 0 8px 28px rgba(0,0,0,0.40);
+  box-shadow: 0 0 0 1px rgba(232,165,68,0.16), 0 8px 28px rgba(0,0,0,0.40);
 }
 .card-wait > .card-header,
 .card-wait > .card-title { color: var(--yellow); }
@@ -1189,8 +1286,12 @@ pre { overflow-x: auto; max-width: 100%; }
 .covenant {
   font-family: var(--mono);
   font-size: var(--t-xs);
-  color: var(--text-2);
-  letter-spacing: 0.02em;
+  /* THE RULE ABOVE IT IS WHAT LIFTS IT, not the colour. On Aurora's darker
+     ground --text-2 is a blue-grey bright enough to compete with the nav;
+     the hairline and the space do the separating, and the hash stays quiet
+     without being furtive — which was this rule's point when it was written. */
+  color: var(--text-3);
+  letter-spacing: 0.04em;
   margin-top: var(--s2);
   padding-top: var(--s2);
   border-top: 1px solid var(--border);
@@ -1236,7 +1337,7 @@ pre { overflow-x: auto; max-width: 100%; }
 /* The highlight is the SELECTION, not a hover effect: the keyboard and the
    mouse drive the same one, so there is never a second thing that looks
    chosen while Enter picks something else. */
-.pal-row.on { background: rgba(137,180,250,0.10); border-left-color: var(--accent); }
+.pal-row.on { background: rgba(77,224,208,0.10); border-left-color: var(--accent); }
 .pal-label { font-size: var(--t-base); }
 .pal-row.on .pal-label { color: var(--accent); }
 .pal-note { font-size: var(--t-sm); color: var(--muted); margin-left: auto;
@@ -1261,7 +1362,7 @@ pre { overflow-x: auto; max-width: 100%; }
    is drawn with a background rather than a border so a hovered row can still
    win without a specificity fight. */
 tbody tr:nth-child(even) td { background: rgba(255,255,255,0.012); }
-tbody tr:hover td { background: rgba(137,180,250,0.05); }
+tbody tr:hover td { background: rgba(77,224,208,0.05); }
 
 /* A FIGURE IS RIGHT-ALIGNED OR IT IS NOT A COLUMN. With tabular numerals
    already on, aligning the right edge is what makes two numbers comparable
@@ -1309,11 +1410,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   pointer-events: none;
 }
 .stat > * { position: relative; }
-.stat:has(.stat-value.green)  { --tint: rgba(166,227,161,0.10); border-color: rgba(166,227,161,0.22); }
-.stat:has(.stat-value.red)    { --tint: rgba(243,139,168,0.12); border-color: rgba(243,139,168,0.28); }
-.stat:has(.stat-value.yellow) { --tint: rgba(249,226,175,0.10); border-color: rgba(249,226,175,0.22); }
-.stat:has(.stat-value.blue)   { --tint: rgba(137,180,250,0.10); border-color: rgba(137,180,250,0.22); }
-.stat:has(.stat-value.purple) { --tint: rgba(203,166,247,0.10); border-color: rgba(203,166,247,0.22); }
+.stat:has(.stat-value.green)  { --tint: rgba(143,239,178,0.10); border-color: rgba(143,239,178,0.22); }
+.stat:has(.stat-value.red)    { --tint: rgba(226,104,90,0.12); border-color: rgba(226,104,90,0.28); }
+.stat:has(.stat-value.yellow) { --tint: rgba(232,165,68,0.10); border-color: rgba(232,165,68,0.22); }
+.stat:has(.stat-value.blue)   { --tint: rgba(77,224,208,0.10); border-color: rgba(77,224,208,0.22); }
+.stat:has(.stat-value.purple) { --tint: rgba(201,160,255,0.10); border-color: rgba(201,160,255,0.22); }
 
 /* The label row carries the delta, so the eye lands on WHAT and HOW IT MOVED
    in one pass instead of reading down to a note. */
@@ -1325,8 +1426,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   border-radius: 10px; padding: 1px 7px;
   background: var(--bg-4); color: var(--muted);
 }
-.stat-delta.up   { background: rgba(166,227,161,0.14); color: var(--green); }
-.stat-delta.down { background: rgba(243,139,168,0.14); color: var(--red); }
+.stat-delta.up   { background: rgba(143,239,178,0.14); color: var(--green); }
+.stat-delta.down { background: rgba(226,104,90,0.14); color: var(--red); }
 .stat-note { font-size: var(--t-sm); color: var(--text-2); margin-top: var(--s1);
              line-height: 1.45; }
 
