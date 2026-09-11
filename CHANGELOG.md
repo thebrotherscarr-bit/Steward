@@ -12,6 +12,48 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The spine is found, not assumed
+
+`verify_chain` was dead on every machine where the Rust spine had been built
+but not installed on PATH — which is every fresh clone. `--atlas-bin` defaults
+to the bare word `"atlas"`, `atlas-door` walked the built tree to find it, and
+`atlas-mcp` never did: the same estate answered differently depending on which
+door you came through. `tests/PROVING.md` has named this a trap since it was
+written, and RUNBOOK's start line still did not carry the flag.
+
+- **The walk moved to `internal/tools`**, the one place that actually shells
+  the binary, so every caller gets it and there is no second copy to drift.
+  Order: an explicit `--atlas-bin` that is not the placeholder, then
+  `ATLAS_BIN`, then PATH, then the built tree.
+- **It starts from the running binary's own location.** A first cut walked up
+  from the tenant home and from cwd; for `atlas-mcp` the tenant home is the
+  CORE ground and the spine lives DOWN from there in `atlas/target/`, so the
+  walk climbed past Desktop and found nothing. `atlas-mcp.exe` sits at
+  `<repo>/line/` and the spine is built at `<repo>/target/` — two up and back
+  down, which the walk now covers. Both `debug` and `release` profiles.
+- **It still names what it could not run.** Nothing found returns `"atlas"`
+  unchanged, so the refusal a caller sees is the same honest one as before.
+
+Proved live, with no `--atlas-bin` passed at all: `verify_chain` on
+`law/chain.jsonl` went from `exec: "atlas": not found in %PATH%` to
+`verdict=FLIP entries=4`. 16 Go packages green after the change.
+
+### The README stopped asking for what it does not need
+
+Found by cloning this repo onto a clean tree and following it literally.
+
+- **The MSVC toolchain is named.** `store/src/ffi.rs` links Windows' own
+  `winsqlite3`, so `cargo build` needs `link.exe`. A fresh PC with only rustup
+  dies on `linker 'link.exe' not found`, which says nothing about this
+  project. Several GB of prerequisite, named nowhere until today.
+- **Python 3.14 was never needed.** The core's `pyproject.toml` says `>=3.10`
+  and CI proves 3.10 and 3.13. The `.venv` the same line named is created by
+  nothing and is gitignored; `tests/prove.py` uses `sys.executable`.
+- **`cd line ; go build ./...` produced no binaries and no error.** `line/cmd`
+  holds five main packages and Go discards every result when it compiles more
+  than one. It is a compile check that reads like a build.
+
+
 ### The rule that kept winning arguments it was not in
 
 `.covenant` being declared twice was one instance of something; this is the

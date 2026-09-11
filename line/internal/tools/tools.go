@@ -131,6 +131,63 @@ type Options struct {
 	CoreCmd string
 }
 
+// findAtlas resolves the Rust spine. In order: an explicit path that is not
+// the placeholder, then ATLAS_BIN, then PATH, then the built tree walked up
+// from the tenant's own home AND from the process working directory — which
+// between them cover `go run` from the module, `go test` from a package dir,
+// a binary launched from the repo root, and a door whose cwd is the tenant.
+// Returns "atlas" unchanged when nothing is found, so the refusal a caller
+// sees still names the thing it could not run.
+func findAtlas(flagVal, home string) string {
+	if flagVal != "" && flagVal != "atlas" {
+		return flagVal
+	}
+	if v := os.Getenv("ATLAS_BIN"); v != "" {
+		return v
+	}
+	if exe, err := exec.LookPath("atlas"); err == nil {
+		return exe
+	}
+	name := "atlas"
+	if os.PathSeparator == '\\' {
+		name = "atlas.exe"
+	}
+	// THE BINARY'S OWN LOCATION IS THE ROOT THAT ACTUALLY WORKS. A first cut
+	// walked up from the tenant home and from cwd; for atlas-mcp the tenant
+	// home is the CORE ground, and the spine lives DOWN from there in
+	// atlas/target/, so the walk climbed past Desktop and found nothing.
+	// atlas-mcp.exe sits at <repo>/line/, and the spine it needs is built at
+	// <repo>/target/ -- two levels up and back down, which this walk covers.
+	roots := []string{}
+	if exe, err := os.Executable(); err == nil {
+		roots = append(roots, filepath.Dir(exe))
+	}
+	roots = append(roots, home, ".")
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		dir := root
+		for i := 0; i < 5; i++ {
+			for _, profile := range []string{"release", "debug"} {
+				c := filepath.Join(dir, "target", profile, name)
+				if st, err := os.Stat(c); err == nil && !st.IsDir() {
+					if abs, err := filepath.Abs(c); err == nil {
+						return abs
+					}
+					return c
+				}
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return "atlas"
+}
+
 // engines is THE LINE's supervisor: one Manjuel process per open world.
 // Deliberately NOT under askLock -- that mutex is global across every tenant,
 // and a 600-second turn beneath it would freeze every tool on every world
@@ -172,10 +229,16 @@ func Build(reg *tenant.Registry, opts Options) *Registry {
 			if path == "" {
 				return "", fmt.Errorf("verify_chain needs a path")
 			}
-			bin := opts.AtlasBin
-			if bin == "" {
-				bin = "atlas"
-			}
+			// RESOLVED HERE, not taken on faith from the flag. `--atlas-bin`
+			// defaults to the bare word "atlas", and on any machine where the
+			// Rust spine has been built but not installed on PATH -- which is
+			// every fresh clone -- exec fails with `"atlas": not found in
+			// %PATH%` and verify_chain is dead on arrival. atlas-door already
+			// walked the built tree for it; atlas-mcp never did, so the same
+			// estate answered differently depending on which door you came
+			// through. findAtlas() is that walk, moved to the one place that
+			// actually shells the binary so every caller gets it.
+			bin := findAtlas(opts.AtlasBin, t.Home)
 			cmd := exec.Command(bin, "chain", "verify", path)
 			cmd.Dir = t.Home
 			out, err := cmd.CombinedOutput()

@@ -53,9 +53,17 @@ atlas/
 
 ### Prerequisites
 
-- Rust stable (`~\.cargo\bin`)
-- Go 1.26+
-- Python 3.14 (`.venv\Scripts\python.exe`)
+- Rust stable (`~\.cargo\bin`) **plus the MSVC toolchain** — Visual Studio
+  Build Tools with "Desktop development with C++". `store/src/ffi.rs` links
+  Windows' own `winsqlite3`, so `cargo build` needs `link.exe`. Without it
+  the build dies on `linker 'link.exe' not found`, which says nothing about
+  this project. Several GB of prerequisite, named nowhere until 2026-09-11.
+- Go 1.26+ — both `line/go.mod` and `webapp/go.mod` say `go 1.26`.
+- Python 3.10+ for the provers. This line said **3.14**, and nothing here
+  needs it: the core's `pyproject.toml` says `>=3.10` and CI proves 3.10 and
+  3.13. The `.venv` it also named is created by nothing and is gitignored —
+  `python tests/prove.py` uses `sys.executable` and is the portable path.
+- Windows 10 1803 or newer, for that same `winsqlite3` link.
 
 ### Build
 
@@ -65,7 +73,10 @@ $env:Path = "$env:USERPROFILE\.cargo\bin;" + $env:Path
 cargo build --workspace
 
 # Go
-cd line ; go build ./... ; cd ..
+cd line ; go build -o atlas-mcp.exe .\cmd\atlas-mcp ; cd ..
+# NOT `go build ./...` — line/cmd holds FIVE main packages, and Go
+# discards the results when it compiles more than one. That command is a
+# compile check that leaves you with no binary and no error.
 
 # Webapp
 cd webapp ; go build -o atlas-webapp.exe . ; cd ..
