@@ -12,6 +12,32 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The door names what it carries
+
+It printed `carried 2`. A count cannot be checked against intent — two is two
+whether the two are the ones you meant or not. It now prints:
+
+    ground: atlas (...\Research\atlas via AGENTS.md); carrying 2: atlas, research
+
+**Earned the same day, by the incident it would have prevented.** The door was
+started from the ground root, so `ground.Detect` resolved the ground to
+`research` and `ground.Siblings()` read the parent of THAT — the desktop —
+carrying every neighbour holding an `AGENTS.md`. A world outside the estate
+rode in, the dashboard read its git state, and the first anyone knew was a
+sidebar badge reading 83,303. Every line needed to catch it at boot was already
+there except the names.
+
+**And the launch point is the whole control, which was got wrong out loud
+first.** `Detect` walks UP and stops at the FIRST marker it finds, and
+`Siblings` scans the parent of what it found — not the parent of the working
+directory. From `atlas\line` the first marker is atlas's own `AGENTS.md`, so
+the scan is of `Research` and the door carries exactly `atlas, research`. From
+the ground root the first marker is the core's, and the scan is of the desktop.
+No flag, no env var and no code change was needed for the behaviour the
+operator asked for; a different `-WorkingDirectory` was the entire answer, and
+this hand told him otherwise before checking. RUNBOOK's own start line already
+does `cd atlas\line` first.
+
 ### The first strokes on the MCP, and two bugs they caught immediately
 
 ADR-006 measured the door and found the thing that explains a two-day failure

@@ -150,9 +150,21 @@ func main() {
 					fatal(err)
 				}
 			}
+			// NAME THEM. This said "carried %d" and nothing else, and a count
+			// cannot be checked against intent — two is two whether the two
+			// are the ones you meant or not.
+			//
+			// Earned 2026-09-11. The door was started from the ground root, so
+			// Detect resolved the ground to `research` and Siblings() read the
+			// parent of THAT -- the desktop -- carrying every neighbour with an
+			// AGENTS.md. A world outside the estate rode in, the dashboard read
+			// its git state, and the first anyone knew was a badge reading
+			// 83,303. Every line needed to catch that at boot was already here
+			// except the names.
 			fmt.Fprintf(os.Stderr,
-				"ground: %s (%s via %s); carried %d\n",
-				here.Name, here.Home, here.Via, len(reg.Names()))
+				"ground: %s (%s via %s); carrying %d: %s\n",
+				here.Name, here.Home, here.Via,
+				len(reg.Names()), strings.Join(reg.Names(), ", "))
 		} else {
 			fmt.Fprintln(os.Stderr,
 				"note: no ground detected from the working directory "+
