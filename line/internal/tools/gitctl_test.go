@@ -169,10 +169,10 @@ func TestAPathIsJailedToItsOwnWorld(t *testing.T) {
 // the host is ever lifted out of one.
 func TestHostOfNeverCarriesCredentials(t *testing.T) {
 	cases := map[string]string{
-		"https://github.com/owner/repo.git":            "github.com",
+		"https://github.com/owner/repo.git":                    "github.com",
 		"https://x-access-token:ghp_SECRET@github.com/o/r.git": "github.com",
-		"git@github.com:owner/repo.git":                "github.com",
-		"ssh://git@example.org:22/o/r.git":             "example.org",
+		"git@github.com:owner/repo.git":                        "github.com",
+		"ssh://git@example.org:22/o/r.git":                     "example.org",
 	}
 	for url, want := range cases {
 		got := hostOf(url)

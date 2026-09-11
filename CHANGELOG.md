@@ -12,6 +12,24 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### gofmt comes back empty
+
+Three files had never been through it: `internal/tools/gitctl_test.go` (a map
+literal whose keys were padded to the wrong width), `cmd/atlas-vc/main.go` (a
+doc comment in the pre-1.19 spelling, leading spaces where Go now wants a tab
+block), and `internal/engine/engine.go` (one struct field padded for an
+alignment group a comment had broken). Eleven lines between them, every one
+cosmetic — no semantic change, 19 packages still green.
+
+Worth naming because of how it was nearly missed: the first check ran
+`gofmt -l internal/tools/` and found ONE file, so the report said one file. The
+module-wide run found three. A scoped check answers the question it was
+scoped to, not the question that was asked.
+
+`gofmt -l .` now returns nothing, which is the precondition for making it a CI
+gate rather than something a hand has to remember.
+
+
 ### ADR-006 accepted, and items 2 through 6 built
 
 **Item 2 — the tier is a field, and the stroke corrected the ADR.** `Tool`

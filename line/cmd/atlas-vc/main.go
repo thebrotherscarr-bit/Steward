@@ -1,8 +1,9 @@
 // atlas vc — convert .us declarations to W3C Verifiable Credentials.
 //
 // Usage:
-//   atlas vc --us <file.us> [--issuer did:atlas:...] [--out <file.json>]
-//   atlas vc verify --vc <file.json>
+//
+//	atlas vc --us <file.us> [--issuer did:atlas:...] [--out <file.json>]
+//	atlas vc verify --vc <file.json>
 package main
 
 import (

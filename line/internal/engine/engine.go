@@ -670,7 +670,7 @@ func (e *Engine) Alive() bool {
 // ---------------------------------------------------------------------
 
 type Registry struct {
-	mu   sync.Mutex // guards `open` ONLY -- held for map access, never a spawn
+	mu sync.Mutex // guards `open` ONLY -- held for map access, never a spawn
 	// SPAWNS ARE SERIALISED ON THEIR OWN LOCK (2026-09-10). C2 below needs two
 	// opens never to race; it does NOT need every reader to queue behind one.
 	// Holding `mu` across the boot made Get() -- and so /run/state, which the
