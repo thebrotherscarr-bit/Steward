@@ -876,3 +876,99 @@ td code {
   padding-top: var(--s2);
   border-top: 1px solid var(--border);
 }
+
+/* ---- THE PALETTE -------------------------------------------------------
+   Ctrl+K / Cmd+K. It sits above everything including the toast, and it is
+   the only thing in this console that takes the whole screen, so it takes it
+   quietly: the page stays visible and readable behind a dim, and the box is
+   small enough to read in one glance rather than a panel to survey. */
+#palette { position: fixed; inset: 0; z-index: 2000; display: flex;
+           align-items: flex-start; justify-content: center; }
+#palette[hidden] { display: none !important; }
+.pal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+.pal-box {
+  position: relative;
+  margin-top: 12vh;
+  width: min(560px, 92vw);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.pal-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--t-lg);
+  padding: var(--s4);
+}
+.pal-input:focus { outline: none; }
+.pal-list { max-height: 46vh; overflow-y: auto; padding: var(--s2) 0; }
+.pal-row {
+  display: flex; align-items: baseline; gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+/* The highlight is the SELECTION, not a hover effect: the keyboard and the
+   mouse drive the same one, so there is never a second thing that looks
+   chosen while Enter picks something else. */
+.pal-row.on { background: rgba(137,180,250,0.10); border-left-color: var(--accent); }
+.pal-label { font-size: var(--t-base); }
+.pal-row.on .pal-label { color: var(--accent); }
+.pal-note { font-size: var(--t-sm); color: var(--muted); margin-left: auto;
+            text-align: right; }
+.pal-none { padding: var(--s4); font-size: var(--t-md); color: var(--muted); }
+.pal-foot {
+  display: flex; gap: var(--s4);
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--border);
+  font-size: var(--t-xs); color: var(--muted);
+}
+.pal-foot kbd {
+  font-family: var(--mono); font-size: var(--t-xs);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; margin-right: 3px;
+}
+
+/* ---- TABLES READ DOWN A COLUMN ----------------------------------------
+   Every table here is read by scanning one column, not by reading rows, and
+   nothing helped the eye hold its place. The stripe is barely there on
+   purpose -- enough to keep a line, not enough to become a pattern -- and it
+   is drawn with a background rather than a border so a hovered row can still
+   win without a specificity fight. */
+tbody tr:nth-child(even) td { background: rgba(255,255,255,0.012); }
+tbody tr:hover td { background: rgba(137,180,250,0.05); }
+
+/* A FIGURE IS RIGHT-ALIGNED OR IT IS NOT A COLUMN. With tabular numerals
+   already on, aligning the right edge is what makes two numbers comparable
+   at a glance instead of by reading both. */
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- WAITING, AND EMPTY ------------------------------------------------
+   "Reading both grounds..." with a spinner is a sentence about the machine.
+   A skeleton is a sentence about the page: it says how much is coming and
+   where it will sit, so the layout does not jump when it lands.
+
+   The pulse is the one piece of non-user-triggered motion in this console,
+   and it earns it: a still grey block reads as a broken image. Respected for
+   anyone who asked the OS for less. */
+.skel { display: block; height: 13px; border-radius: 4px;
+        background: var(--bg-4); animation: skel 1.4s ease-in-out infinite; }
+.skel + .skel { margin-top: var(--s2); }
+.skel-60 { width: 60%; } .skel-40 { width: 40%; } .skel-80 { width: 80%; }
+@keyframes skel { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.8; } }
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; opacity: 0.55; }
+  .pulse, .btn-mic.hot { animation: none; }
+}
+
+/* An empty screen is an invitation, so it is given room and a plain sentence
+   rather than a shrug in the corner of a card. */
+.empty-text { font-size: var(--t-md); color: var(--text-2); line-height: 1.6;
+              padding: var(--s5) var(--s4); text-align: center; }
+.empty-text b { color: var(--text); }

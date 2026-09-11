@@ -16,7 +16,7 @@ const Flows = {
       <div class="page-subtitle">What is saved, what is not, and every way to move it</div></div></div>
 
       <div class="card"><div class="card-title">The repositories — what is saved, what is not, and what you can do about it</div>
-        <div id="repo-watch"><div class="loading">Reading both grounds...</div></div>
+        <div id="repo-watch"><div class="skel skel-60"></div><div class="skel skel-80"></div><div class="skel skel-40"></div></div>
         <div class="muted mt-16">Every button here is your hand, not the machine's.
         Nothing fires on its own, nothing sends while the wall is shut, and
         nothing is thrown away without saying so first.</div>

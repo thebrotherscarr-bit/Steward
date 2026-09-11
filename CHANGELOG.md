@@ -12,6 +12,31 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The console takes a keyboard
+- **Ctrl+K / Cmd+K opens a palette.** Every page and the engine's verbs, three
+  letters and Enter. Checked on the event rather than the platform, because a
+  Mac keyboard on a Windows box happens and neither should have to learn the
+  other's key. **It navigates and it boots, and nothing else** — a palette that
+  can run anything is a second command surface to learn and a second place for a
+  destructive verb to hide. Close is in it because it *pays the toll*, the one
+  routine act the record depends on and the easiest to forget.
+- **What it offers is what is true right now.** The engine rows read `Run`'s live
+  state, so a palette opened after a crash does not offer to close a sitting that
+  already closed.
+- **Tables read down a column.** A stripe barely there — enough to hold a line,
+  not enough to become a pattern — drawn as a background so a hovered row still
+  wins without a specificity fight. Figures are right-aligned, which is what
+  makes two numbers comparable at a glance now that they are tabular.
+- **Waiting looks like the thing that is coming.** "Reading both grounds..." with
+  a spinner is a sentence about the machine; a skeleton says how much is arriving
+  and where it will sit, so the layout does not jump when it lands. It is the one
+  piece of non-user-triggered motion here and it earns it — a still grey block
+  reads as a broken image — and it is switched off under
+  `prefers-reduced-motion`, along with the mic pulse.
+- **An empty screen is an invitation**, so it gets room and a plain sentence
+  rather than a shrug in the corner of a card.
+
+
 ### The console is rearranged around what you actually look at
 - **Recent moved with it**, and the nav item is **Version control** now. The
   route and `data-page` stay `flows`: the route is what every link, bookmark and

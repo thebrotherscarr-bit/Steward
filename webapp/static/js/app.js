@@ -14,6 +14,8 @@ const App = {
       });
     });
     this.loadHealth();
+    // Ctrl+K / Cmd+K, anywhere. The one global key this console binds.
+    Palette.bind();
     API.sse((e) => this.onEvent(e));
     // Every page follows a turn started in another browser, not just the
     // one that asked for it. Idempotent: mirror() returns at once if it is
@@ -822,10 +824,10 @@ const App = {
         ${escHtml(rc.error)}<span class="brief-src">sessions/sessions.jsonl</span></div></div>`;
     } else if (rc.sittings != null) {
       const rows = (rc.recent || []).slice().reverse().map(r => `<tr>
-        <td>${escHtml(String(r.n))}</td>
+        <td class="num">${escHtml(String(r.n))}</td>
         <td>${escHtml(String(r.started || '').replace('T', ' '))}</td>
         <td>${r.ended ? escHtml(String(r.ended).slice(11)) : '<span class="tool-bad">still open</span>'}</td>
-        <td>${escHtml(String(r.runs))}</td>
+        <td class="num">${escHtml(String(r.runs))}</td>
         <td>${r.toll_paid ? '<span class="badge badge-green">tolled</span>'
                           : '<span class="badge badge-yellow">no toll</span>'}</td></tr>`).join('');
       estate = `<div class="card">
@@ -844,7 +846,7 @@ const App = {
             <div class="stat-note">objectives the council actually ran</div>
             <div class="brief-src">sessions/sessions.jsonl</div></div>
         </div>
-        ${rows ? `<div class="table-wrap"><table><thead><tr><th>sitting</th><th>opened</th><th>closed</th><th>runs</th><th>toll</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+        ${rows ? `<div class="table-wrap"><table><thead><tr><th class="num">sitting</th><th>opened</th><th>closed</th><th class="num">runs</th><th>toll</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
         <div class="stat-note" style="margin-top:10px">
           ${escHtml((rc.counted_by_the_engine || []).join(' and '))} are counted by the core's own rules
           (memory.py's entry pattern; a SELECT against index/vectors.db) and are shown whole in the
@@ -897,7 +899,7 @@ const App = {
              and "logs" were clipped off the right edge -- two whole kinds
              invisible on a page whose job is to show what the ground carries. -->
         <div class="flex" id="rec-kinds" style="flex-wrap:wrap;gap:6px;margin:8px 0 12px"></div>
-        <div id="rec-list"><div class="loading">Reading what this ground carries...</div></div>
+        <div id="rec-list"><div class="skel skel-60"></div><div class="skel skel-80"></div><div class="skel skel-40"></div></div>
       </div>
       <div id="rec-doc"></div>
       <div id="rec-proof" class="mt-16"></div>`;
@@ -945,11 +947,11 @@ const App = {
       (kind.kind === 'logs'
         ? '<div class="stat-note" style="margin-bottom:10px">The newest 60 transcripts, most recent first. The rest are on disk in <code>logs/</code>.</div>'
         : '') +
-      '<div class="table-wrap"><table><thead><tr><th>document</th><th>kind</th><th>size</th><th>changed</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table><thead><tr><th>document</th><th>kind</th><th class="num">size</th><th>changed</th></tr></thead><tbody>' +
       kind.documents.map(d => `<tr class="rec-row" data-name="${escHtml(d.name)}" style="cursor:pointer">
         <td><code>${escHtml(d.name)}</code>${d.sealed ? ' <span class="badge badge-yellow">sealed</span>' : ''}</td>
         <td><span class="muted">${escHtml(d.kind)}</span></td>
-        <td>${(d.bytes / 1024).toFixed(1)} KB</td>
+        <td class="num">${(d.bytes / 1024).toFixed(1)} KB</td>
         <td>${escHtml(when(Date.parse(d.modified) || 0))}</td></tr>`).join('') +
       '</tbody></table></div>';
     list.querySelectorAll('.rec-row').forEach(tr => {
