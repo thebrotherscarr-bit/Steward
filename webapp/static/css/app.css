@@ -1,4 +1,34 @@
 /* ATLAS Design System — Sovereign Dark Theme */
+
+/* ---- THE TYPEFACES, VENDORED ------------------------------------------
+   Declared since the first line of this file and never once rendered: no
+   font file existed anywhere in the tree, RULE 4 forbids a CDN, so every
+   size and weight below was tuned against Segoe UI by accident. Bundled
+   2026-09-10 at the operator's word ("ill take a little bundled").
+
+   ONE FILE PER FAMILY. Both are VARIABLE fonts -- the weight is an axis,
+   not a separate download -- so 100..900 comes out of 48KB and 100..800
+   out of 31KB. Latin subset; 80KB embedded for the whole console.
+
+   font-display: swap -- the text is readable in the fallback from the
+   first paint and upgrades when the face lands. On loopback that is a
+   handful of milliseconds, but a console that shows nothing while it
+   waits for a font is a console lying about being up. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono.woff2') format('woff2');
+}
+
 :root {
   --bg: #0a0a0f;
   --bg-2: #12121a;
@@ -24,13 +54,68 @@
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --transition: 0.15s ease;
+
+  /* ---- THE FOUR PHANTOM TOKENS --------------------------------------
+     Written as `var(--muted, #6c7086)` in a hundred places below and NEVER
+     DEFINED, so every one of them silently took the fallback. The newest
+     and most-used surfaces -- the chat, the council feed, the seats, the
+     home thread -- were running entirely on literals while a design system
+     sat at the top of the file being ignored.
+
+     Three resolve to exactly what the fallback already was, so defining
+     them changes nothing on screen; they just stop lying. The fourth is
+     the real repair: `var(--mono, monospace)` handed those surfaces the
+     BROWSER'S default monospace, which means bundling JetBrains Mono
+     would have done nothing for them. */
+  --muted: var(--text-3);                  /* was #6c7086 — identical */
+  --surface: var(--bg-2);                  /* was #12121a — identical */
+  --accent-dim: rgba(137,180,250,0.14);    /* was the literal — identical */
+  --mono: var(--font-mono);                /* was `monospace` — THE REPAIR */
+
+  /* ---- ONE TYPE SCALE ------------------------------------------------
+     Fifteen distinct sizes were in use (10, 11, 11.5, 12, 12.5, 13, 13.5,
+     14, 14.5, 15, 16, 18, 22, 28) with nothing deciding between them. These
+     are the eight that were doing real work; the half-pixel steps between
+     them (11.5, 12.5, 13.5, 14.5) were never a decision, only drift. Body
+     stays 14 -- the scale is here to END arbitrary sizes, not to resize the
+     console on the way past. */
+  --t-xs:   11px;  /* labels, source attributions, the smallest true text */
+  --t-sm:   12px;  /* secondary lines, metadata */
+  --t-md:   13px;  /* rows, controls, table cells */
+  --t-base: 14px;  /* body — what most of the console is */
+  --t-lg:   15px;  /* what he types into, and what answers him */
+  --t-xl:   18px;  /* section identity */
+  --t-2xl:  22px;  /* one per page: the page's own name */
+  --t-num:  28px;  /* the figures on Records, and nothing else */
+
+  /* ---- ONE SPACING SCALE ---------------------------------------------
+     Nineteen ad-hoc values became six on a 4px base. `.mt-16` stays for
+     now because JS writes that class; it is aliased, not orphaned. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+}
+
+/* ---- FIGURES LINE UP ---------------------------------------------------
+   Every count, hash, duration and timestamp in this console is a figure in
+   a column next to other figures. Proportional numerals make 191 and 996
+   different widths, so the eye cannot compare them down a table without
+   re-reading each one. tabular-nums is the whole fix. */
+.stat-value, table, .hash, code, .badge,
+.timeline-time, .timeline-hash, .organ-src code,
+.voice-gb, .chat-now, .home-said-meta, .cev-mark {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--t-base);
   line-height: 1.5;
   background: var(--bg);
   color: var(--text);
@@ -70,13 +155,13 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .logo h1 {
-  font-size: 18px;
+  font-size: var(--t-xl);
   font-weight: 700;
   color: var(--accent);
   letter-spacing: 1px;
 }
 .logo span {
-  font-size: 11px;
+  font-size: var(--t-xs);
   color: var(--text-3);
   font-family: var(--font-mono);
 }
@@ -91,7 +176,7 @@ body {
   padding: 10px 20px;
   color: var(--text-3);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--t-md);
   font-weight: 500;
   transition: all var(--transition);
   border-left: 3px solid transparent;
@@ -144,12 +229,12 @@ body {
   margin-bottom: 24px;
 }
 .page-title {
-  font-size: 22px;
+  font-size: var(--t-2xl);
   font-weight: 700;
   color: var(--text);
 }
 .page-subtitle {
-  font-size: 13px;
+  font-size: var(--t-md);
   color: var(--text-3);
   margin-top: 2px;
 }
@@ -164,8 +249,8 @@ body {
   transition: border-color var(--transition);
 }
 .stat:hover { border-color: var(--border-2); }
-.stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: 6px; font-weight: 600; }
-.stat-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); }
+.stat-label { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: 6px; font-weight: 600; }
+.stat-value { font-size: var(--t-num); font-weight: 700; font-family: var(--font-mono); }
 .stat-value.green { color: var(--green); }
 .stat-value.red { color: var(--red); }
 .stat-value.yellow { color: var(--yellow); }
@@ -189,7 +274,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .card-title {
-  font-size: 12px;
+  font-size: var(--t-sm);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-3);
@@ -203,7 +288,7 @@ body {
   gap: 4px;
   padding: 3px 10px;
   border-radius: 20px;
-  font-size: 11px;
+  font-size: var(--t-xs);
   font-weight: 600;
   font-family: var(--font-mono);
 }
@@ -222,10 +307,10 @@ th, td {
   text-align: left;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--t-md);
 }
 th {
-  font-size: 11px;
+  font-size: var(--t-xs);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-3);
@@ -255,7 +340,7 @@ td code {
   background: var(--bg-2);
   color: var(--text);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--t-md);
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition);
@@ -275,7 +360,7 @@ td code {
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--t-md);
   transition: border-color var(--transition);
   width: 100%;
 }

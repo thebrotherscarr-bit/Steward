@@ -1,0 +1,18 @@
+Fonts vendored into this console, 2026-09-10.
+
+Both are licensed under the SIL Open Font License, Version 1.1, which permits
+bundling and redistribution with reserved-name and same-licence conditions.
+They are vendored rather than fetched so the console renders identically with
+no network at all -- RULE 4: the estate is local. Nothing here reaches a
+server at runtime, and these bytes are not touched again.
+
+  inter.woff2          Inter, (c) Rasmus Andersson and the Inter project
+                       authors. https://github.com/rsms/inter
+                       Variable weight axis; latin subset only.
+
+  jetbrains-mono.woff2 JetBrains Mono, (c) JetBrains s.r.o.
+                       https://github.com/JetBrains/JetBrainsMono
+                       Variable weight axis; latin subset only.
+
+The full OFL 1.1 text ships with each upstream project and governs these
+files unchanged.

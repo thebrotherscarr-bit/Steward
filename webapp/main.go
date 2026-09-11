@@ -11,13 +11,26 @@ import (
 	"atlas/webapp/traces"
 	"embed"
 	"fmt"
+	"mime"
 	"os"
 )
 
-//go:embed static/index.html static/css/* static/js/*
+// THE FONTS ARE NAMED HERE OR THEY DO NOT SHIP. This directive lists each
+// directory explicitly, so a new one is invisible to the binary until it is
+// added -- static/fonts/ would have 404'd silently and the console would have
+// gone on falling back to Segoe UI with nothing to say it had.
+//
+//go:embed static/index.html static/css/* static/js/* static/fonts/*
 var staticFiles embed.FS
 
 func main() {
+	// Go's builtin MIME table knows .css, .js, .svg and .wasm -- NOT .woff2.
+	// Without this the file server sniffs the bytes and answers
+	// application/octet-stream. Browsers are lenient about font types in
+	// @font-face and would probably still render it, and "probably" is not a
+	// thing to ship a typeface on.
+	mime.AddExtensionType(".woff2", "font/woff2")
+
 	port := "8091"
 	if p := os.Getenv("ATLAS_WEB_PORT"); p != "" {
 		port = p
