@@ -12,6 +12,38 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The last leg that called an absence a failure
+
+The door's battery learned this doctrine at 07:00 on 2026-09-11. One layer up,
+`tests/prove.py` had never learned it, and it was found the same way: by a
+fresh clone.
+
+`absent_dependency` recognises an absence only when a refusal NAMES A PATH — it
+scans for one, checks it does not exist, and checks it lies outside the atlas
+tree. `check_trade_parity` shells the Rust spine, so on an unbuilt tree it
+refuses with a COMMAND instead ("REFUSED: build the binary first (cargo build
+-p atlas)"), which that scan cannot see. It fell through to FAIL.
+
+So the whole battery went red on any machine that had not yet run cargo build —
+which is every fresh clone, and the first thing a second machine does. Measured
+by parking the binary and re-running:
+
+    before                       20 held - 14 absent - 1 broke - exit 1
+    after                        20 held - 15 absent - 0 broke - exit 0
+    after, with the spine built  21 held - 14 absent - 0 broke - exit 0
+
+The new branch is gated on the binary being GENUINELY ABSENT, so it can never
+turn a real break into an absence: with the binary on disk it is unreachable,
+which the third line proves — that leg still reports the ORACLE absence there,
+not this one. `leg_go` has applied the same rule two functions up since it was
+written. This is that rule reaching the last leg without it.
+
+- **The tool count was stale in two places.** `README.md` and `DELIVERABLE.md`
+  said the door serves 72 tools. It serves 78, counted off the wire — `tools/list`
+  and `GET /tools` agree, and every one of them carries a description and an
+  inputSchema. The table under DELIVERABLE's heading lists 24 of them and always
+  did; only the count moved.
+
 ### The first CI run found two, on its first try
 
 atlas's CI went up and the Linux probe went red immediately — which is what

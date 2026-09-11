@@ -223,6 +223,28 @@ def leg_goldens():
         if code == 0:
             out.append(Leg("GOLDENS", name, PASS, "", "", secs))
             continue
+        # A CUTTER THAT SHELLS THE SPINE IS ABSENT WITHOUT IT, NOT BROKEN.
+        # absent_dependency only recognises an absence that NAMES A PATH. A
+        # cutter whose subject is the unbuilt binary names a COMMAND instead,
+        # so check_trade_parity fell through to FAIL and set a RED EXIT on any
+        # machine that had not yet run cargo build -- which is every fresh
+        # clone, and the first thing a second machine does. Found 2026-09-11 in
+        # the packaging run by parking the binary and re-running: 20 held, 14
+        # absent, 1 broke, exit 1, on a tree where nothing was wrong.
+        #
+        # This is the doctrine leg_go already applies two functions up, and the
+        # one cmd/atlas-door/prove_test.go learned the same day: ABSENT names
+        # what would answer it and is never a pass; only FAIL is red.
+        #
+        # Gated on the binary being GENUINELY ABSENT so this can never turn a
+        # real break into an absence -- with the binary on disk the branch is
+        # unreachable. The cutter says the same thing from the other side with
+        # exit 2, and it is the only cutter in tools/ that uses 2 at all.
+        if not os.path.exists(ATLAS_BIN) and "cargo build -p atlas" in text:
+            out.append(Leg("GOLDENS", name, ABSENT,
+                           "the spine this cutter shells is not built",
+                           "cargo build -p atlas", secs))
+            continue
         need = absent_dependency(text)
         if need:
             # NAME THE DIAL, not just the missing file. The goldens themselves

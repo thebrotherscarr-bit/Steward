@@ -43,7 +43,7 @@ atlas/
 | Binary | Language | Description |
 |---|---|---|
 | `atlas` | Rust | CLI: version, ground-init, ground-prove |
-| `atlas-mcp` | Go | MCP server: 72 tools + HTTP + GUI on :8090 |
+| `atlas-mcp` | Go | MCP server: 78 tools + HTTP + GUI on :8090 |
 | `atlas-tui` | Go | Terminal UI: dashboard, traces, agents, chain view |
 | `atlas-town` | Go | Town square: multi-agent coordination |
 | `atlas-door` | Go | Door: per-module MCP gateway |
