@@ -275,6 +275,11 @@ const Flows = {
       }
     } catch (e) { say('Refused: ' + e.message); return; }
     await this.repos();
+    // THE BADGE IS A NUMBER THE RECORD CAN PROVE, so it is re-proved here.
+    // It used to repaint only on a run event, which meant a save or a send
+    // made from this very page left the panel showing the count from before
+    // the act — the one moment the number is most obviously watched.
+    if (App.paintBadges) App.paintBadges();
     say(answer);
   },
 

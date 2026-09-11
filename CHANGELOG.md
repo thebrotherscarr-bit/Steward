@@ -36,6 +36,11 @@ under, because they are the record of what happened.
   controls that are not fields. The placeholder took the ground's own muted
   colour in the same stroke; it had been inheriting a grey that read nearly as
   loud as a typed value.
+- **A git act on Version control re-proves the sidebar badge.** The badge
+  repainted only on a run event, so a save or a send made from that very page
+  left the panel showing the count from before the act — the one moment the
+  number is most obviously being watched. Seen live: research pushed, the page
+  said *in step*, the badge still read 7.
 
 ### The readers are proven too
 - **15 more strokes on `internal/tools`**, on the three tools that READ the
