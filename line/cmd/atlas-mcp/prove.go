@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -74,7 +75,7 @@ func runProve() int {
 	}
 	// Wire a hermetic stub engine for the atlas tenant so ask_steward's
 	// subprocess + lock contract is proven without booting a real engine.
-	reg2.SetEngine("atlas", "cmd /c echo THE ANSWER")
+	reg2.SetEngine("atlas", echoEngine())
 
 	surface2 := tools.Build(reg2, tools.Options{AtlasBin: "atlas"})
 
@@ -261,7 +262,7 @@ func runProve() int {
 		"name": "ask_steward", "arguments": map[string]any{"project": "atlas", "question": "boot manjuel?"}})
 	check("ask_steward refuses an engine reaching a read-only ground (B1 hardening)",
 		refIsErr && strings.Contains(refText, "REFUSED") && strings.Contains(refText, "read-only ground"))
-	reg2.SetEngine("atlas", "cmd /c echo THE ANSWER")
+	reg2.SetEngine("atlas", echoEngine())
 
 	// manifest remaps the handoffs key to a directory.
 	mHome := filepath.Join(root, "manifested")
@@ -1207,4 +1208,23 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// echoEngine is the stub engine the ask_steward strokes wire: a command that
+// answers instantly and reaches nothing.
+//
+// IT WAS `cmd /c echo THE ANSWER`, HARDCODED, IN TWO PLACES — and `cmd` does
+// not exist off Windows. Nobody could know, because until 2026-09-11 these
+// suites had never run anywhere but the operator's machine. The first Linux
+// job in atlas's first CI found it on its first run, which is the entire
+// reason that job exists: the suites must not quietly depend on the
+// operator's platform.
+//
+// splitCommand splits on whitespace, so both spellings arrive as argv and
+// both print exactly "THE ANSWER".
+func echoEngine() string {
+	if runtime.GOOS == "windows" {
+		return "cmd /c echo THE ANSWER"
+	}
+	return "/bin/echo THE ANSWER"
 }

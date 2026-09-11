@@ -12,6 +12,36 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The first CI run found two, on its first try
+
+atlas's CI went up and the Linux probe went red immediately — which is what
+that job is for. The gate passed (the battery, green on Windows, 1m47s). The
+probe found one workflow error of mine and one real dependency on the
+operator's platform.
+
+- **The door's battery reported ABSENT as FAIL.** Every stroke in
+  `cmd/atlas-door` goes through the Rust spine, so on a machine where it has
+  not been built there is nothing to prove and nothing has gone wrong. It said
+  FAIL. That made a fresh clone look broken: the first thing `go test ./...`
+  said on a clean checkout was a red door, with the actual cause — one
+  undocumented `cargo build` — buried in a refusal nobody read. Found twice in
+  one day: on a clean clone of both repos, where it was the ONLY red in sixteen
+  packages, and then by CI, whose Linux job cannot build the spine at all
+  (`store/src/ffi.rs` links Windows' `winsqlite3`) and so could never have
+  passed it. It now SKIPS with the command that would answer it, which is the
+  shape `tests/prove.py` has held since it was written: ABSENT is not a pass
+  and it is not a failure.
+- **The stub engine was `cmd /c echo`, hardcoded, in two places.** `cmd` does
+  not exist off Windows. Nobody could know: until today these suites had never
+  run anywhere but one machine. `echoEngine()` picks by `runtime.GOOS`, and
+  `splitCommand` takes both spellings to the same argv.
+
+Proven both ways before it was pushed: **19 packages green with the spine
+built, and 19 green with `ATLAS_BIN` pointed at a path that cannot exist** —
+the closest proxy this machine can run for the Linux job. With the spine the
+door PASSES; without it the door SKIPS and says why.
+
+
 ### atlas gets a CI, and it needs no network
 
 Until today every claim in this repo rested on one machine — 78 tools, 19 green
