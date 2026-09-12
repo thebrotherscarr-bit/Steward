@@ -154,6 +154,36 @@ stroke green throughout: a sha that pointed at nothing a reader could find, a
 button that did nothing, and before either of them a panel that had no such
 button at all. It is the same lesson this version is named for.
 
+**AND THEN THE TAG WENT, AND THE RELEASE WORKFLOW FAILED ON ITS OWN FAULT.**
+`release.yml` was written this morning and had never been FIRED. The first
+real tag through it, v0.1.5, died at `Go tests, both modules`:
+
+    prove refused: no working atlas binary behind "atlas"
+    build it first (cargo build -p atlas) or set ATLAS_BIN.
+
+`Build the spine` runs `--release`, so the binary is in `target/release`.
+`findAtlas` walks only `target/DEBUG` -- while `prove_test.go`'s skip check
+deliberately looks in BOTH profiles, its own comment reading "a tree built
+with --release would skip here and refuse there". So the stroke declined to
+skip, the finder found nothing, and the leg went red. `prove.yml` never met
+this because it builds the DEBUG profile, with a comment saying it builds
+first precisely so that leg is an answer rather than a shrug.
+
+The step now names `ATLAS_BIN` at the release binary and refuses outright if
+it is missing. That is a better answer than also building debug: a release
+run should prove THE BYTES IT IS ABOUT TO PUBLISH, not a second copy built a
+different way. The disagreement between finder and skip-check is left alone
+and named -- which profiles findAtlas walks is how the door behaves at
+RUNTIME, and that is a decision rather than a workflow fix.
+
+**WHAT THIS MEANS FOR v0.1.5, said plainly.** The mark is sound and the code
+under it is proven: `prove.yml` passed on 3dacdbc, both jobs, and the core's
+passed on c766ce7. What did NOT happen is the draft release -- the packaging
+run failed, and it cannot be re-run green, because a dispatch uses the
+workflow file AS IT STANDS AT THAT REF and the fix is not there. THE MARK IS
+NOT MOVED TO FETCH IT: that is the rule this door enforces on everyone else,
+and it is not waived for its author. The fix rides the next number.
+
 Both Go modules green and gofmt-clean; the door's own battery PROVEN.
 
 ### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed

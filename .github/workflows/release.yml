@@ -133,8 +133,32 @@ jobs:
         run: python tests/prove.py
 
       - name: Go tests, both modules
+        # ATLAS_BIN POINTS AT THE ARTIFACT THIS RUN IS SHIPPING, and that is
+        # why this line exists. THE FIRST TAG EVER SENT THROUGH THIS FILE
+        # (v0.1.5, 2026-09-12) died right here:
+        #
+        #   prove refused: no working atlas binary behind "atlas"
+        #   build it first (cargo build -p atlas) or set ATLAS_BIN.
+        #
+        # `Build the spine` above runs --release, so the binary is in
+        # target/release. `findAtlas` (cmd/atlas-door/door.go) walks only
+        # target/DEBUG -- while prove_test.go's skip check deliberately looks
+        # in BOTH profiles, its own comment saying "a tree built with
+        # --release would skip here and refuse there". So the stroke declined
+        # to skip, the finder found nothing, and the leg failed. prove.yml
+        # never hit it because it builds the DEBUG profile.
+        #
+        # Naming the release binary is the better answer than also building
+        # debug: a release run should prove the bytes it is about to publish,
+        # not a second copy built a different way. The disagreement between
+        # finder and skip-check is left alone deliberately -- changing which
+        # profiles findAtlas walks changes how the door behaves at RUNTIME,
+        # and that is a decision, not a workflow fix.
         shell: bash
+        env:
+          ATLAS_BIN: ${{ github.workspace }}/target/release/atlas.exe
         run: |
+          test -x "$ATLAS_BIN" || { echo "REFUSED: $ATLAS_BIN was never built"; exit 1; }
           (cd line && go test ./...)
           (cd webapp && go test ./...)
 
