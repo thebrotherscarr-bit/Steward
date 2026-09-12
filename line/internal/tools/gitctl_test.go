@@ -554,6 +554,52 @@ func TestTheMarkListNamesWhatIsCutAndWhatTheGroundDeclares(t *testing.T) {
 	}
 }
 
+// AN ANNOTATED TAG IS ITS OWN OBJECT, with its own sha -- and the column this
+// fills means "what it points at". The first cut of the list put
+// %(objectname) there, so on the glass v0.1.5 showed 1beae6d while it marked
+// ae31e7c: a sha the reader would not find anywhere in the log. Found by
+// LOOKING AT THE PANEL, an hour after the code was written and while every
+// stroke in this file was green -- which is the whole argument for firing a
+// thing rather than reading it.
+func TestTheColumnNamesTheCommitAndNotTheMarksOwnObject(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	t.Setenv("MANJUEL_GIT_REMOTE", "")
+	t.Setenv("CHAINKIT_GIT_REMOTE", "")
+	call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the flow confirmation"})
+
+	var d struct {
+		Tags []struct {
+			Name string `json:"name"`
+			At   string `json:"at"`
+		} `json:"tags"`
+	}
+	if err := json.Unmarshal([]byte(call(t, toolGitTag, tn, nil)), &d); err != nil {
+		t.Fatalf("the list must be JSON: %v", err)
+	}
+	if len(d.Tags) != 1 {
+		t.Fatalf("one mark was cut, so one must be listed: %+v", d.Tags)
+	}
+
+	commit := headOf(t, tn)
+	if d.Tags[0].At == "" || !strings.HasPrefix(commit, d.Tags[0].At) {
+		t.Fatalf("the column must name the COMMIT %s, not the mark's own object: got %q",
+			commit[:7], d.Tags[0].At)
+	}
+
+	// AND THE OTHER HALF: the mark really does have a second, different sha.
+	// Without this the stroke above would also pass on a git that quietly
+	// made a lightweight tag, where there is nothing to get wrong.
+	obj, err := gitRun(tn, 10*time.Second, "rev-parse", "--verify", "refs/tags/v0.1.5")
+	if err != nil {
+		t.Fatalf("the mark must be readable: %v", err)
+	}
+	if strings.TrimSpace(obj) == commit {
+		t.Fatal("this mark is lightweight -- `tag -a` must make an annotated one, " +
+			"or the message the operator wrote is not stored anywhere")
+	}
+}
+
 func TestAnUnknownTagActionIsRefusedByName(t *testing.T) {
 	tn := versionWorld(t, "0.1.5")
 	out := call(t, toolGitTag, tn, map[string]any{"action": "delete", "name": "v0.1.5"})

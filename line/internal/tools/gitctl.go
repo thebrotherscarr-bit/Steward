@@ -429,8 +429,16 @@ func tagSend(t tenant.Tenant, name string) (string, error) {
 
 // tagList names every mark, newest first, and says which ones GitHub has.
 func tagList(t tenant.Tenant) (string, error) {
+	// %(*objectname) DEREFERENCES, and that is the whole difference between a
+	// true column and a confusing one. An ANNOTATED tag is its own object with
+	// its own sha, so %(objectname) is THAT -- not the commit the mark is on.
+	// The first cut of this panel printed the tag object under a column that
+	// means "what it points at": v0.1.5 showed 1beae6d while it marked
+	// ae31e7c, a sha the reader would not find anywhere in the log. The deref
+	// is empty for a LIGHTWEIGHT tag, which already points straight at its
+	// commit, so the plain field is the fallback and never the first answer.
 	raw, _ := gitRun(t, 15*time.Second, "for-each-ref", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname:short)\t%(creatordate:relative)\t%(contents:subject)",
+		"--format=%(refname:short)\t%(objectname:short)\t%(*objectname:short)\t%(creatordate:relative)\t%(contents:subject)",
 		"refs/tags")
 
 	// WHAT GITHUB HAS IS ASKED OF GITHUB, and only while the wall is open. A
@@ -465,12 +473,16 @@ func tagList(t tenant.Tenant) (string, error) {
 		if strings.TrimSpace(ln) == "" {
 			continue
 		}
-		f := strings.SplitN(ln, "\t", 4)
-		for len(f) < 4 {
+		f := strings.SplitN(ln, "\t", 5)
+		for len(f) < 5 {
 			f = append(f, "")
 		}
+		at := f[2] // the commit an annotated mark is on
+		if at == "" {
+			at = f[1] // a lightweight mark IS its commit
+		}
 		marks = append(marks, mark{
-			Name: f[0], At: f[1], When: f[2], Subject: f[3], Sent: sent[f[0]],
+			Name: f[0], At: at, When: f[3], Subject: f[4], Sent: sent[f[0]],
 		})
 	}
 

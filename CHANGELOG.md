@@ -114,6 +114,27 @@ machine. They were run by hand here instead, and all pass. Whether that fixture
 should skip when its oracle is absent or the oracle should be brought in is a
 decision, and the oracle is private material, so it is named and left.
 
+**AND THEN THE PANEL SHOWED THE WRONG SHA, WHICH IS WHY YOU FIRE IT.** The
+first mark was cut with every stroke in this file green, and the glass
+printed `v0.1.5 | 1beae6d` -- while the mark was on `ae31e7c`. An ANNOTATED
+tag is its own object with its own sha, so `%(objectname)` is THAT, not the
+commit; the column means "what it points at", and the number under it was one
+the reader would not find anywhere in the log. `%(*objectname)` dereferences,
+and the plain field stays as the fallback for a lightweight tag, which is
+already its own commit.
+
+The stroke came after the sighting and was proved against it: mutated back to
+`f[1]`, `TestTheColumnNamesTheCommitAndNotTheMarksOwnObject` goes red naming
+both shas. It also pins the OTHER half -- that the mark really is annotated --
+because on a git that quietly made a lightweight tag there would be no second
+sha to get wrong, and the message the operator wrote would be stored nowhere.
+
+The mark was cut, seen to be wrong, and REMOVED BEFORE IT WAS SENT, so nothing
+outside this machine ever saw it. Removing it took a git command, because the
+panel deliberately has no un-cut button: that is a real gap and it is named
+rather than filled, since a verb that deletes marks is a different decision
+from a verb that cuts them.
+
 Both Go modules green and gofmt-clean; the door's own battery PROVEN.
 
 ### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed
