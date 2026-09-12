@@ -286,3 +286,86 @@ func TestAnObjectiveCannotSatisfyItself(t *testing.T) {
 		t.Fatalf("an echoed requirement must not pass as a result: %v", res.Fired)
 	}
 }
+
+// THE REPAIR PATH WAS UNJUDGED, AND THAT IS THE SAME FAULT ONE BRANCH OVER.
+//
+// 2026-09-12. The coder flow judged `verify` and then, on a failure, ran
+// `repair` and `recheck` straight into the gate: `recheck -> land always`. So
+// a run that failed its requirement, repaired, and rechecked arrived at the
+// hand with NO judgement of the repaired work -- the same hole as the original
+// green-on-wrong-code, moved down one edge.
+//
+// A SECOND EVAL, WITH ONLY A PASS EDGE. An eval that fails with no fail edge
+// stops the run (run.go: `if !hasFailEdge(...) { return VerdictFail }`), and
+// that is exactly the wanted behaviour: the retry is UNROLLED, so there is no
+// second repair to steer to, and work that still does not meet the requirement
+// must not be offered for landing at all. The verdict then means something --
+// PAUSED is "it passed, your hand decides", FAIL is "it did not".
+func repairPathSpec() Spec {
+	return Spec{Name: "repairpath", BudgetS: 900,
+		Nodes: []Node{
+			{Name: "work", Kind: "run", Question: "do it"},
+			{Name: "judge", Kind: "eval", Ref: "work", Match: "contains", Expected: "WANT"},
+			{Name: "repair", Kind: "run", Question: "fix it"},
+			{Name: "recheck", Kind: "run", Question: "run it again"},
+			{Name: "proof", Kind: "eval", Ref: "recheck", Match: "contains", Expected: "WANT"},
+			{Name: "land", Kind: "gate", Title: "nothing has reached the estate"},
+		},
+		Edges: []Edge{
+			{From: "work", To: "judge", When: "always"},
+			{From: "judge", To: "land", When: "pass"},
+			{From: "judge", To: "repair", When: "fail"},
+			{From: "repair", To: "recheck", When: "always"},
+			{From: "recheck", To: "proof", When: "always"},
+			{From: "proof", To: "land", When: "pass"},
+		}}
+}
+
+func withBlock(body string) string {
+	return "the seat's words\n\n" + play.ToolVerdictHead + "\n  run_python: " + body
+}
+
+func TestARepairThatWorksReachesTheGate(t *testing.T) {
+	eng := &stubEngine{answers: map[string]string{
+		"do it":        withBlock("RAN: x.py\n    nope"),
+		"fix it":       withBlock("Edited x.py at line 3"),
+		"run it again": withBlock("RAN: x.py\n    WANT"),
+	}}
+	res, err := Run(t.TempDir(), eng, repairPathSpec(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != VerdictPaused {
+		t.Fatalf("verdict = %s, want PAUSED at the gate", res.Verdict)
+	}
+	if res.PausedNode != "land" {
+		t.Fatalf("paused at %q, want land", res.PausedNode)
+	}
+	for _, want := range []string{"judge", "repair", "recheck", "proof"} {
+		if !strings.Contains(strings.Join(res.Fired, ","), want) {
+			t.Fatalf("%s did not fire: %v", want, res.Fired)
+		}
+	}
+}
+
+func TestARepairThatDidNotWorkNeverReachesTheGate(t *testing.T) {
+	// the repair ran and the work STILL does not meet the requirement
+	eng := &stubEngine{answers: map[string]string{
+		"do it":        withBlock("RAN: x.py\n    nope"),
+		"fix it":       withBlock("Edited x.py at line 3"),
+		"run it again": withBlock("RAN: x.py\n    still nope"),
+	}}
+	res, err := Run(t.TempDir(), eng, repairPathSpec(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != VerdictFail {
+		t.Fatalf("verdict = %s, want FAIL -- unmet work must not be gated", res.Verdict)
+	}
+	if strings.Contains(strings.Join(res.Fired, ","), "land") {
+		t.Fatalf("the gate was offered for work that failed: %v", res.Fired)
+	}
+	if res.PausedNode != "" {
+		t.Fatalf("it paused at %q instead of failing", res.PausedNode)
+	}
+}

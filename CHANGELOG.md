@@ -12,6 +12,42 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The repair path is judged too, and the verdict now means something
+
+`recheck -> land always`. A run that failed its requirement, repaired and
+rechecked arrived at the hand with **no judgement of the repaired work** — the
+same fault as the original green-on-wrong-code, moved one edge down. It was the
+last of the three holes that firing this flow found, and the only one left open
+when the other two landed.
+
+**Fixed — `proof`, a second eval on `recheck`, holding the repair to the SAME
+expectation.** `coder` is at v12, eight nodes.
+
+**IT HAS NO FAIL EDGE, AND THAT IS THE DESIGN.** An eval that fails with no
+fail edge stops the run (`run.go`: `if !hasFailEdge(...) { return VerdictFail }`),
+and there is nothing to steer to anyway — the retry is UNROLLED, so there is no
+second repair. Work that still does not meet the requirement must not be
+OFFERED for landing. So the verdict carries information it did not before:
+
+    PAUSED   it passed, and your hand decides
+    FAIL     it did not, and no gate is offered for it
+
+Nothing is thrown away either way: every attempt stays in the workspace with
+what each run said.
+
+Strokes: `TestARepairThatWorksReachesTheGate` — judge fails, repair and recheck
+fire, proof passes, the run PAUSES at the gate with all four named;
+`TestARepairThatDidNotWorkNeverReachesTheGate` — the same path with a repair
+that did not fix it FAILS, never fires `land`, and never sets a paused node.
+The flow lives in gitignored runtime state, so the strokes are how this shape
+travels at all.
+
+**Also measured live, and it closes a gap in the previous landing's own
+judgement.** That landing noted the pass side had never been proven on real
+code — every live run had ended verdict-fail. It has now: objective "print the
+6th Fibonacci number", `FIB6: 8` expected, and the coder got it first try —
+artifact prints `FIB6: 8`, the evidence block carries it, verdict `pass`, gate.
+
 ### An eval scores evidence, and prose is not scored at all
 
 **The run that forced it.** With the correctness check in, the coder was asked
