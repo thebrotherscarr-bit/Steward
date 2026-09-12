@@ -217,6 +217,280 @@ func walled(what string) string {
 		"operator's alone -- this door reads it and never opens it."
 }
 
+// --- the marks a version is cut at -----------------------------------------
+
+// toolGitTag lists the marks on this world's history, cuts one, or sends one.
+//
+// A TAG IS THE ONE ARTIFACT A STRANGER TAKES ON FAITH. He fetches v0.1.5 and
+// believes it is 0.1.5 because the name says so, and unlike a branch a mark is
+// not expected to move under him. Every refusal below exists to keep that one
+// sentence true.
+//
+// `action` is list (default) | cut | send.
+func toolGitTag(t tenant.Tenant, args map[string]any) (string, error) {
+	if !isRepo(t) {
+		return notARepo, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(str(args, "action")))
+	if action == "" {
+		action = "list"
+	}
+	name := strings.TrimSpace(str(args, "name"))
+
+	switch action {
+	case "list":
+		return tagList(t)
+	case "cut", "new":
+		return tagCut(t, name, strings.TrimSpace(str(args, "message")),
+			strings.TrimSpace(str(args, "at")))
+	case "send", "push":
+		return tagSend(t, name)
+	}
+	return fmt.Sprintf("Refused: %q is not something this does. It lists the marks "+
+		"(list), cuts one (cut), or sends one to GitHub (send).", action), nil
+}
+
+// badTagName is stricter than git's own law for refs, deliberately: this door
+// cuts VERSION marks and nothing else, so the only lawful shape is
+// vMAJOR.MINOR.PATCH.
+//
+// EARNED 2026-09-12. release.ps1 appended a build moniker to the tag it told
+// the operator to cut -- a plain 0.1.5 came out of it as `v0.1.5+f1`, which no
+// longer equals what VERSION says. atlas's own release.yml refuses that on
+// arrival; refusing it HERE kills it before the mark exists at all, which
+// matters because a mark that has been sent may already have been fetched.
+func badTagName(v string) string {
+	if v == "" {
+		return "Refused: name the mark, e.g. v0.1.5."
+	}
+	if !strings.HasPrefix(v, "v") {
+		return fmt.Sprintf("Refused: %q does not begin with 'v'. A version mark "+
+			"here is vMAJOR.MINOR.PATCH, e.g. v0.1.5.", v)
+	}
+	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	if len(parts) != 3 {
+		return fmt.Sprintf("Refused: %q is not vMAJOR.MINOR.PATCH -- three numbers "+
+			"and two dots, e.g. v0.1.5.", v)
+	}
+	for _, p := range parts {
+		if p == "" {
+			return fmt.Sprintf("Refused: %q is not vMAJOR.MINOR.PATCH -- three "+
+				"numbers and two dots, e.g. v0.1.5.", v)
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return fmt.Sprintf("Refused: %q carries %q, which is not a number. "+
+					"A version mark is vMAJOR.MINOR.PATCH and nothing else -- no "+
+					"build moniker, no suffix, no trailing word. A mark that does "+
+					"not equal what the version file says is a lie to whoever "+
+					"fetches it.", v, string(c))
+			}
+		}
+	}
+	return ""
+}
+
+// declaredVersionAt reads the version the ground DECLARED AT THAT COMMIT --
+// out of git, never off the disk.
+//
+// The disk is the tip. A mark may be cut at an older commit, and checking a
+// tag against a VERSION that moved AFTER that commit is exactly how a green
+// check passes a wrong tag. This is the same arithmetic release.yml does by
+// checking the tag out before it compares.
+//
+// Two spellings, because this estate has two kinds of world: a VERSION file
+// (atlas) and pyproject.toml (the core). Returns the version and the name of
+// the file that said so, so a refusal can cite its source.
+func declaredVersionAt(t tenant.Tenant, rev string) (string, string) {
+	if out, err := gitRun(t, 15*time.Second, "show", rev+":VERSION"); err == nil {
+		if v := strings.TrimSpace(out); v != "" {
+			return v, "VERSION"
+		}
+	}
+	if out, err := gitRun(t, 15*time.Second, "show", rev+":pyproject.toml"); err == nil {
+		for _, ln := range strings.Split(out, "\n") {
+			ln = strings.TrimSpace(ln)
+			if !strings.HasPrefix(ln, "version") {
+				continue
+			}
+			rest := strings.TrimSpace(strings.TrimPrefix(ln, "version"))
+			if !strings.HasPrefix(rest, "=") {
+				continue
+			}
+			v := strings.Trim(strings.TrimSpace(strings.TrimPrefix(rest, "=")), "\"'")
+			if v != "" {
+				return v, "pyproject.toml"
+			}
+		}
+	}
+	return "", ""
+}
+
+// tagCut cuts ONE annotated mark, at a commit whose declared version it must
+// equal. WRITES, and local: sending is a separate button behind the wall.
+func tagCut(t tenant.Tenant, name, message, at string) (string, error) {
+	if refusal := badTagName(name); refusal != "" {
+		return refusal, nil
+	}
+	if message == "" {
+		return "Refused: a mark needs a message saying what this version is. " +
+			"Nothing was cut -- the name carries the number and the message " +
+			"carries what it was for.", nil
+	}
+	if at == "" {
+		at = "HEAD"
+	}
+	sha, err := gitRun(t, 10*time.Second, "rev-parse", "--verify", at+"^{commit}")
+	if err != nil {
+		return fmt.Sprintf("Refused: %q is not a commit in this world.", at), nil
+	}
+	sha = strings.TrimSpace(sha)
+
+	// A MARK IS NEVER MOVED. Re-pointing a tag that has been fetched is the
+	// same act as a force-push, except the fetcher never finds out: his clone
+	// keeps the old object and agrees with nobody. The next number is free.
+	if _, err := gitRun(t, 10*time.Second, "rev-parse", "--verify", "refs/tags/"+name); err == nil {
+		short, _ := gitRun(t, 10*time.Second, "rev-parse", "--short", "refs/tags/"+name+"^{commit}")
+		return fmt.Sprintf("Refused: %s already exists here, on %s. A mark is "+
+			"never moved -- anyone who already fetched it would keep the old one "+
+			"and never learn it changed. Cut the next number instead.",
+			name, strings.TrimSpace(short)), nil
+	}
+
+	// UNSAVED WORK IS CHECKED BEFORE THE VERSION IS. This order is the whole
+	// usefulness of the refusal: the ordinary way to arrive here is to bump
+	// the version file and forget to save it, and then the version AT HEAD is
+	// still the old one. Checked the other way round, that person is told the
+	// mark and the ground disagree -- true, and no help at all.
+	headSha, _ := gitRun(t, 10*time.Second, "rev-parse", "--verify", "HEAD^{commit}")
+	if strings.TrimSpace(headSha) == sha && dirty(t) {
+		return "Refused: there is unsaved work here. Save it first -- a mark cut " +
+			"now would point at a commit that is not what is on your disk, and " +
+			"nothing built from it would be what you tested. If you have just " +
+			"bumped the version file, that bump is part of what needs saving.", nil
+	}
+
+	// THE THREE THINGS THAT MUST AGREE: the name, the file, and plain semver
+	// (badTagName, above). The same arithmetic release.yml runs on arrival.
+	declared, source := declaredVersionAt(t, sha)
+	if declared == "" {
+		return "Refused: this world declares no version at that commit -- no " +
+			"VERSION file, and no version in pyproject.toml. There is nothing " +
+			"for the mark to agree with, so the mark would mean nothing.", nil
+	}
+	if "v"+declared != name {
+		return fmt.Sprintf("Refused: the mark and the ground disagree. You asked "+
+			"for %s; %s at that commit says %s, so the mark to cut there is v%s. "+
+			"Bump the file or change the name -- but a stranger fetches %s and "+
+			"believes it is %s because the name says so, and this refusal is "+
+			"what keeps that true.",
+			name, source, declared, declared, name, strings.TrimPrefix(name, "v")), nil
+	}
+
+	out, err := gitRun(t, 30*time.Second, "tag", "-a", name, "-m", message, sha)
+	if err != nil {
+		return "Refused: the mark did not land -- " + firstLine(out), nil
+	}
+	short, _ := gitRun(t, 10*time.Second, "rev-parse", "--short", sha)
+	subject, _ := gitRun(t, 10*time.Second, "log", "-1", "--format=%s", sha)
+	return fmt.Sprintf("Cut %s at %s (%q), against %s saying %s.\n\nIt is on this "+
+		"machine only -- sending it is a separate button.",
+		name, strings.TrimSpace(short), strings.TrimSpace(subject), source, declared), nil
+}
+
+// tagSend sends ONE named mark. WRITES, and walled like every other verb that
+// reaches a remote.
+func tagSend(t tenant.Tenant, name string) (string, error) {
+	if refusal := badTagName(name); refusal != "" {
+		return refusal, nil
+	}
+	if !dial(t.Home, "GIT_REMOTE") {
+		return walled("Sending"), nil
+	}
+	if _, err := gitRun(t, 10*time.Second, "rev-parse", "--verify", "refs/tags/"+name); err != nil {
+		return fmt.Sprintf("Refused: there is no mark called %s here to send. "+
+			"Cut it first.", name), nil
+	}
+	// ONE MARK, NAMED IN FULL. Never --tags, which sends every mark this
+	// machine holds. That is the same class as `git push --all`, which is
+	// written into CLAUDE.md RULE 1 because it has already cost this estate
+	// something: a verb that looks like it acts on the thing you named quietly
+	// acts on all of them.
+	out, err := gitRun(t, 300*time.Second, "push", "origin", "refs/tags/"+name)
+	if err != nil {
+		return fmt.Sprintf("Sending refused by the remote -- %s\n\n%s",
+			firstLine(out), out), nil
+	}
+	if strings.TrimSpace(out) == "" {
+		out = "GitHub already had it."
+	}
+	return fmt.Sprintf("Sent %s to origin.\n\n%s", name, out), nil
+}
+
+// tagList names every mark, newest first, and says which ones GitHub has.
+func tagList(t tenant.Tenant) (string, error) {
+	raw, _ := gitRun(t, 15*time.Second, "for-each-ref", "--sort=-creatordate",
+		"--format=%(refname:short)\t%(objectname:short)\t%(creatordate:relative)\t%(contents:subject)",
+		"refs/tags")
+
+	// WHAT GITHUB HAS IS ASKED OF GITHUB, and only while the wall is open. A
+	// local repository genuinely does not know what a remote holds, and a
+	// guess dressed as a fact is the one thing this panel must never show.
+	// `sent_known` says which of the two answers the caller is looking at.
+	sent := map[string]bool{}
+	known := false
+	if dial(t.Home, "GIT_REMOTE") {
+		if ls, err := gitRun(t, 30*time.Second, "ls-remote", "--tags", "origin"); err == nil {
+			known = true
+			for _, ln := range strings.Split(ls, "\n") {
+				f := strings.Fields(ln)
+				if len(f) < 2 {
+					continue
+				}
+				n := strings.TrimSuffix(strings.TrimPrefix(f[1], "refs/tags/"), "^{}")
+				sent[n] = true
+			}
+		}
+	}
+
+	type mark struct {
+		Name    string `json:"name"`
+		At      string `json:"at"`
+		When    string `json:"when"`
+		Subject string `json:"subject"`
+		Sent    bool   `json:"sent"`
+	}
+	marks := []mark{}
+	for _, ln := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		f := strings.SplitN(ln, "\t", 4)
+		for len(f) < 4 {
+			f = append(f, "")
+		}
+		marks = append(marks, mark{
+			Name: f[0], At: f[1], When: f[2], Subject: f[3], Sent: sent[f[0]],
+		})
+	}
+
+	declared, source := declaredVersionAt(t, "HEAD")
+	next := ""
+	if declared != "" {
+		next = "v" + declared
+	}
+	doc := map[string]any{
+		"world":       t.Name,
+		"tags":        marks,
+		"declared":    declared,
+		"declared_by": source,
+		"next":        next,
+		"sent_known":  known,
+	}
+	b, err := json.MarshalIndent(doc, "", " ")
+	return string(b), err
+}
+
 // --- lines of work ---------------------------------------------------------
 
 // toolGitBranch lists, opens, switches or closes a line of work.

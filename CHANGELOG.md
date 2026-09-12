@@ -29,6 +29,93 @@ somewhere it was not.
 None of them was found by reading. Every one was found by FIRING the thing and
 then refusing to believe the green.
 
+### There was no way to cut a tag, and the panel is where he cuts them
+
+His order, 2026-09-12: *"cut the tags through the dashboard"*, then *"add the
+workflow if there is no version control workflow existing, use the system to
+run the tag updates."*
+
+**THE ANSWER TO THE FIRST HALF WAS THAT IT COULD NOT BE DONE.** Every path was
+checked before anything was clicked, and none of them could cut a mark:
+
+    the door        seven git tools -- git, git_diff, git_commit, git_push,
+                    git_pull, git_branch, git_remote. No tag.
+    git_branch      `action` is list | new | switch | close. Lines of work
+                    only; it had never known what a tag was.
+    the glass       Save the work · Send to GitHub · Take from GitHub ·
+                    Lines of work.
+    the council     the core's own skills are git_status, git_commit,
+                    git_init, git_pull, git_push, git_cycle. No tag there
+                    either.
+
+So `release.yml` had been waiting since this morning for an event nothing in
+this estate could produce.
+
+**`git_tag`: list, cut, send.** One more verb in gitctl.go, under the header
+that file already carries -- stdin closed, jailed to the tenant's Home, and
+sending walled. A mark is the one artifact a stranger takes on faith: he
+fetches v0.1.5 and believes it is 0.1.5 because the name says so, and unlike a
+line of work a mark is not expected to move under him. Every refusal exists to
+keep that sentence true.
+
+    plain semver only    vMAJOR.MINOR.PATCH and nothing else. EARNED TODAY:
+                         release.ps1 would have turned a plain 0.1.5 into
+                         `v0.1.5+f1`. release.yml refuses that on arrival;
+                         this refuses it before the mark EXISTS, which is the
+                         half that matters once a mark has been fetched.
+    the ground agrees    the name must equal the version the world declares --
+                         VERSION, or pyproject.toml for the core -- and the
+                         refusal quotes what the file actually says.
+    AT THE COMMIT        and this is the whole design. The version is read out
+                         of git at the commit being marked, never off the
+                         disk. The disk is the TIP; a mark is often cut at an
+                         older commit, and checking a tag against a VERSION
+                         that moved AFTER it is exactly how a green check
+                         passes a wrong tag. Same arithmetic release.yml does
+                         by checking the tag out first.
+    never moved          a name that already exists is refused, and told where
+                         it points. Re-pointing a fetched tag is a force-push
+                         whose victim never finds out: his clone keeps the old
+                         object and agrees with nobody.
+    unsaved work         a mark at HEAD over a dirty tree is refused -- AND
+                         THAT CHECK COMES BEFORE THE VERSION ONE, deliberately.
+                         The ordinary way to arrive here is to bump the version
+                         file and forget to save it; checked the other way
+                         round that person is told the mark and the ground
+                         disagree, which is true and no help at all.
+    one mark, named      send pushes `refs/tags/<name>`, never `--tags`. Same
+                         class as `git push --all`, which is in CLAUDE.md
+                         RULE 1 because it has already cost this estate
+                         something: a verb that looks like it acts on the thing
+                         you named quietly acts on all of them.
+
+**THE STROKES WERE PROVED NON-VACUOUS, not just green.** A guard and its stroke
+landing together have no red to point at, so the central guard was MUTATED --
+`if "v"+declared != name` replaced with `if false` -- and both strokes went red
+on exactly the right thing: a mark named v0.2.0 cut against a ground saying
+0.1.5. Guard restored, green again. Ten strokes, each both ways.
+
+**AND THE PANEL GREW THE BUTTON.** "Version marks" opens beside "Lines of
+work": every mark with what it points at, when, and whether GitHub has it --
+asked OF GitHub, and only while the wall is open, because a local repository
+genuinely does not know and `sent_known` says which answer you are reading. The
+name box is filled with the ground's own number rather than left blank, since
+the one lawful answer is already known and retyping it is only a chance to typo
+it. Sending asks first, and says what it is starting: where a release workflow
+is set up, the tag arriving is what fires it.
+
+**A FINDING THAT CAME FREE, AND IS NOT MINE TO FIX.** `prove.ps1` parses now
+(it could not, until this morning) -- and it exits at STEP 1 OF 6. The Rust
+`us_parity` test reads `estate/Agents/.us/Agents.us`, and `estate/` has never
+existed in this ground: `git log --all -- estate` returns nothing, ever. So
+steps 2 through 6 -- the Go tests, the Python verifiers, the 58 MCP strokes,
+enrollment, the webapp build -- have never run from that script on this
+machine. They were run by hand here instead, and all pass. Whether that fixture
+should skip when its oracle is absent or the oracle should be brought in is a
+decision, and the oracle is private material, so it is named and left.
+
+Both Go modules green and gofmt-clean; the door's own battery PROVEN.
+
 ### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed
 
 Two of the review's open items, closed.

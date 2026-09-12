@@ -386,7 +386,7 @@ func TestTheRegistryAgreesWithWhatEachToolDoes(t *testing.T) {
 			t.Fatalf("%s is declared as writing and does not", name)
 		}
 	}
-	for _, name := range []string{"git_commit", "git_push", "git_pull", "git_branch"} {
+	for _, name := range []string{"git_commit", "git_push", "git_pull", "git_branch", "git_tag"} {
 		if v, ok := writes[name]; !ok {
 			t.Fatalf("%s is not registered", name)
 		} else if !v {

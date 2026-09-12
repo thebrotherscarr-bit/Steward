@@ -9,6 +9,9 @@ const Flows = {
   // Which worlds have their lines-of-work panel open. Kept here and not in
   // the DOM: repos() rebuilds every node in that card.
   open: {},
+  // The same, for the version-marks panel. A second flag rather than a shared
+  // one: opening the lines of work is not a request to see the marks.
+  marked: {},
 
   async render(el) {
     el.innerHTML = `
@@ -196,6 +199,7 @@ const Flows = {
         + this.controls(w, g)
         + (files ? `<div class="mt-16">${files}</div>` : '')
         + `<div id="lines-${escHtml(w)}"></div>`
+        + `<div id="marks-${escHtml(w)}"></div>`
         + `</div>`);
     }
     box.innerHTML = cards.join('') + '<div id="repo-diff"></div>';
@@ -205,7 +209,7 @@ const Flows = {
     box.querySelectorAll('[data-act]').forEach(b => {
       b.onclick = () => this.act(b.dataset.act, b.dataset.w);
     });
-    for (const w of worlds) this.lines(w);
+    for (const w of worlds) { this.lines(w); this.marks(w); }
   },
 
   // THE BUTTONS. Each one is a door tool, and each tool refuses in words the
@@ -239,6 +243,8 @@ const Flows = {
           ${walled || g.dirty || !g.behind ? 'disabled' : ''} title="${escHtml(fetchWhy)}">Take from GitHub</button>
         <button class="btn btn-sm" data-act="lines" data-w="${q}"
           title="The lines of work in this world">Lines of work</button>
+        <button class="btn btn-sm" data-act="marks" data-w="${q}"
+          title="The version marks cut on this world's history">Version marks</button>
       </div>
       <div id="out-${q}" class="muted"></div>
     </div>`;
@@ -275,6 +281,10 @@ const Flows = {
       } else if (what === 'lines') {
         this.open[w] = !this.open[w];
         await this.lines(w);
+        return;
+      } else if (what === 'marks') {
+        this.marked[w] = !this.marked[w];
+        await this.marks(w);
         return;
       }
     } catch (e) { say('Refused: ' + e.message); return; }
@@ -346,6 +356,106 @@ const Flows = {
     } catch (e) { say('Refused: ' + e.message); return; }
     // The card first (the branch may have moved, which changes every row
     // above), then the lines, then the answer into the element both rebuilt.
+    await this.repos();
+    say(answer);
+  },
+
+  // THE VERSION MARKS. A mark is what a stranger fetches and takes on faith:
+  // he pulls v0.1.5 and believes it is 0.1.5 because the name says so, and
+  // unlike a line of work a mark is not expected to move under him.
+  //
+  // THE GLASS DOES NOT JUDGE ANY OF THAT. Every refusal -- a name that is not
+  // plain semver, a number the version file does not agree with, a mark that
+  // already exists, a dirty tree -- belongs to git_tag and is shown in its own
+  // words. What this decides is the same one thing the buttons above decide:
+  // what to grey out, so a button that cannot work says why before it is
+  // pressed rather than after.
+  //
+  // WHICH WORLDS ARE OPEN IS REMEMBERED ON THE OBJECT, for the same reason
+  // `open` is -- repos() replaces every node in this card, so a flag kept in
+  // the DOM is erased by the refresh that follows each act.
+  async marks(w) {
+    const box = document.getElementById('marks-' + w);
+    if (!box) return;
+    if (!this.marked[w]) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="loading">Reading the marks...</div>';
+    let d;
+    try { d = JSON.parse(await App.tool('git_tag', { project: w, action: 'list' })); }
+    catch (e) { box.innerHTML = `<div class="empty-text">Could not read them: ${escHtml(e.message)}</div>`; return; }
+
+    const q = escHtml(w);
+    const rows = (d.tags || []).map(m => {
+      // WHAT GITHUB HAS IS ONLY SAID WHEN GITHUB WAS ASKED. With the wall
+      // shut the door cannot know, and it says `sent_known: false` rather
+      // than reporting every mark as unsent -- so this must not either.
+      const where = !d.sent_known ? 'GitHub was not asked — the wall is shut'
+        : m.sent ? 'on GitHub'
+          : 'only on this machine';
+      const send = (d.sent_known && !m.sent)
+        ? `<button class="btn btn-sm" data-mark="send" data-w="${q}" data-n="${escHtml(m.name)}">Send to GitHub</button>`
+        : '';
+      return `<tr><td style="padding-right:12px;white-space:nowrap"><b>${escHtml(m.name)}</b></td>`
+        + `<td class="muted" style="padding-right:12px;white-space:nowrap">${escHtml(m.at || '')}</td>`
+        + `<td class="muted" style="padding-right:12px">${escHtml(where)}</td>`
+        + `<td class="muted" style="padding-right:12px">${escHtml(m.when || '')}</td>`
+        + `<td>${send}</td></tr>`;
+    }).join('');
+
+    // THE NUMBER IS THE GROUND'S, NOT A GUESS. `next` is "v" + whatever the
+    // world's own version file declares at HEAD, read by the door. The box is
+    // filled with it rather than left empty, because the one lawful answer is
+    // already known and typing it again is just an opportunity to typo it.
+    const cut = d.declared
+      ? `<div class="flex mt-16">`
+        + `<input type="text" class="input mb-16" id="markname-${q}" value="${escHtml(d.next || '')}" placeholder="v0.0.0" />`
+        + `<input type="text" class="input mb-16" id="markmsg-${q}" placeholder="say what this version is, in your own words" />`
+        + `<button class="btn btn-sm" data-mark="cut" data-w="${q}">Cut the mark</button></div>`
+        + `<div class="muted">This world says it is <b>${escHtml(d.declared)}</b>, `
+        + `read from ${escHtml(d.declared_by || 'its version file')}. A mark that does not `
+        + `equal that is refused — and cutting one changes nothing on GitHub until you send it.</div>`
+      : `<div class="muted mt-16">This world declares no version — no VERSION file and
+         no version in pyproject.toml — so there is nothing here for a mark to mean.</div>`;
+
+    box.innerHTML = `<div class="card-title mt-16">Version marks</div>`
+      + (rows ? `<table>${rows}</table>` : `<div class="empty-text">No marks have been cut here.</div>`)
+      + cut
+      + `<div id="markout-${q}" class="muted"></div>`;
+
+    box.querySelectorAll('[data-mark]').forEach(b => {
+      b.onclick = () => this.mark(b.dataset.mark, b.dataset.w, b.dataset.n);
+    });
+  },
+
+  // ACTING ON A MARK. Same shape as line(): the tool's own words, verbatim,
+  // and then a re-read of the world and its marks so the panel never shows a
+  // state the ground has already left.
+  async mark(action, w, name) {
+    const say = t => {
+      const out = document.getElementById('markout-' + w);
+      if (out) out.innerHTML = `<pre>${escHtml(t)}</pre>`;
+    };
+    let answer;
+    try {
+      if (action === 'cut') {
+        const nb = document.getElementById('markname-' + w);
+        const mb = document.getElementById('markmsg-' + w);
+        name = (nb && nb.value || '').trim();
+        const message = (mb && mb.value || '').trim();
+        if (!name) { say('Name the mark first.'); return; }
+        if (!message) { say('Say what this version is first — the message is what the mark carries.'); return; }
+        say('Cutting...');
+        answer = await App.tool('git_tag', { project: w, action: 'cut', name: name, message: message });
+      } else if (action === 'send') {
+        // SENDING A MARK IS THE ONE ACT ON THIS PAGE THAT CAN START SOMETHING
+        // ON THE OTHER SIDE: where a release workflow is set up, it fires on
+        // the tag arriving. Said before the click, not after it.
+        if (!confirm(`Send ${name} to GitHub?\n\nA mark cannot be pulled back once `
+          + `someone has fetched it, and where a release workflow is set up this is `
+          + `what starts it.`)) return;
+        say('Sending...');
+        answer = await App.tool('git_tag', { project: w, action: 'send', name: name });
+      }
+    } catch (e) { say('Refused: ' + e.message); return; }
     await this.repos();
     say(answer);
   },

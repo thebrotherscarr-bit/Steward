@@ -13,11 +13,13 @@
 package tools
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"atlas/line/internal/tenant"
 )
@@ -334,6 +336,230 @@ func TestAnUnknownBranchActionIsRefusedByName(t *testing.T) {
 	mustContain(t, out, `"rebase" is not something this does`, "an unknown verb must be named")
 }
 
+// --- the marks a version is cut at ------------------------------------------
+//
+// A tag is the one artifact a stranger takes on faith, and unlike a branch it
+// is not expected to move under him. Every stroke here proves one refusal that
+// keeps that true, and each proves it BOTH WAYS -- a guard shown only on what
+// it refuses might be refusing everything.
+
+// versionWorld builds a repository that DECLARES a version, which is the only
+// kind of world this verb will mark.
+func versionWorld(t *testing.T, declared string) tenant.Tenant {
+	t.Helper()
+	tn := tempWorld(t)
+	saveVersion(t, tn, declared)
+	return tn
+}
+
+func saveVersion(t *testing.T, tn tenant.Tenant, declared string) {
+	t.Helper()
+	write(t, tn.Home, "VERSION", declared+"\n")
+	if out, err := gitRun(tn, 30*time.Second, "add", "-A"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if out, err := gitRun(tn, 30*time.Second, "commit", "-m", "the version, declared"); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+}
+
+func headOf(t *testing.T, tn tenant.Tenant) string {
+	t.Helper()
+	out, err := gitRun(tn, 10*time.Second, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("rev-parse: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(out)
+}
+
+// THE MONIKER FAULT, 2026-09-12. release.ps1 would have turned a plain 0.1.5
+// into `v0.1.5+f1`. Anything that is not vMAJOR.MINOR.PATCH dies before the
+// mark exists -- and the lawful name still lands, which is the other half.
+func TestAVersionMarkMustBePlainSemver(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	for name, want := range map[string]string{
+		"v0.1.5+f1":  "is not a number",
+		"v0.1.5-rc1": "is not a number",
+		"v0.1.5f":    "is not a number",
+		"0.1.5":      "does not begin with 'v'",
+		"v0.1":       "three numbers and two dots",
+		"v0.1.5.2":   "three numbers and two dots",
+		"":           "name the mark",
+	} {
+		out := call(t, toolGitTag, tn, map[string]any{
+			"action": "cut", "name": name, "message": "the coding update"})
+		mustContain(t, out, want, "a mark named "+name+" must be refused by name")
+		mustNotContain(t, out, "Cut ", "nothing may be cut on a refusal")
+	}
+	// AND THE LAWFUL ONE LANDS.
+	out := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the flow confirmation"})
+	mustContain(t, out, "Cut v0.1.5", "a lawful mark on an agreeing ground must land")
+}
+
+// The name, the file, and semver must all agree -- the same arithmetic
+// release.yml runs on arrival, done here before the mark can be sent.
+func TestAMarkMustEqualWhatTheGroundDeclaresAtThatCommit(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	out := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.2.0", "message": "a number nobody bumped"})
+	mustContain(t, out, "the mark and the ground disagree", "a mismatch must be refused")
+	mustContain(t, out, "says 0.1.5", "the refusal must quote what the ground actually says")
+	mustContain(t, out, "v0.1.5", "the refusal must name the mark that WOULD be lawful")
+	mustNotContain(t, out, "Cut v", "nothing may be cut on a disagreement")
+}
+
+// THE STROKE THE WHOLE DESIGN EXISTS FOR. The version is read AT THE COMMIT,
+// out of git -- never off the disk. The disk is the tip, and a mark is often
+// cut at an older commit: checking a tag against a VERSION that moved AFTER it
+// is exactly how a green check passes a wrong tag.
+func TestTheVersionIsReadAtTheCommitAndNotOffTheDisk(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	old := headOf(t, tn)
+	saveVersion(t, tn, "0.2.0") // the ground moves on; the disk now says 0.2.0
+
+	out := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the flow confirmation", "at": old})
+	mustContain(t, out, "Cut v0.1.5", "the version AT THE COMMIT is what a mark is judged against")
+	mustContain(t, out, "saying 0.1.5", "the answer must cite the version it agreed with")
+
+	// And the tip's own number is refused AT THAT OLDER COMMIT, which is the
+	// same fault from the other side.
+	out = call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.2.0", "message": "the tip's number, at the wrong commit", "at": old})
+	mustContain(t, out, "says 0.1.5", "the older commit's own declaration is what governs there")
+}
+
+// Re-pointing a mark that has been fetched is a force-push whose victim never
+// finds out: his clone keeps the old object and agrees with nobody.
+func TestAMarkIsNeverMoved(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	first := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the flow confirmation"})
+	mustContain(t, first, "Cut v0.1.5", "the first cut must land")
+
+	write(t, tn.Home, "after.txt", "later work\n")
+	if out, err := gitRun(tn, 30*time.Second, "add", "-A"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if out, err := gitRun(tn, 30*time.Second, "commit", "-m", "later"); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+	again := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the same name, a new commit"})
+	mustContain(t, again, "already exists here", "a second cut of the same name must refuse")
+	mustContain(t, again, "never moved", "the refusal must say why")
+}
+
+// THE ORDER OF TWO GUARDS IS ITSELF THE POINT. The ordinary way to arrive here
+// is to bump the version file and forget to save it -- so the unsaved-work
+// refusal must come FIRST, or that person is told the mark and the ground
+// disagree, which is true and no help at all.
+func TestAMarkAtHeadIsRefusedOverUnsavedWorkButAnOlderCommitIsNot(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	old := headOf(t, tn)
+	saveVersion(t, tn, "0.2.0")
+	write(t, tn.Home, "unsaved.txt", "work in hand\n")
+
+	// At HEAD the name would AGREE with the file, and it still refuses.
+	out := call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.2.0", "message": "cut over a dirty tree"})
+	mustContain(t, out, "unsaved work", "a mark at HEAD over unsaved work must refuse")
+	mustContain(t, out, "bumped the version file", "the refusal must name the usual cause")
+	mustNotContain(t, out, "disagree", "the unsaved-work refusal must come before the version one")
+
+	// An older commit has nothing to do with what is unsaved now.
+	out = call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the older mark", "at": old})
+	mustContain(t, out, "Cut v0.1.5", "unsaved work must not block a mark at an older commit")
+}
+
+func TestAMarkNeedsAMessageAndAVersionToAgreeWith(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	out := call(t, toolGitTag, tn, map[string]any{"action": "cut", "name": "v0.1.5"})
+	mustContain(t, out, "needs a message", "a mark with no message must refuse")
+	mustNotContain(t, out, "Cut v", "nothing may be cut without a message")
+
+	// A world that declares nothing has nothing for a mark to mean.
+	bare := tempWorld(t)
+	out = call(t, toolGitTag, bare, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "against nothing"})
+	mustContain(t, out, "declares no version", "an undeclared world must refuse the mark")
+	mustContain(t, out, "mean nothing", "the refusal must say why that matters")
+}
+
+func TestSendingAMarkIsWalledAndNamesAMarkItCannotFind(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	t.Setenv("MANJUEL_GIT_REMOTE", "")
+	t.Setenv("CHAINKIT_GIT_REMOTE", "")
+	out := call(t, toolGitTag, tn, map[string]any{"action": "send", "name": "v0.1.5"})
+	mustContain(t, out, "MANJUEL_GIT_REMOTE", "a shut wall must refuse the send and name the dial")
+	mustContain(t, out, "operator's alone", "the refusal must say whose the dial is")
+
+	// With the wall OPEN, a mark that was never cut is still refused -- and
+	// this refusal is not the wall's.
+	t.Setenv("MANJUEL_GIT_REMOTE", "1")
+	out = call(t, toolGitTag, tn, map[string]any{"action": "send", "name": "v9.9.9"})
+	mustContain(t, out, "no mark called v9.9.9", "an uncut mark must be named, not sent")
+	mustNotContain(t, out, "MANJUEL_GIT_REMOTE", "this refusal is not the wall's")
+}
+
+func TestTheMarkListNamesWhatIsCutAndWhatTheGroundDeclares(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	t.Setenv("MANJUEL_GIT_REMOTE", "")
+	t.Setenv("CHAINKIT_GIT_REMOTE", "")
+
+	var before struct {
+		Tags       []map[string]any `json:"tags"`
+		Declared   string           `json:"declared"`
+		DeclaredBy string           `json:"declared_by"`
+		Next       string           `json:"next"`
+		SentKnown  bool             `json:"sent_known"`
+	}
+	if err := json.Unmarshal([]byte(call(t, toolGitTag, tn, nil)), &before); err != nil {
+		t.Fatalf("the list must be JSON: %v", err)
+	}
+	if len(before.Tags) != 0 {
+		t.Fatalf("an unmarked world must list no marks: %v", before.Tags)
+	}
+	if before.Declared != "0.1.5" || before.DeclaredBy != "VERSION" || before.Next != "v0.1.5" {
+		t.Fatalf("the list must say what the ground declares and what that makes the mark: %+v", before)
+	}
+	// WITH THE WALL SHUT, WHAT GITHUB HAS IS NOT KNOWN -- and the answer says
+	// so rather than guessing false.
+	if before.SentKnown {
+		t.Fatal("a shut wall cannot know what the remote holds")
+	}
+
+	call(t, toolGitTag, tn, map[string]any{
+		"action": "cut", "name": "v0.1.5", "message": "the flow confirmation"})
+	var after struct {
+		Tags []struct {
+			Name    string `json:"name"`
+			Subject string `json:"subject"`
+			Sent    bool   `json:"sent"`
+		} `json:"tags"`
+	}
+	if err := json.Unmarshal([]byte(call(t, toolGitTag, tn, nil)), &after); err != nil {
+		t.Fatalf("the list must be JSON: %v", err)
+	}
+	if len(after.Tags) != 1 || after.Tags[0].Name != "v0.1.5" {
+		t.Fatalf("the cut mark must be listed: %+v", after.Tags)
+	}
+	if after.Tags[0].Subject != "the flow confirmation" {
+		t.Fatalf("the mark's own message must be carried: %+v", after.Tags[0])
+	}
+	if after.Tags[0].Sent {
+		t.Fatal("a mark that was never sent must not be reported as sent")
+	}
+}
+
+func TestAnUnknownTagActionIsRefusedByName(t *testing.T) {
+	tn := versionWorld(t, "0.1.5")
+	out := call(t, toolGitTag, tn, map[string]any{"action": "delete", "name": "v0.1.5"})
+	mustContain(t, out, `"delete" is not something this does`, "an unknown verb must be named")
+}
+
 // --- absence ----------------------------------------------------------------
 
 // A world that is not a repository is denied honestly by every verb, and
@@ -346,6 +572,7 @@ func TestNotARepositoryIsDeniedByEveryVerb(t *testing.T) {
 		"git_push":   toolGitPush,
 		"git_pull":   toolGitPull,
 		"git_branch": toolGitBranch,
+		"git_tag":    toolGitTag,
 		"git_remote": toolGitRemote,
 	} {
 		out := call(t, fn, tn, map[string]any{"message": "m", "name": "b"})
