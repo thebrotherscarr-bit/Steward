@@ -135,6 +135,25 @@ panel deliberately has no un-cut button: that is a real gap and it is named
 rather than filled, since a verb that deletes marks is a different decision
 from a verb that cuts them.
 
+**AND THE SEND BUTTON DID NOTHING AT ALL, WHICH WAS THE THIRD SIGHTING.**
+Sending a mark is the one act on this page that starts something on the far
+side, so the first cut asked with a `confirm()`. It was DISMISSED WITHOUT
+EVER BEING SHOWN -- the button was pressed, the panel still said "only on
+this machine", and no refusal appeared anywhere, because a dismissed confirm
+is not an error. A browser dialog is the one piece of interface the glass
+does not control, and nothing else on this page opens a modal.
+
+It ASKS IN THE PANEL now: the first press ARMS the button -- it says "Click
+again to send", and the answer line says what sending starts and that a mark
+someone has fetched cannot be pulled back. One mark is armed at a time by
+construction, and any repaint of the card disarms, so a flag cannot outlive
+the row it was set on and arm a button he never pressed.
+
+That is three faults in one afternoon found by USING the thing, with every
+stroke green throughout: a sha that pointed at nothing a reader could find, a
+button that did nothing, and before either of them a panel that had no such
+button at all. It is the same lesson this version is named for.
+
 Both Go modules green and gofmt-clean; the door's own battery PROVEN.
 
 ### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed

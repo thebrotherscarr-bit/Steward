@@ -12,6 +12,10 @@ const Flows = {
   // The same, for the version-marks panel. A second flag rather than a shared
   // one: opening the lines of work is not a request to see the marks.
   marked: {},
+  // The one mark, if any, whose Send is ARMED -- "<world>:<name>". One at a
+  // time by construction: arming a second disarms the first, so there is never
+  // a loaded button somewhere off screen.
+  arming: null,
 
   async render(el) {
     el.innerHTML = `
@@ -377,6 +381,9 @@ const Flows = {
   async marks(w) {
     const box = document.getElementById('marks-' + w);
     if (!box) return;
+    // A REPAINT DISARMS. The row the operator armed is destroyed and rebuilt
+    // here, so a flag that outlived it would arm a button he never pressed.
+    this.arming = null;
     if (!this.marked[w]) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="loading">Reading the marks...</div>';
     let d;
@@ -447,11 +454,28 @@ const Flows = {
         answer = await App.tool('git_tag', { project: w, action: 'cut', name: name, message: message });
       } else if (action === 'send') {
         // SENDING A MARK IS THE ONE ACT ON THIS PAGE THAT CAN START SOMETHING
-        // ON THE OTHER SIDE: where a release workflow is set up, it fires on
-        // the tag arriving. Said before the click, not after it.
-        if (!confirm(`Send ${name} to GitHub?\n\nA mark cannot be pulled back once `
-          + `someone has fetched it, and where a release workflow is set up this is `
-          + `what starts it.`)) return;
+        // ON THE OTHER SIDE: where a release workflow is set up, the tag
+        // arriving is what fires it, and a mark someone has already fetched
+        // cannot be pulled back. So it asks -- once, and in the page itself.
+        //
+        // NOT A confirm(). Nothing else on this page opens a modal, and a
+        // browser dialog is the one piece of interface the glass does not
+        // control: the first cut used one and it was dismissed without ever
+        // being shown, so the button silently did nothing. Arming is visible,
+        // it lives in the panel, and it cannot be answered by something that
+        // is not the operator.
+        const key = w + ':' + name;
+        if (this.arming !== key) {
+          this.arming = key;
+          const btn = document.querySelector(
+            `[data-mark="send"][data-w="${CSS.escape(w)}"][data-n="${CSS.escape(name)}"]`);
+          if (btn) btn.textContent = 'Click again to send';
+          say(`${name} will go to GitHub. A mark cannot be pulled back once someone `
+            + `has fetched it, and where a release workflow is set up this is what `
+            + `starts it. Click again to send it; anything else leaves it here.`);
+          return;
+        }
+        this.arming = null;
         say('Sending...');
         answer = await App.tool('git_tag', { project: w, action: 'send', name: name });
       }
