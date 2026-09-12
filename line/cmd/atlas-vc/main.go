@@ -11,9 +11,22 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
+
+	_ "embed"
 
 	"atlas/line/internal/vc"
 )
+
+// THE FIFTH COMMAND, WHICH HAD NO VERSION AT ALL (2026-09-12). The other four
+// each embed a VERSION file beside them; this one printed a literal, so it sat
+// outside the single-authority scheme entirely and `docs/ACCEPTANCE.md`'s
+// "VERSION = ... in all 6 files" was counting a set this command was not in.
+//
+//go:embed VERSION
+var versionFile string
+
+func Version() string { return strings.TrimSpace(versionFile) }
 
 func main() {
 	var (
@@ -37,7 +50,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Println("0.1.3")
+		fmt.Println(Version())
 		return
 	}
 

@@ -12,6 +12,7 @@
 package tenant
 
 import (
+	"atlas/line/internal/ground"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -183,6 +184,16 @@ func (r *Registry) Add(name, home string) error {
 	abs, err := filepath.Abs(home)
 	if err != nil {
 		return err
+	}
+	// THE ARCHIVE IS NOT A TENANT, BY ANY ROAD (2026-09-12). The walk in
+	// `ground` refuses to find it; this refuses to carry it even when
+	// something hands it over directly -- an explicit --tenant tag included.
+	// Detection was the road it actually came in by, twice; a rule that only
+	// guards the road it was broken on is a rule with a way around it.
+	if ground.Barred(abs) || ground.Barred(name) {
+		return fmt.Errorf("refused: THE LINE does not carry %q as %q. RULE 1: "+
+			"the archive is outside the estate -- never served, never indexed, "+
+			"never read from here, and never by a flag", abs, name)
 	}
 	key := strings.ToLower(name)
 	if _, seen := r.byName[key]; !seen {

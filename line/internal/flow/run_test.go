@@ -290,3 +290,89 @@ func TestNoFinishPath(t *testing.T) {
 		}
 	}
 }
+
+// THE PASS BRANCH THAT HAD NEVER BEEN REACHABLE (2026-09-12).
+//
+// `play.Score` is exact match after trim and casefold, and it also scores
+// prompt-eval datasets -- so it could not be loosened without rescoring saved
+// runs. Meanwhile the builder's label for this field read "what the answer
+// should carry", which is `contains` in words. The coder flow believed the
+// label: it checked a `run` node, whose answer is the council's prose, for
+// "RAN". `verify` came back "RAN: fizz_buzz.py" over correct FizzBuzz and the
+// check failed anyway, every time, since the flow was first folded.
+func TestEvalMatchModes(t *testing.T) {
+	answer := "RAN: fizz_buzz.py\n--- stdout ---\n1\n2\nFizz"
+
+	// contains: the test the label always described
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, answer) {
+		t.Fatal("contains did not find RAN in an answer that carries it")
+	}
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "CONTAINS"}, answer) {
+		t.Fatal("the MODE is case-blind even though the needle is not")
+	}
+	if scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, answer) {
+		t.Fatal("contains passed on a string the answer does not carry")
+	}
+
+	// THE PASS THAT WAS A LIE, measured 2026-09-12 on the first live run after
+	// `contains` landed. calculate_sum.py died of a SyntaxError, run_python
+	// said so, and the check passed anyway -- because the delivery contained
+	// the English word "ran". A word-boundary test would not have caught it:
+	// that match WAS a whole word. Case is what separates a verdict from prose.
+	failed := `FAILED (exit 1): calculate_sum.py
+--- stderr ---
+SyntaxError: invalid syntax
+
+The tools that actually ran this turn were write_file, run_python.`
+	if scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, failed) {
+		t.Fatal("a FAILED run scored as a pass; a gate must not tell that lie")
+	}
+	if !scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, failed) {
+		t.Fatal("contains could not find the verdict that is actually there")
+	}
+	// and the verdict token run_python really emits, on a real success
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, answer) {
+		t.Fatal("contains missed the RAN: verdict line run_python emits")
+	}
+	if scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, failed) {
+		t.Fatal("RAN: matched a run that failed")
+	}
+
+	// equals: UNCHANGED, which is the whole reason the mode exists
+	if scoreNode(Node{Kind: "eval", Expected: "RAN"}, answer) {
+		t.Fatal("an unmarked eval stopped being exact match; saved specs moved")
+	}
+	if !scoreNode(Node{Kind: "eval", Expected: " ran "}, "RAN") {
+		t.Fatal("equals must still trim and casefold, as play.Score does")
+	}
+
+	// AN EMPTY EXPECTED NEVER PASSES -- every string contains ""
+	for _, m := range []string{"", "equals", "contains"} {
+		if scoreNode(Node{Kind: "eval", Expected: "  ", Match: m}, answer) {
+			t.Fatalf("match %q passed on a blank expected; that is a green light nobody set", m)
+		}
+	}
+}
+
+func TestValidateGuardsTheMatchMode(t *testing.T) {
+	spec := func(n Node) Spec {
+		return Spec{Name: "m", Nodes: []Node{{Name: "a", Kind: "ask", Question: "Q"}, n},
+			Edges: []Edge{{From: "a", To: "e", When: "always"}}}
+	}
+	if _, err := Validate(spec(Node{Name: "e", Kind: "eval", Ref: "a", Expected: "x", Match: "roughly"})); err == nil {
+		t.Fatal("Validate accepted an unknown match mode")
+	} else if !strings.Contains(err.Error(), "equals, contains") {
+		t.Fatalf("the refusal must name the set: %v", err)
+	}
+	// a mode on something with no answer to test is a field that means nothing
+	s := Spec{Name: "m", Nodes: []Node{{Name: "a", Kind: "ask", Question: "Q", Match: "contains"}}}
+	if _, err := Validate(s); err == nil {
+		t.Fatal("Validate accepted `match` on an ask node")
+	}
+	// and both real modes pass validation
+	for _, m := range []string{"", "equals", "contains"} {
+		if _, err := Validate(spec(Node{Name: "e", Kind: "eval", Ref: "a", Expected: "x", Match: m})); err != nil {
+			t.Fatalf("Validate refused match %q: %v", m, err)
+		}
+	}
+}

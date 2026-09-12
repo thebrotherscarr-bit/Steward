@@ -14,7 +14,22 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "embed"
 )
+
+// THE VERSION FILE IS THE AUTHORITY, HERE TOO (2026-09-12). This command had
+// a VERSION file beside it like the other four and did not read it: it asked
+// the Rust spine for `--version` and fell back to a LITERAL when the spine was
+// absent. So on any machine where the spine is not built -- the fresh clone
+// `prove.py` has a whole ABSENT branch for -- it printed a number nobody had
+// bumped, and `docs/ACCEPTANCE.md` asserts that exact line. The one place the
+// staleness could not be noticed was the one place it lived.
+//
+//go:embed VERSION
+var versionFile string
+
+func Version() string { return strings.TrimSpace(versionFile) }
 
 const (
 	reset  = "\033[0m"
@@ -176,7 +191,7 @@ func printVersion() {
 	if out, err := run("atlas", "--version"); err == nil {
 		fmt.Printf("atlas-tui %s\n", strings.TrimSpace(out))
 	} else {
-		fmt.Println("atlas-tui 0.1.3")
+		fmt.Printf("atlas-tui %s\n", Version())
 	}
 }
 

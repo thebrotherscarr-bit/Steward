@@ -13,9 +13,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	_ "embed"
 )
+
+// THE GLASS WAS REPORTING A LITERAL (2026-09-12). Two places said `0.1.3` by
+// hand: /health's `version` field and the Prometheus line
+// `atlas_server_info{server="atlas-webapp",version="..."}`. A version a
+// monitoring system scrapes is the last one anybody re-reads, so it is the
+// worst place for a number nobody bumps. Beside the code that reports it, the
+// way each command in `line` keeps its own.
+//
+//go:embed VERSION
+var versionFile string
+
+// Version is what this build answers when asked, read from disk at compile
+// time rather than typed into two unrelated functions.
+func Version() string { return strings.TrimSpace(versionFile) }
 
 type Handlers struct {
 	store     *traces.Store
@@ -76,7 +93,7 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	// the tenant-filtered list faces.
 	resp := map[string]interface{}{
 		"status":  "ok",
-		"version": "0.1.3",
+		"version": Version(),
 		"time":    time.Now().UTC(),
 		"auth":    h.authOn,
 	}

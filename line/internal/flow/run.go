@@ -378,12 +378,48 @@ func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) 
 		if !ok {
 			return "", false, "fail", fmt.Errorf("eval node checks node %q with no output yet", nd.Ref)
 		}
-		if play.Score(nd.Expected, got) {
+		// `equals` stays play.Score, which is also what scores prompt-eval
+		// datasets -- loosening it there would have rescored saved runs.
+		// `contains` is asked for explicitly, per node, and is the test the
+		// builder's own label has always described.
+		if scoreNode(nd, got) {
 			return "pass", true, "ok", nil
 		}
-		return "fail: expected " + quoted(nd.Expected), false, "ok", nil
+		return "fail: expected " + nd.MatchMode() + " " + quoted(nd.Expected), false, "ok", nil
 	}
 	return "", false, "fail", fmt.Errorf("refused: unknown kind %q", nd.Kind)
+}
+
+// scoreNode makes the test the eval node asked for.
+//
+// AN EMPTY `expected` NEVER PASSES, and `contains` is the reason it has to be
+// said out loud: every string contains "". A check that passes on a blank
+// field is a green light nobody set, which is worse than no check at all.
+//
+// AND `contains` IS CASE-SENSITIVE, WHICH IS THE WHOLE DIFFERENCE BETWEEN THE
+// TWO MODES. Measured 2026-09-12, on the first run after `contains` landed:
+// the check looked for "RAN" in a `run` node's prose, the script had actually
+// died of a SyntaxError, and the check passed anyway -- because the delivery
+// said "the tools that actually RAN this turn were...". Lowercase `ran` is an
+// ordinary English word, so a case-blind search for it finds English rather
+// than a verdict. A word-boundary test would not have helped; that match WAS a
+// whole word.
+//
+// `equals` compares a whole answer to a whole expected value, where case is
+// noise, so it stays case-blind (and stays play.Score, which also scores
+// prompt-eval datasets). `contains` hunts a MARKER inside prose -- `RAN:`,
+// `FAILED`, `PASS` -- and in machine output the case IS the marker. Anything
+// looser reports a pass on a failure, which is the one lie a gate must not
+// tell.
+func scoreNode(nd Node, got string) bool {
+	want := strings.TrimSpace(nd.Expected)
+	if want == "" {
+		return false
+	}
+	if nd.MatchMode() == "contains" {
+		return strings.Contains(got, want)
+	}
+	return play.Score(want, got)
 }
 
 func quoted(s string) string {

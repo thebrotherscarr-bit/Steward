@@ -1,6 +1,6 @@
 # ATLAS Acceptance Criteria
 
-**Version:** 0.1.3
+**Version:** 0.1.4
 
 ---
 
@@ -9,7 +9,7 @@
 ### SPINE (Rust Core)
 - [ ] `cargo build --workspace` exits 0
 - [ ] `cargo test --workspace` passes 85+ tests
-- [ ] `atlas --version` prints `0.1.3`
+- [ ] `atlas --version` prints `0.1.4`
 - [ ] `atlas chain verify` returns INTACT on lawful chain
 - [ ] `atlas chain recognize` identifies form
 - [ ] `atlas db init` creates database
@@ -25,11 +25,11 @@
 - [ ] `go vet ./...` clean
 - [ ] `go test ./...` passes 92+ tests
 - [ ] `atlas-mcp --prove` reports the surface carries 78 tools
-- [ ] `atlas-mcp --version` prints `0.1.3`
+- [ ] `atlas-mcp --version` prints `0.1.4`
 - [ ] `atlas-mcp --prove` 125 strokes PASS
 - [ ] `atlas-town --prove` 11 strokes PASS
 - [ ] `atlas-door --prove` 13 strokes PASS
-- [ ] `atlas-tui --version` prints `atlas-tui 0.1.3`
+- [ ] `atlas-tui --version` prints `atlas-tui 0.1.4`
 
 ### GOLDEN (Python)
 - [ ] The 24 cutters answering `--verify`: byte-identical, or ABSENT naming `ATLAS_ORACLE_ROOT`
@@ -66,7 +66,7 @@
 - [ ] Build exits 0
 - [ ] `go vet` clean
 - [ ] Health endpoint returns status ok
-- [ ] Version matches 0.1.3
+- [ ] Version matches 0.1.4
 - [ ] List agents returns >= 40
 - [ ] Get agent returns agent detail
 - [ ] Add trace returns hash
@@ -134,7 +134,13 @@
 - [ ] All 6 pipelines PASS
 - [ ] All 84 scenarios PASS
 - [ ] All 38 workflow steps PASS
-- [ ] VERSION = 0.1.3 in all 6 files
+- [ ] VERSION = 0.1.4 in all 8 files (`VERSION`, `line/VERSION`, one beside
+      each of the five `line/cmd/*` mains, and `webapp/handlers/VERSION`), and
+      every binary AGREES when asked: `atlas-mcp`, `atlas-door`, `atlas-town`,
+      `atlas-vc` print it bare, `atlas-tui` prefixes its own name. It was 6
+      on 2026-09-12, and the two that were missing were the two that printed a
+      hardcoded literal instead — `atlas-vc` always, `atlas-tui` whenever the
+      Rust spine was absent, which is exactly the fresh clone this list is for.
 - [ ] All 6 binaries version-pinned
 - [ ] Git clean (no uncommitted changes)
 - [ ] DELIVERABLE.md present

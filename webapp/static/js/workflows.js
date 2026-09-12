@@ -48,12 +48,17 @@ const Workflows = {
     seat:   { label: 'seat',   blurb: 'one named seat, its own prompt',          fields: ['seat', 'question', 'voice', 'method'] },
     prompt: { label: 'prompt', blurb: 'a saved prompt, by name and version',     fields: ['prompt', 'version', 'voice'] },
     memory: { label: 'memory', blurb: 'recall with citations',                   fields: ['voice', 'question'] },
-    eval:   { label: 'eval',   blurb: 'check another node — this is what steers', fields: ['node', 'expected'] },
+    eval:   { label: 'eval',   blurb: 'check another node — this is what steers', fields: ['node', 'match', 'expected'] },
     gate:   { label: 'gate',   blurb: 'stop and wait for a hand',                fields: ['title'] },
   },
 
   // Which fields carry long text, so they get a textarea instead of an input.
   LONG: { question: true, expected: true },
+
+  // Fields whose value is a closed set. A select instead of a box, because the
+  // engine refuses an unknown one at save and a free-text field invites it.
+  // The first entry is the default the engine takes for an empty value.
+  CHOICES: { match: ['equals', 'contains'] },
 
   async render(el) {
     el.innerHTML = `
@@ -187,6 +192,8 @@ const Workflows = {
           '<div class="muted">No edges. With one step that is fine; with more, an unreached step is refused at save.</div>'}</div>
         <button class="btn btn-sm mt-16" id="wf-addedge" ${names.length < 2 ? 'disabled' : ''}>+ edge</button>
 
+        ${this.varsBlock(s)}
+
         <div class="flex flex-between mt-16" style="gap:8px">
           <div class="muted">Saving folds a new version. The old one is kept whole, never rewritten.</div>
           <div class="flex" style="gap:8px">
@@ -221,9 +228,15 @@ const Workflows = {
       ${k.fields.map(f => `
         <div class="wf-field">
           <div class="form-label">${esc(f)}</div>
-          ${this.LONG[f]
+          ${this.CHOICES[f]
+            ? `<select class="select" data-n="${i}" data-f="${f}">${this.CHOICES[f].map(c =>
+                `<option value="${esc(c)}"${(n[f] || this.CHOICES[f][0]) === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`
+            : this.LONG[f]
             ? `<textarea class="textarea" data-n="${i}" data-f="${f}" rows="2" placeholder="${esc(this.hint(n.kind, f))}">${esc(n[f] || '')}</textarea>`
             : `<input class="input" data-n="${i}" data-f="${f}" value="${esc(n[f] == null ? '' : String(n[f]))}" placeholder="${esc(this.hint(n.kind, f))}">`}
+          ${f === 'match' ? `<div class="muted">${n[f] === 'contains'
+            ? 'the answer passes if it CARRIES the text below — exact case, because a marker in machine output is uppercase and the same letters in prose are not (look for <code>RAN:</code>, not <code>ran</code>)'
+            : 'the answer passes only if it IS the text below, whitespace and case aside'}</div>` : ''}
         </div>`).join('')}
     </div>`;
   },
@@ -236,7 +249,13 @@ const Workflows = {
     if (f === 'question') return 'what to ask';
     if (f === 'voice') return 'a model tag, e.g. llama3.2:latest (blank = the default)';
     if (f === 'node') return 'the step this checks — it must exist';
-    if (f === 'expected') return 'what the answer should carry; this decides pass or fail';
+    // THIS LABEL USED TO SAY "what the answer should carry", which is
+    // `contains` in words, while the engine only ever did `equals`. The coder
+    // flow believed the label and its pass branch was unreachable for as long
+    // as it existed. The field now says which test is being made, and `match`
+    // beside it is how you choose.
+    if (f === 'expected') return 'the marker the check looks for, e.g. RAN: — `match` above decides equals or contains';
+    if (f === 'match') return 'equals';
     if (f === 'title') return 'what the hand is being asked to decide';
     if (f === 'seat') return 'a seat name from agents/';
     if (f === 'prompt') return 'a saved prompt name';
@@ -347,14 +366,51 @@ const Workflows = {
     }
   },
 
+  // WHAT THE FLOW ASKS OF THE HAND FIRING IT. Every {{var}} the steps render
+  // that no step supplies from its own output, which is the only kind that has
+  // to come from outside. ONLY the two fields the engine actually renders --
+  // a node's question, and a prompt node's vars. A box for `expected` or a
+  // gate's title would be offering to fill something nothing substitutes.
+  openVars(s) {
+    const own = new Set((s.nodes || []).map(n => 'out_' + n.name));
+    const found = new Set();
+    (s.nodes || []).forEach(n => {
+      [n.question].concat(Object.values(n.vars || {})).forEach(v =>
+        String(v || '').replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, k) => {
+          if (!own.has(k)) found.add(k);
+          return '';
+        }));
+    });
+    return [...found].sort();
+  },
+
+  varsBlock(s) {
+    const vars = this.openVars(s);
+    if (!vars.length) return '';
+    return `<div class="wf-head mt-16">What it needs from you</div>
+      <div class="muted mb-16">The steps below use these and no step supplies
+        them. A missing one is refused rather than guessed, so the run stops
+        before it spends anything.</div>
+      ${vars.map(v => `<div class="form-group">
+        <div class="form-label">${esc(v)}</div>
+        <input class="input" data-var="${esc(v)}" placeholder="what ${esc(v)} is, for this run">
+      </div>`).join('')}`;
+  },
+
   async fire() {
     if (!this.spec || this.busy) return;
     this.busy = true;
+    // Read BEFORE the run panel is painted: these live in #wf-build, which
+    // the paint below does not touch, and reading them first keeps it that way.
+    const inputs = {};
+    document.querySelectorAll('#wf-build [data-var]').forEach(i => {
+      inputs[i.getAttribute('data-var')] = i.value;
+    });
     const box = document.getElementById('wf-run');
     box.innerHTML = `<div class="card"><div class="card-title">The run, step by step</div>
       <div class="muted">Firing ${esc(this.spec.name)}… every step is a real call; this takes as long as it takes.</div></div>`;
     try {
-      const r = await API.fireFlow(this.spec.name, '{}');
+      const r = await API.fireFlow(this.spec.name, JSON.stringify(inputs));
       const text = r.text || '';
       const id = (text.match(/f-\d{8}-\d{6}-[0-9a-f]{8}/) || [])[0] || '';
       const v = (text.match(/verdict:\s*([A-Z_]+)/) || [])[1]

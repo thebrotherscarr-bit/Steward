@@ -12,6 +12,42 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### 0.1.4 — THE DELIVERY PACKAGING
+
+His word, 2026-09-12: *"atlas 0.1.4 - the delivery packaging."*
+
+`VERSION` is the single authority and it is now true in all EIGHT files,
+not six: the root, `line/`, one beside each of the five `line/cmd/*`
+mains, and a new `webapp/handlers/VERSION`. Two of those did not exist
+this morning, and their absence is the whole entry:
+
+    atlas-vc    printed the literal "0.1.3" unconditionally and had no
+                VERSION file at all -- the fifth command, outside the
+                scheme the other four were in, while ACCEPTANCE.md
+                counted "all 6 files" as though it were not
+    atlas-tui   had a VERSION file beside it and did not read it: it
+                asked the Rust spine for --version and fell back to a
+                LITERAL when the spine was absent. So it printed a stale
+                number on exactly the machines where the spine is not
+                built -- the fresh clone `prove.py` keeps an ABSENT
+                branch for, and the one case ACCEPTANCE.md is written to
+                catch. The one place the staleness could not be noticed
+                was the one place it lived.
+    webapp      said "0.1.3" by hand in TWO unrelated functions --
+                /health's `version` field and the Prometheus gauge
+                `atlas_server_info{server="atlas-webapp",version=...}`.
+                A version a monitoring system scrapes is the last one
+                anybody re-reads.
+
+All five commands and the glass now answer from the file: measured, not
+asserted -- `atlas-mcp 0.1.4`, `atlas-tui atlas-tui 0.1.4` (with the
+spine absent, which is the fixed path), `atlas-vc 0.1.4`, `atlas-door
+0.1.4`, `atlas-town 0.1.4`. `Cargo.toml` and `core/src/version.rs`'s own
+assertion moved with them, and every doc line that ASSERTS what the build
+prints -- ACCEPTANCE, PIPELINES, OLLAMA_PROVER, WORKFLOWS, E2E_SCENARIOS,
+AGENTS -- moved too. The released headers below did not: they are the
+record of what shipped.
+
 ### The gofmt gate repeated the fault it was named after
 
 Its own note, written this morning: *"three files had never been through gofmt

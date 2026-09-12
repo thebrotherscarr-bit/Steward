@@ -1700,6 +1700,37 @@ func flowInputs(args map[string]any) (map[string]string, error) {
 	return out, nil
 }
 
+// toolVerdictHead marks the machine's own lines inside a turn's answer. It is
+// also how the append knows it has already happened: the core may one day
+// recompose these itself, and the news reaches the gate exactly once.
+const toolVerdictHead = "--- WHAT THE TOOLS SAID ---"
+
+// appendVerdicts puts the machine's own lines under the seats' prose.
+//
+// APPENDED, NEVER SUBSTITUTED. The prose is what a person reads at the gate;
+// these are what a CHECK should read, and both survive. Once only -- the core
+// may one day recompose them itself, and the news reaches the gate exactly
+// once (LAW 5), which is the same discipline the failure list above keeps.
+//
+// A turn that called no tool gains nothing: an empty block would be a heading
+// asserting there was something to say.
+func appendVerdicts(out string, raw any) string {
+	vs, ok := raw.([]any)
+	if !ok || len(vs) == 0 || strings.Contains(out, toolVerdictHead) {
+		return out
+	}
+	lines := make([]string, 0, len(vs))
+	for _, v := range vs {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			lines = append(lines, "  "+s)
+		}
+	}
+	if len(lines) == 0 {
+		return out
+	}
+	return out + "\n\n" + toolVerdictHead + "\n" + strings.Join(lines, "\n")
+}
+
 // councilEngine is flow's Engine with a real Turn: a `run` node puts its
 // objective through the world's own Manjuel process, so a workflow gets the
 // law gate, the Router and the recompose rather than a bare voice.
@@ -1732,6 +1763,17 @@ func (c councilEngine) Turn(ctx context.Context, objective, feed, method string)
 		!strings.Contains(out, "NOT EVERYTHING RAN") {
 		out += fmt.Sprintf("\n\nNOT EVERYTHING RAN: %v", fails)
 	}
+	// WHAT THE TOOLS SAID, carried out whole beside what the seats said about
+	// it. An eval node checking a `run` node was scoring the closing seat's
+	// PARAPHRASE: on 2026-09-12 a check for `RAN:` failed over a script that
+	// had worked, because the seat wrote "reported that it produced 5050 to
+	// stdout" instead of the verdict. The delivery is testimony; these lines
+	// are the machine's own (LAW 5), and they let a check score the run rather
+	// than the account of it.
+	//
+	// Appended, never substituted -- the prose is what a person reads at the
+	// gate, and the facts go under it where both survive.
+	out = appendVerdicts(out, f["verdicts"])
 	return out, nil
 }
 

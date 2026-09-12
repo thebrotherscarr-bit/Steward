@@ -136,12 +136,39 @@ func main() {
 			// the seat opened -- not across whatever one launch happened to
 			// name. One level up, one level across; the attic is skipped
 			// because folded copies are history, not claim.
+			// AND THE WALK DOES NOT LEAVE THE ESTATE (operator, 2026-09-12:
+			// "remove those two as well"). The walk goes ONE LEVEL UP to find
+			// the town, and when the ground is the top of its own tree that
+			// level up is somebody's desktop. On 2026-09-11 it carried the
+			// archive from there; on 2026-09-12, with the archive refused by
+			// name, it still carried `manjuel` and `neiro_recovery` -- two
+			// desktop folders that happen to hold an AGENTS.md.
+			//
+			// Barring them by name would have been a third name on a list
+			// waiting for a fourth folder. So the rule is a boundary, not a
+			// list: a NEIGHBOUR is carried only when it sits inside a tenant
+			// the command line actually named. Detection still learns where it
+			// is standing -- that was the 2026-08-27 ruling and it stands --
+			// but what it may ADOPT stops at the estate it was given.
+			var outside []string
 			for _, sib := range ground.Siblings(filepath.Dir(here.Home)) {
-				if !reg.Has(sib.Name) {
-					if err := reg.Add(sib.Name, sib.Home); err != nil {
-						fatal(err)
-					}
+				if reg.Has(sib.Name) {
+					continue
 				}
+				if !insideNamed(sib.Home, tenants) {
+					outside = append(outside, sib.Name)
+					continue
+				}
+				if err := reg.Add(sib.Name, sib.Home); err != nil {
+					fatal(err)
+				}
+			}
+			// NAME WHAT WAS LEFT OUT, for the same reason the line below names
+			// what was taken in: a count cannot be checked against intent.
+			if len(outside) > 0 {
+				fmt.Fprintf(os.Stderr,
+					"ground: left outside the estate (%d): %s\n",
+					len(outside), strings.Join(outside, ", "))
 			}
 			// The ground underfoot answers unnamed calls, unless the operator
 			// pinned one with --default-project.
@@ -245,4 +272,33 @@ func sortedKeys(m map[string]string) []string {
 		}
 	}
 	return out
+}
+
+// insideNamed reports whether home sits inside a tenant the command line
+// actually named -- the estate's boundary, as the operator drew it.
+//
+// PREFIX ON CLEANED, ABSOLUTE PATHS, with a separator demanded after the root:
+// `...\Research` must not swallow `...\Research_old`, which a bare
+// strings.HasPrefix does. Equal to a root counts; a root that will not resolve
+// is no root at all and admits nothing (fail closed, as gate_paths does).
+func insideNamed(home string, named map[string]string) bool {
+	h, err := filepath.Abs(home)
+	if err != nil {
+		return false
+	}
+	h = filepath.Clean(h)
+	for _, root := range named {
+		r, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		r = filepath.Clean(r)
+		if strings.EqualFold(h, r) {
+			return true
+		}
+		if strings.HasPrefix(strings.ToLower(h), strings.ToLower(r)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

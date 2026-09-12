@@ -66,7 +66,32 @@ type Node struct {
 	Method   string            `json:"method,omitempty"`
 	Ref      string            `json:"node,omitempty"`
 	Expected string            `json:"expected,omitempty"`
+	Match    string            `json:"match,omitempty"`
 	Title    string            `json:"title,omitempty"`
+}
+
+// Matches is the closed set of tests an eval node may make of the answer it
+// checks. Empty means `equals`, so every spec folded before this existed keeps
+// the verdict it already had -- a scoring rule that changes under saved runs is
+// a rewritten record.
+//
+// WHY `contains` HAD TO EXIST (2026-09-12). `play.Score` is exact match after
+// trim and casefold, and it is also what scores prompt-eval datasets, so it
+// could not simply be loosened. Meanwhile the builder's own label for this
+// field read "what the answer should carry" -- which is `contains`, in words.
+// The coder flow believed the label: its check expected RAN against a `run`
+// node, whose answer is the council's prose. `verify` came back
+// "RAN: fizz_buzz.py" over correct FizzBuzz and the check failed anyway. The
+// pass branch had never once been reachable. The label was right about what
+// the field is for; the engine offered no way to mean it.
+var Matches = map[string]bool{"equals": true, "contains": true}
+
+// MatchMode is the test this node makes, defaulted and lowercased.
+func (n Node) MatchMode() string {
+	if m := strings.ToLower(strings.TrimSpace(n.Match)); m != "" {
+		return m
+	}
+	return "equals"
 }
 
 // Edge steers: always fires from a fired source; pass/fail follow the
@@ -144,6 +169,14 @@ func Validate(s Spec) ([]string, error) {
 		}
 		if n.Kind == "eval" && strings.TrimSpace(n.Ref) == "" {
 			return nil, fmt.Errorf("refused: eval node %q names no node to check", n.Name)
+		}
+		if n.Kind == "eval" && !Matches[n.MatchMode()] {
+			return nil, fmt.Errorf("refused: eval node %q carries unknown match %q; "+
+				"the set is equals, contains", n.Name, n.Match)
+		}
+		if n.Kind != "eval" && strings.TrimSpace(n.Match) != "" {
+			return nil, fmt.Errorf("refused: node %q is a %s and has no answer to "+
+				"test, so `match` means nothing on it", n.Name, n.Kind)
 		}
 		byName[n.Name] = n
 	}

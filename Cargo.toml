@@ -3,5 +3,5 @@ resolver = "2"
 members = ["core", "store", "apps/atlas"]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"

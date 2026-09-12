@@ -230,3 +230,74 @@ func TestSiblingsOfSomethingUnreadableIsEmpty(t *testing.T) {
 		t.Errorf("expected nothing from a path that does not exist, got %v", got)
 	}
 }
+
+// THE ARCHIVE IS REFUSED AT THE WALK, 2026-09-12. The strokes above state what
+// this package DOES; these state what it will not do. The day after the badge
+// read 83,303 it read 83,302 -- same walk, same cause, a door relaunched from
+// the ground root. Naming what it carried made that visible; it did not make it
+// stop. Barred makes it stop.
+func TestSiblingsNeverCarriesTheArchive(t *testing.T) {
+	root := t.TempDir()
+	desk := mk(t, root, "desktop")
+	markAgents(t, mk(t, desk, "research"))
+	markAgents(t, mk(t, desk, "Archive"))
+	markAgents(t, mk(t, desk, "neighbour"))
+
+	got := map[string]bool{}
+	for _, f := range Siblings(desk) {
+		got[f.Name] = true
+	}
+	// it must still SEE THE TOWN -- the refusal is one house, not the street
+	if !got["research"] || !got["neighbour"] {
+		t.Fatalf("the walk stopped seeing the town: %v", got)
+	}
+	if got["archive"] {
+		t.Fatal("the walk carried the archive; RULE 1 puts it outside the estate")
+	}
+}
+
+func TestDetectStopsAtTheArchive(t *testing.T) {
+	root := t.TempDir()
+	arc := mk(t, root, "Archive")
+	markAgents(t, arc)
+	if f, ok := Detect(mk(t, arc, "notes", "2025")); ok {
+		t.Fatalf("detected %q at %q from inside the archive", f.Name, f.Home)
+	}
+	// a module declared INSIDE it is still inside it
+	inner := mk(t, arc, "module")
+	markAgents(t, inner)
+	if f, ok := Detect(inner); ok {
+		t.Fatalf("detected %q at %q; a ground inside the archive is still the archive", f.Name, f.Home)
+	}
+	// and a real ground beside it is untouched
+	keep := mk(t, root, "research")
+	markAgents(t, keep)
+	if f, ok := Detect(keep); !ok || f.Name != "research" {
+		t.Fatalf("a ground beside the archive must still detect: %+v ok=%v", f, ok)
+	}
+}
+
+func TestBarredIsCaseBlindAndWholePath(t *testing.T) {
+	barred := []string{
+		filepath.Join("C:", "Users", "x", "Desktop", "Archive"),
+		filepath.Join("home", "x", "archive"),
+		"ARCHIVE",
+		filepath.Join("a", "Archive", "inner", "deeper"),
+	}
+	for _, p := range barred {
+		if !Barred(p) {
+			t.Fatalf("Barred(%q) = false; it is refused wherever it sits", p)
+		}
+	}
+	allowed := []string{
+		"research",
+		filepath.Join("home", "x", "archived"),
+		filepath.Join("home", "x", "archive-notes"),
+		filepath.Join("home", "x", "my_archive_tool"),
+	}
+	for _, p := range allowed {
+		if Barred(p) {
+			t.Fatalf("Barred(%q) = true; only the archive itself is refused", p)
+		}
+	}
+}

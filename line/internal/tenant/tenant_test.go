@@ -269,3 +269,41 @@ func TestSetEngineRefusesAnUncarriedTenant(t *testing.T) {
 		t.Error("wired an engine for a tenant that is not carried")
 	}
 }
+
+// THE ARCHIVE IS NOT A TENANT, BY ANY ROAD (2026-09-12). The walk in `ground`
+// refuses to FIND it; this refuses to CARRY it when something hands it over
+// directly. Detection was the road it actually came in by, twice, and a rule
+// that guards only the road it was broken on is a rule with a way around it.
+func TestTheArchiveIsNeverCarried(t *testing.T) {
+	r := NewRegistry()
+	base := t.TempDir()
+
+	// by name, whatever path it is given
+	if err := r.Add("archive", filepath.Join(base, "somewhere")); err == nil {
+		t.Fatal("registry carried a tenant named archive")
+	} else if !strings.Contains(err.Error(), "RULE 1") {
+		t.Fatalf("the refusal must say why: %v", err)
+	}
+	// by path, whatever name it is given
+	if err := r.Add("notes", filepath.Join(base, "Desktop", "Archive")); err == nil {
+		t.Fatal("registry carried the archive under another name")
+	}
+	// and anything inside it
+	if err := r.Add("module", filepath.Join(base, "Archive", "module")); err == nil {
+		t.Fatal("registry carried a world inside the archive")
+	}
+	if len(r.Names()) != 0 {
+		t.Fatalf("a refused tenant must leave no trace: %v", r.Names())
+	}
+
+	// AND THE WAY THAT MUST NOT FIRE -- a real world still lands
+	if err := r.Add("research", filepath.Join(base, "Research")); err != nil {
+		t.Fatalf("a real tenant was refused: %v", err)
+	}
+	if err := r.Add("archived", filepath.Join(base, "archived")); err != nil {
+		t.Fatalf("`archived` is not `archive`: %v", err)
+	}
+	if got := r.Names(); len(got) != 2 {
+		t.Fatalf("expected the two real worlds, got %v", got)
+	}
+}

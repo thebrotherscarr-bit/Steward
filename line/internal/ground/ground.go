@@ -119,12 +119,50 @@ func hasAgentsFile(dir string) bool {
 // Detect walks up from start and returns the nearest ground. ok is false when
 // the climb reaches the filesystem root without finding one -- a caller must
 // degrade honestly rather than invent a ground.
+// Barred reports a home THE LINE will not carry, whatever names it and
+// however it was found.
+//
+// RULE 1 of the estate, and the only absolute one about a PLACE:
+// `Desktop\Archive` is OUTSIDE the ground, and the archive never leaves this
+// machine. On 2026-09-11 the sibling walk below carried it in, because it has
+// an AGENTS.md like any other world -- and the dashboard read its git state,
+// 83,303 changed files, before anyone knew it was there. The boot line was
+// made to NAME what it carries that day so the next one would be visible. It
+// was visible the next day, on the same walk, at 83,302. Being visible is not
+// the same as being refused, so this is the refusal.
+//
+// BY NAME, AND THAT IS THE POINT. A path test would bind this to one machine's
+// layout and would miss a copy, a mount or a move; `archive` is the estate's
+// word for this place wherever it sits, and a world that wants carrying does
+// not get to be called that. Checked at the walk AND at the registry, because
+// a rule with one door is a rule with a way around it.
+//
+// EVERY SEGMENT, not just the last. A `.us` module sitting INSIDE the archive
+// is still inside the archive, and Detect walking up from it would have found
+// the module before it ever reached the barred parent.
+func Barred(home string) bool {
+	p := filepath.Clean(home)
+	for {
+		if strings.EqualFold(filepath.Base(p), "archive") {
+			return true
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return false
+		}
+		p = parent
+	}
+}
+
 func Detect(start string) (Found, bool) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
 		return Found{}, false
 	}
 	for i := 0; i < maxWalk; i++ {
+		if Barred(dir) {
+			return Found{}, false
+		}
 		if id := idFromUsDir(dir); id != "" {
 			return Found{Name: id, Home: dir, Via: ".us"}, true
 		}
@@ -158,6 +196,9 @@ func Siblings(root string) []Found {
 	if err != nil {
 		return out
 	}
+	if Barred(abs) {
+		return out
+	}
 	if id := idFromUsDir(abs); id != "" {
 		out = append(out, Found{Name: id, Home: abs, Via: ".us"})
 	} else if hasAgentsFile(abs) {
@@ -176,6 +217,9 @@ func Siblings(root string) []Found {
 			continue
 		}
 		d := filepath.Join(abs, n)
+		if Barred(d) {
+			continue
+		}
 		if id := idFromUsDir(d); id != "" {
 			out = append(out, Found{Name: id, Home: d, Via: ".us"})
 			continue

@@ -1,6 +1,6 @@
 # ATLAS 6 Agent Workflows
 
-**Version:** 0.1.3
+**Version:** 0.1.4
 **Ollama Backend:** 127.0.0.1:11434
 
 ---
