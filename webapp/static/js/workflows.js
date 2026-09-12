@@ -368,14 +368,23 @@ const Workflows = {
 
   // WHAT THE FLOW ASKS OF THE HAND FIRING IT. Every {{var}} the steps render
   // that no step supplies from its own output, which is the only kind that has
-  // to come from outside. ONLY the two fields the engine actually renders --
-  // a node's question, and a prompt node's vars. A box for `expected` or a
-  // gate's title would be offering to fill something nothing substitutes.
+  // to come from outside.
+  //
+  // ONLY the fields the engine actually renders: a node's question, an eval's
+  // `expected`, and a prompt node's vars. A gate's title is still not one --
+  // gates never reach execNode, so a box for it would offer to fill something
+  // nothing substitutes.
+  //
+  // `expected` WAS ON THAT LIST, and this comment said so, until the engine
+  // started rendering it (2026-09-12) so a check could hold a node to an
+  // expectation the HAND supplies at fire time rather than one folded into the
+  // spec. The comment outlived the fact by about an hour; it is corrected in
+  // the same stroke as the scan.
   openVars(s) {
     const own = new Set((s.nodes || []).map(n => 'out_' + n.name));
     const found = new Set();
     (s.nodes || []).forEach(n => {
-      [n.question].concat(Object.values(n.vars || {})).forEach(v =>
+      [n.question, n.expected].concat(Object.values(n.vars || {})).forEach(v =>
         String(v || '').replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, k) => {
           if (!own.has(k)) found.add(k);
           return '';

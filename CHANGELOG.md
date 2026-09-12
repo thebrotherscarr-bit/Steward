@@ -12,6 +12,91 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### The check scored liveness and called it correctness
+
+**How it was found: by firing it.** The coder flow was given a real task — "turn
+a version string into a release target, and it must REFUSE any string carrying
+a plus build tag INSTEAD OF STRIPPING OR DEFAULTING IT". The coder wrote
+`version_str.split('+')[0]`: it stripped, the one behaviour the objective named
+and forbade. **The flow went green.** `check` had asked whether `run_python`
+said `RAN:`, and it had. The delivery even wrote both halves of the
+contradiction in one sentence: *"It refuses to process any string carrying a
+plus build tag, effectively ignoring it."*
+
+A flow that goes green on wrong code is worse than one that goes red. The green
+is the thing a reader trusts, and it launders wrong work to a gate.
+
+**Fixed — an eval's `expected` is rendered, so a check can hold a node to an
+expectation supplied at FIRE time.** It was a literal, so a check could only
+ever test something written when the flow was FOLDED. That is enough for
+liveness and cannot express correctness, because what a correct run prints is a
+fact about THIS request.
+
+    flow/run.go      play.Render on nd.Expected before scoring; the fail
+                     message carries the RENDERED want, because "expected
+                     contains {{expect}}" tells a reader nothing
+    scoreNode        takes `want` already rendered -- the caller owns the
+                     templating so this stays one question
+    workflows.js     openVars scans `expected` too, and the comment that said
+                     it deliberately did not is corrected in the same stroke.
+                     A gate's title is still excluded: gates never reach
+                     execNode, so a box for it would fill nothing
+
+**THE EXPECTATION COMES FROM THE HAND, NOT A MODEL.** A model that both states
+what correct output looks like and writes the code can agree with itself, and
+agreeing with itself is the disease. `play.Render` refuses a missing var, so a
+flow that templates an expectation nobody supplied fails at that node instead
+of scoring against an empty string.
+
+Strokes: `TestExpectationComesFromTheFiring` (met -> pass; **ran and WRONG ->
+fail**, which is the run above), `TestAnExpectationNobodySuppliedIsRefused`,
+`TestTheFailMessageNamesTheRenderedWant`, and
+`TestAFoldedLiteralExpectationIsUnchanged` -- because every spec written before
+this carries a plain literal and must score exactly as it did.
+
+**Measured live.** `coder` v11: the same objective that went green now fails.
+
+    verify    run_python: RAN: version_to_release_target.py   (exit 0)
+    verdict   fail: expected contains "Refused"
+              -> repair -> recheck -> land (gate)
+
+**THREE WIRING ATTEMPTS, EACH CORRECTED BY A RUN, AND THE LESSONS ARE THE
+VALUE:**
+
+    v9   check(liveness) gated verdict(correctness). Wrong: a task whose
+         correct behaviour is a NON-ZERO EXIT fails the liveness gate. A
+         correct refusal exits 1.
+    v10  check and verdict both hung off verify as recorders. Wrong, and the
+         engine says so plainly: `if !hasFailEdge(...) { return VerdictFail }`
+         -- AN EVAL IS A GATE, NEVER A PASSIVE RECORDER. Removing check's fail
+         edge made the whole run FAIL before verdict could fire.
+    v11  one eval, on the requirement. Liveness is not a second gate; it is
+         evidence, and it is already in the verdict block a reader sees.
+
+**And the expectation is only as good as the observable the objective names.**
+A run where the code was CORRECT still failed the verdict, because the
+expectation said `Refused` and the program printed `Refusing`. `contains` is
+exact and case-sensitive and did what it was told. The cure is a spec -- the
+objective naming the marker, the expectation matching it -- not fuzzy matching,
+which would reintroduce the laundering this exists to stop. The brief now also
+states that the file is run with NO arguments, after a coder wrote an
+`sys.argv`-reading script that `run_python` structurally cannot invoke.
+
+**Open, named, not fixed — two holes this found and did not close:**
+
+    the retry is unjudged   `recheck -> land always`. Only `verify` is judged,
+                            so a run that fails the verdict, repairs and
+                            rechecks reaches the gate with NO correctness
+                            judgement of the repaired work. Same shape as the
+                            original bug, one branch over. Wants a second eval
+                            after recheck.
+    verify can run nothing  a verify node came back in 5.6s with no verdict
+                            block at all -- it called no tool, so the verdict
+                            had nothing to judge and failed for want of
+                            evidence rather than for wrong work. The two are
+                            not the same and the record should not conflate
+                            them.
+
 ### 0.1.4 — THE DELIVERY PACKAGING
 
 His word, 2026-09-12: *"atlas 0.1.4 - the delivery packaging."*

@@ -378,14 +378,35 @@ func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) 
 		if !ok {
 			return "", false, "fail", fmt.Errorf("eval node checks node %q with no output yet", nd.Ref)
 		}
+		// THE EXPECTATION IS TEMPLATED TOO (2026-09-12). Until now `expected`
+		// was a literal, so a check could only ever hold a node to something
+		// written when the flow was FOLDED. That is enough for liveness -- is
+		// `RAN:` in there -- and cannot express correctness, because what a
+		// correct run prints is a fact about THIS run's request.
+		//
+		// Rendering it here lets a check score against a var the run was
+		// FIRED with, which is the whole point: the hand states what correct
+		// output looks like and the machine measures it. A model that both
+		// states the expectation and writes the code can agree with itself,
+		// and agreeing with itself is the disease.
+		//
+		// `play.Render` refuses a missing var rather than guessing, so a flow
+		// that templates an expectation nobody supplied fails HERE instead of
+		// scoring against an empty string -- which `scoreNode` refuses anyway.
+		want, rerr := play.Render(nd.Expected, vars)
+		if rerr != nil {
+			return "", false, "fail", rerr
+		}
 		// `equals` stays play.Score, which is also what scores prompt-eval
 		// datasets -- loosening it there would have rescored saved runs.
 		// `contains` is asked for explicitly, per node, and is the test the
 		// builder's own label has always described.
-		if scoreNode(nd, got) {
+		if scoreNode(nd, want, got) {
 			return "pass", true, "ok", nil
 		}
-		return "fail: expected " + nd.MatchMode() + " " + quoted(nd.Expected), false, "ok", nil
+		// The RENDERED want, not the template: "expected contains {{expect}}"
+		// tells a reader nothing about why the run was refused.
+		return "fail: expected " + nd.MatchMode() + " " + quoted(want), false, "ok", nil
 	}
 	return "", false, "fail", fmt.Errorf("refused: unknown kind %q", nd.Kind)
 }
@@ -411,8 +432,11 @@ func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) 
 // `FAILED`, `PASS` -- and in machine output the case IS the marker. Anything
 // looser reports a pass on a failure, which is the one lie a gate must not
 // tell.
-func scoreNode(nd Node, got string) bool {
-	want := strings.TrimSpace(nd.Expected)
+// `want` is passed in ALREADY RENDERED. The caller owns the templating so
+// that this stays one question -- does this answer satisfy this expectation --
+// and cannot silently score a template against prose.
+func scoreNode(nd Node, want, got string) bool {
+	want = strings.TrimSpace(want)
 	if want == "" {
 		return false
 	}

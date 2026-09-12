@@ -304,13 +304,13 @@ func TestEvalMatchModes(t *testing.T) {
 	answer := "RAN: fizz_buzz.py\n--- stdout ---\n1\n2\nFizz"
 
 	// contains: the test the label always described
-	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, answer) {
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, "RAN", answer) {
 		t.Fatal("contains did not find RAN in an answer that carries it")
 	}
-	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "CONTAINS"}, answer) {
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "CONTAINS"}, "RAN", answer) {
 		t.Fatal("the MODE is case-blind even though the needle is not")
 	}
-	if scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, answer) {
+	if scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, "FAILED", answer) {
 		t.Fatal("contains passed on a string the answer does not carry")
 	}
 
@@ -324,31 +324,31 @@ func TestEvalMatchModes(t *testing.T) {
 SyntaxError: invalid syntax
 
 The tools that actually ran this turn were write_file, run_python.`
-	if scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, failed) {
+	if scoreNode(Node{Kind: "eval", Expected: "RAN", Match: "contains"}, "RAN", failed) {
 		t.Fatal("a FAILED run scored as a pass; a gate must not tell that lie")
 	}
-	if !scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, failed) {
+	if !scoreNode(Node{Kind: "eval", Expected: "FAILED", Match: "contains"}, "FAILED", failed) {
 		t.Fatal("contains could not find the verdict that is actually there")
 	}
 	// and the verdict token run_python really emits, on a real success
-	if !scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, answer) {
+	if !scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, "RAN:", answer) {
 		t.Fatal("contains missed the RAN: verdict line run_python emits")
 	}
-	if scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, failed) {
+	if scoreNode(Node{Kind: "eval", Expected: "RAN:", Match: "contains"}, "RAN:", failed) {
 		t.Fatal("RAN: matched a run that failed")
 	}
 
 	// equals: UNCHANGED, which is the whole reason the mode exists
-	if scoreNode(Node{Kind: "eval", Expected: "RAN"}, answer) {
+	if scoreNode(Node{Kind: "eval", Expected: "RAN"}, "RAN", answer) {
 		t.Fatal("an unmarked eval stopped being exact match; saved specs moved")
 	}
-	if !scoreNode(Node{Kind: "eval", Expected: " ran "}, "RAN") {
+	if !scoreNode(Node{Kind: "eval"}, " ran ", "RAN") {
 		t.Fatal("equals must still trim and casefold, as play.Score does")
 	}
 
 	// AN EMPTY EXPECTED NEVER PASSES -- every string contains ""
 	for _, m := range []string{"", "equals", "contains"} {
-		if scoreNode(Node{Kind: "eval", Expected: "  ", Match: m}, answer) {
+		if scoreNode(Node{Kind: "eval", Expected: "  ", Match: m}, "  ", answer) {
 			t.Fatalf("match %q passed on a blank expected; that is a green light nobody set", m)
 		}
 	}
