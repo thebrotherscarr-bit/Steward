@@ -117,6 +117,17 @@ func Score(expected, got string) bool {
 	return strings.EqualFold(strings.TrimSpace(expected), strings.TrimSpace(got))
 }
 
+// ToolVerdictHead marks the machine's own lines inside a turn's answer -- the
+// verdict each tool returned, carried out whole beside what the seats said
+// about it.
+//
+// IT LIVES HERE BECAUSE TWO PACKAGES NEED THE SAME WORD. `tools` writes the
+// block (councilEngine.Turn) and `flow` reads it: an eval judging a `run` node
+// asks whether there is any evidence to judge before it judges. `tools`
+// imports `flow`, so the constant cannot live in either of them; this package
+// imports nothing of ours and is where their shared vocabulary belongs.
+const ToolVerdictHead = "--- WHAT THE TOOLS SAID ---"
+
 // Save folds a new version: the old latest is kept as <name>.v<k>.md.
 func Save(home, name, body, description string) (Prompt, error) {
 	if !NameRe.MatchString(name) {

@@ -1703,7 +1703,11 @@ func flowInputs(args map[string]any) (map[string]string, error) {
 // toolVerdictHead marks the machine's own lines inside a turn's answer. It is
 // also how the append knows it has already happened: the core may one day
 // recompose these itself, and the news reaches the gate exactly once.
-const toolVerdictHead = "--- WHAT THE TOOLS SAID ---"
+//
+// THE WORD ITSELF LIVES IN `play` (2026-09-12), because `flow` reads it too --
+// an eval judging a `run` node checks for evidence before it judges, and a
+// second copy of this string is a rule with two spellings.
+const toolVerdictHead = play.ToolVerdictHead
 
 // appendVerdicts puts the machine's own lines under the seats' prose.
 //
@@ -1716,8 +1720,12 @@ const toolVerdictHead = "--- WHAT THE TOOLS SAID ---"
 // asserting there was something to say.
 func appendVerdicts(out string, raw any) string {
 	vs, ok := raw.([]any)
-	if !ok || len(vs) == 0 || strings.Contains(out, toolVerdictHead) {
-		return out
+	if !ok || len(vs) == 0 {
+		// NO BLOCK AND NO FAKE ONE. A turn with no verdicts must not leave a
+		// seat's own marker standing: an eval reads evidence from after that
+		// marker, so a suppressed block is indistinguishable from an invented
+		// one. Strip it and say nothing.
+		return stripVerdictHead(out)
 	}
 	lines := make([]string, 0, len(vs))
 	for _, v := range vs {
@@ -1726,9 +1734,34 @@ func appendVerdicts(out string, raw any) string {
 		}
 	}
 	if len(lines) == 0 {
+		return stripVerdictHead(out)
+	}
+	// STRIP FIRST, THEN APPEND. This used to SKIP when the marker was already
+	// present, on the reasoning that the news must reach the gate exactly
+	// once. It does -- but a SEAT can write that string, and a seat that did
+	// would have suppressed the machine's block and left its own text sitting
+	// where an eval reads evidence from (2026-09-12). Exactly one block, and
+	// it is always this one.
+	return stripVerdictHead(out) + "\n\n" + toolVerdictHead + "\n" +
+		strings.Join(lines, "\n")
+}
+
+// stripVerdictHead removes every line that IS the marker, so the only marker
+// in an answer is the one this file writes. The seat's surrounding words are
+// left alone: they are testimony, they are allowed to be wrong, and they are
+// no longer scored by anything.
+func stripVerdictHead(out string) string {
+	if !strings.Contains(out, toolVerdictHead) {
 		return out
 	}
-	return out + "\n\n" + toolVerdictHead + "\n" + strings.Join(lines, "\n")
+	keep := make([]string, 0, 16)
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.TrimSpace(ln) == toolVerdictHead {
+			continue
+		}
+		keep = append(keep, ln)
+	}
+	return strings.TrimRight(strings.Join(keep, "\n"), "\n")
 }
 
 // councilEngine is flow's Engine with a real Turn: a `run` node puts its

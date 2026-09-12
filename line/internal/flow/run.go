@@ -226,7 +226,7 @@ func runFrom(home string, eng Engine, s Spec, order []string, inputs map[string]
 			return r, nil
 		}
 		start := time.Now()
-		outcome, pok, status, rerr := execNode(ctx, eng, nd, vars)
+		outcome, pok, status, rerr := execNode(ctx, eng, nd, vars, byName)
 		ms := time.Since(start).Milliseconds()
 		elapsed = append(elapsed, ms)
 		total += ms
@@ -309,7 +309,8 @@ func hasFailEdge(edges []Edge, from string) bool {
 
 // execNode runs one node: templates rendered, measurement taken, evals
 // scored. Gate nodes never reach here (they pause in the loop).
-func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) (string, bool, string, error) {
+func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string,
+	byName map[string]Node) (string, bool, string, error) {
 	switch nd.Kind {
 	case "run":
 		obj, err := play.Render(nd.Question, vars)
@@ -397,6 +398,47 @@ func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) 
 		if rerr != nil {
 			return "", false, "fail", rerr
 		}
+		// NO EVIDENCE IS NOT A VERDICT (2026-09-12). A `run` node puts its
+		// objective through the council, and the council may come back having
+		// called NO TOOL AT ALL -- one did, in 5.6 seconds, with no verdict
+		// block and nothing but prose. Judging that answer is judging a seat's
+		// account of work nobody watched happen.
+		//
+		// IT CANNOT PASS, and that is the point rather than a nicety. The
+		// marker a check hunts is a string, and a seat can WRITE the string
+		// without anything having run -- the same laundering that made a
+		// pasted `RAN:` pass earlier today. Requiring the block means the
+		// evidence was machine-emitted from the tool results, not typed.
+		//
+		// ONLY FOR `run` NODES. An `ask`, `prompt` or `memory` node holds no
+		// tools by definition, so demanding tool evidence there would refuse
+		// every honest eval over a voice -- `branchSpec`'s does exactly that
+		// and must keep working.
+		if byName[nd.Ref].Kind == "run" {
+			ev, ok := evidenceOf(got)
+			if !ok {
+				return "fail: NO EVIDENCE -- `" + nd.Ref + "` is a run node that " +
+					"called no tool, so nothing in its answer shows what the work " +
+					"did. Nothing was judged; expected " + nd.MatchMode() + " " +
+					quoted(want), false, "ok", nil
+			}
+			// AND THE PROSE IS NOT SCORED AT ALL (2026-09-12). Requiring the
+			// block proved that something RAN; it did not prove the marker came
+			// from what ran. Twice in one day it did not:
+			//
+			//   an objective naming `FIB6: 8` put that string in the brief, the
+			//   brief put it in this node's objective, and the seat quoted it;
+			//
+			//   and the seat reported the failure ACCURATELY -- "printed
+			//   FIB6: 0, which is not the expected output of FIB6: 8" -- so a
+			//   substring check found the marker inside the clause saying it
+			//   did NOT match.
+			//
+			// Prose quotes requirements and prose negates them. So the answer
+			// stays what a person reads at the gate, and the check reads only
+			// the machine's lines.
+			got = ev
+		}
 		// `equals` stays play.Score, which is also what scores prompt-eval
 		// datasets -- loosening it there would have rescored saved runs.
 		// `contains` is asked for explicitly, per node, and is the test the
@@ -432,6 +474,20 @@ func execNode(ctx context.Context, eng Engine, nd Node, vars map[string]string) 
 // `FAILED`, `PASS` -- and in machine output the case IS the marker. Anything
 // looser reports a pass on a failure, which is the one lie a gate must not
 // tell.
+// evidenceOf returns the machine's own lines from a `run` node's answer -- the
+// text after the verdict marker -- and whether there were any.
+//
+// THE LAST MARKER WINS. `appendVerdicts` strips seat-written markers before
+// writing its own, so there should only ever be one; taking the last is the
+// belt to that braces, and it costs nothing.
+func evidenceOf(answer string) (string, bool) {
+	i := strings.LastIndex(answer, play.ToolVerdictHead)
+	if i < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(answer[i+len(play.ToolVerdictHead):]), true
+}
+
 // `want` is passed in ALREADY RENDERED. The caller owns the templating so
 // that this stays one question -- does this answer satisfy this expectation --
 // and cannot silently score a template against prose.

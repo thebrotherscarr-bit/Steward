@@ -399,7 +399,13 @@ const Workflows = {
     return `<div class="wf-head mt-16">What it needs from you</div>
       <div class="muted mb-16">The steps below use these and no step supplies
         them. A missing one is refused rather than guessed, so the run stops
-        before it spends anything.</div>
+        before it spends anything.<br>
+        <strong>If a check scores against one of these, give it a string the
+        answer will literally carry</strong> — the test is exact and
+        case-sensitive, so <code>Refused</code> does not find
+        <code>Refusing</code>. Name the marker in the objective and repeat it
+        here; that is the whole discipline, and a looser test would go green
+        on work that only sounded right.</div>
       ${vars.map(v => `<div class="form-group">
         <div class="form-label">${esc(v)}</div>
         <input class="input" data-var="${esc(v)}" placeholder="what ${esc(v)} is, for this run">

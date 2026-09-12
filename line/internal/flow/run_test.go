@@ -36,6 +36,12 @@ func (s *stubEngine) SeatAsk(seat, question, _, _ string) (play.Run, error) {
 
 func (s *stubEngine) Turn(_ context.Context, objective, feed, method string) (string, error) {
 	s.calls = append(s.calls, "run:"+objective)
+	// A canned answer lets a stroke hand back a turn WITH a verdict block, so
+	// the evidence rule can be struck both ways. With none, the old string is
+	// returned unchanged and every existing stroke reads as it did.
+	if a, ok := s.answers[objective]; ok {
+		return a, nil
+	}
 	return "stub-run:" + objective, nil
 }
 

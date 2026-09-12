@@ -12,6 +12,123 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### An eval scores evidence, and prose is not scored at all
+
+**The run that forced it.** With the correctness check in, the coder was asked
+for a script printing `FIB6: 8`. It wrote a fibonacci that never sets
+`fib_sequence[1]`, so it printed `FIB6: 0`. **The verdict passed.** The seat
+had reported the failure perfectly — *"printed `FIB6: 0`, which is not the
+expected output of `FIB6: 8`"* — and a `contains "FIB6: 8"` found the marker
+inside the clause saying it did not match.
+
+Requiring the verdict block (landed an hour earlier) did not stop it: the block
+was present, because `run_python` really had run. **Evidence that something ran
+is not evidence that the marker came from what ran.** And the second road is
+worse — naming the marker in the objective puts it in the brief, the brief puts
+it in the node's objective, and the seat quotes it. The guidance to name the
+marker was manufacturing the false pass.
+
+**Fixed — for a `run` node, the check reads only the machine's lines.**
+
+    evidenceOf()     the text after the verdict marker, and whether there is
+                     any. The LAST marker wins -- belt to the braces below.
+    flow/run.go      an eval judging a `run` node scores that and nothing
+                     else. The answer stays whole as what a person reads at
+                     the gate; it is simply no longer scoreable.
+
+**And the marker itself is now unforgeable.** `appendVerdicts` used to SKIP
+when a marker was already present — "the news reaches the gate exactly once".
+It does, but a SEAT can write that string, and a seat that did would have
+suppressed the machine's block and left its own words sitting exactly where an
+eval now reads evidence from. It is strip-then-append: every seat-written
+marker line is removed, then the real block is written. A turn with no verdicts
+leaves no marker at all, because a suppressed block is indistinguishable from
+an invented one.
+
+`TestAppendVerdicts`' once-only assertion was REWRITTEN the same day it was
+written: it held the IMPLEMENTATION (byte-identical on a second call) where the
+property is what matters (exactly one marker, the real lines under it). The
+guard is the same guard.
+
+Strokes: `TestTheVerdictScoresEvidenceAndNotProse` carries the real answer —
+requirement quoted, failure honestly reported, evidence saying `FIB6: 0` — and
+must fail, with the right-output twin passing so the rule did not become a
+refusal of everything. `TestAnObjectiveCannotSatisfyItself` holds the other
+road. `TestARunNodeThatCalledNoToolCannotBeJudged` and
+`TestAVoiceIsJudgedWithoutToolEvidence` still stand: an `ask`, `prompt` or
+`memory` node holds no tools by definition and is judged on its answer, which
+is the only thing it has.
+
+Measured live, re-firing the exact case that had passed:
+
+    prose     contains "FIB6: 8"   True
+    evidence  contains "FIB6: 8"   False
+    evidence  run_python: RAN: fibonacci.py / --- stdout --- / FIB6: 5
+    verdict   fail -> repair -> recheck -> land (gate)
+
+**Still open, and it is the last of them:** `recheck -> land` is UNJUDGED. Only
+`verify` is scored, so a run that fails the verdict, repairs and rechecks
+reaches the gate with no judgement of the repaired work.
+
+### No evidence is not a verdict
+
+**How it was found: by the run immediately after the correctness check
+landed.** A `verify` node came back in **5.6 seconds** with no verdict block at
+all — it had called no tool — and the eval failed it. Taking the fail edge was
+right. Recording it as `fail: expected contains "X"` was not: failing because
+the work was WRONG and failing because NOBODY WATCHED THE WORK are different
+facts, and a reader at the gate could not tell them apart.
+
+**And the pass side was the real hole.** The marker a check hunts is a string,
+and a seat can WRITE the string without anything having run. That is the same
+laundering that made a pasted `RAN:` pass earlier the same day, arriving by a
+new road: not a marker that travelled between nodes, but one a seat simply
+asserted. A check that accepts it is scoring testimony again (LAW 5).
+
+**Fixed — an eval judging a `run` node requires the machine's own block before
+it judges at all.**
+
+    play.ToolVerdictHead   the marker moved to `play`, which imports nothing
+                           of ours. `tools` WRITES the block and `flow` now
+                           READS it; `tools` imports `flow`, so it could live
+                           in neither, and two copies of the string would be
+                           one rule with two spellings.
+    flow/run.go            execNode takes the spec's nodes, so an eval can ask
+                           what KIND the node it judges is. A `run` node whose
+                           answer carries no block returns
+                           `fail: NO EVIDENCE -- <node> is a run node that
+                           called no tool`, and says nothing was judged.
+
+**IT CANNOT PASS, and that is the point rather than a nicety.** Requiring the
+block means the evidence was machine-emitted from the tool results, not typed
+by the seat being judged.
+
+**ONLY FOR `run` NODES.** An `ask`, `prompt` or `memory` node holds no tools by
+definition, so demanding tool evidence there would refuse every honest eval
+over a voice — `branchSpec`'s does exactly that, and a stroke holds it.
+
+Strokes: `TestARunNodeThatCalledNoToolCannotBeJudged` — the 5.6-second turn,
+whose prose literally contains `RAN:` and must still fail, with the record
+naming why; `TestEvidenceLetsTheJudgementStand` — the same answer WITH the
+block passes, and a witnessed failure still fails, so the rule did not become
+a rubber stamp; `TestAVoiceIsJudgedWithoutToolEvidence` — the ask-node eval is
+untouched. The stub engine gained a canned `Turn` answer so the rule could be
+struck both ways; with none it returns the old string and every existing
+stroke reads as it did.
+
+**Also — the builder now states the discipline it had left implicit.** The
+expectation box said only "what expect is, for this run", and a run whose code
+was CORRECT failed because the hand wrote `Refused` where the program printed
+`Refusing`. The block now says the test is exact and case-sensitive, and that
+the marker belongs in the objective and repeated in the box. A looser test
+would go green on work that only sounded right, which is the thing all of this
+exists to refuse.
+
+**Still open from the same run:** `recheck -> land` remains UNJUDGED. Only
+`verify` is scored, so a run that fails the verdict, repairs and rechecks
+reaches the gate with no judgement of the repaired work. That is the last of
+the three holes firing this flow found, and it is not closed here.
+
 ### The check scored liveness and called it correctness
 
 **How it was found: by firing it.** The coder flow was given a real task — "turn
