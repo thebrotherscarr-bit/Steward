@@ -12,6 +12,81 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
+### 0.1.5
+
+Named by its work, not by a word — the name is the operator's to give. What is
+under this heading is the coder flow's correctness arc (the templated
+expectation, the evidence rule, prose no longer scored, the repair path judged)
+and the release path that could not run.
+
+### The release path could not run, and had not been able to for two days
+
+**Three faults, stacked, each hiding the one under it.**
+
+**1. It would not PARSE.** `release.ps1` is UTF-8 with NO BOM and carried seven
+em-dashes. PowerShell 5.1 reads a BOM-less file as ANSI, so each dash became
+three bytes of nonsense and broke the string on the `<ver>` help line — *"The
+'<' operator is reserved for future use."* Proven by parsing HEAD's own bytes:
+re-encoded with a BOM it parses clean; as it actually sits on disk it does not.
+`prove.ps1`, which step 1 of 4 calls, had the same single dash and the same
+fault. **Neither local script has ever run on this machine.** Both are pure
+ASCII now, so no BOM has to survive a future edit.
+
+**2. Under that, the moniker.** `version.ps1` was cured of the stone tag on
+2026-09-10 — *"remove the moniker for the stones, no letters in my versions"* —
+and **its only caller was not**. `release.ps1` computed `0.1.5+f1` and handed
+it to `version.ps1 set`, which now REFUSES a tag. So it did not merely cut a
+bad tag: it would have died at step 2 of 4, *after* running the whole prove
+suite. One half of a fix landed and the other half was left holding the bug.
+
+**3. And it lied on the way out.** Its closing line said *"GitHub Actions will
+build binaries and create the release."* Nothing does — `.github/workflows/`
+holds one file, `prove.yml`, and it runs on push/PR, not on tags. It now says
+so plainly. A script that tells the operator work is happening elsewhere, when
+it is not, is worse than one that says nothing: he stops looking.
+`--dry-run` was never a thing either; PowerShell takes `-DryRun`.
+
+**Fixed — and `version.ps1` now moves every pin, not six of ten.** Its list
+held six VERSION files. The two it was missing were exactly the two that
+printed a hardcoded literal until this morning (`atlas-vc` had no VERSION file
+at all; the webapp said `0.1.3` by hand in `/health` and in the Prometheus
+gauge). Cargo.toml and `core/src/version.rs`'s assertion were a WARNING telling
+the reader to run a stroke **that does not exist** — there is no `version-cross`
+leg in `tests/prove.py`. They are moved now, not mentioned: a bump that left
+them behind would ship a Cargo.toml disagreeing with every binary, and
+`release.ps1` would commit and tag it.
+
+`sync` checks all ten and says so: `All 10 pins in sync: 0.1.5`.
+
+**A REGRESSION I CAUSED AND REVERTED, recorded because it is the lesson.** The
+pin rewrite used `Get-Content`/`Set-Content` and CORRUPTED
+`core/src/version.rs` on its first run: PowerShell 5.1's `Get-Content` read the
+BOM-less file as ANSI, so every multi-byte sequence became separate Latin-1
+characters — `§` to `Â§`, `—` to `â€"` — and `Set-Content -Encoding utf8` then
+re-encoded that mojibake *and* added a BOM. Reverted from HEAD and rewritten
+with `[IO.File]::ReadAllText` plus `UTF8Encoding($false)`. The diff is now two
+version lines and nothing else, no BOM, `§` and `—` intact. **A version bump
+must move a version and touch nothing else** — and the fault was the same
+encoding trap as fault 1, one layer down.
+
+**Measured.**
+
+    release.ps1 0.1.5 -DryRun   Target 0.1.5   Tag v0.1.5
+    release.ps1 patch  -DryRun  Target 0.1.5   Tag v0.1.5
+    release.ps1 0.1.5+f1        Refused: carries a build tag.  exit 1
+    all three .ps1              parse clean on PowerShell 5.1
+    five binaries + the glass   answer 0.1.5, asked one by one
+
+**And DELIVERABLE.md was a 0.1.2 / 2026-09-08 snapshot end to end** — header,
+Version field, and a binaries table claiming 0.1.2 for six binaries while
+omitting `atlas-vc` entirely. Its own usage block still taught
+`.\release.ps1 0.1.2+f2`, the banned moniker, in the delivery instructions. The
+inventory called `.github/workflows/` "2 workflows: 6 parallel pipelines" and
+`line/` "92 tests" (it is 229 fns over 19 pkgs). Every version claim is
+measured now; the 112/112 results and the git-history block are LABELLED as
+0.1.2-era fossils rather than swept, because they are the record of what that
+release proved.
+
 ### The repair path is judged too, and the verdict now means something
 
 `recheck -> land always`. A run that failed its requirement, repaired and

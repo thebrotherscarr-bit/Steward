@@ -1,6 +1,6 @@
 # ATLAS Ollama Prover
 
-**Version:** 0.1.4
+**Version:** 0.1.5
 **Ollama Backend:** 127.0.0.1:11434
 
 ---
@@ -97,7 +97,7 @@ python tests/e2e/ollama_prover.py --dry-run
 
 ```
 === ATLAS OLLAMA PROVER ===
-Version: 0.1.4
+Version: 0.1.5
 Ollama: 127.0.0.1:11434
 
 [S1] Binary Smoke .................. 5/5 PASS
@@ -138,7 +138,7 @@ Results written to `tests/e2e/ollama_prover_results.json`:
 
 ```json
 {
-  "version": "0.1.4",
+  "version": "0.1.5",
   "ollama": "127.0.0.1:11434",
   "timestamp": "2026-09-08T...",
   "scenarios": {

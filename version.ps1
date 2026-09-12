@@ -29,13 +29,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# EIGHT, NOT SIX (2026-09-12). This list held six, and the two it was missing
+# were the two that printed a HARDCODED literal instead of reading a file:
+# atlas-vc had no VERSION beside it at all, and webapp said "0.1.3" by hand in
+# /health and in the Prometheus gauge. Both were given one and both now read
+# it -- so both belong here, or the next bump leaves them behind exactly the
+# way the last one nearly did.
 $VERSION_FILES = @(
     "VERSION",
     "line/VERSION",
     "line/cmd/atlas-mcp/VERSION",
     "line/cmd/atlas-tui/VERSION",
     "line/cmd/atlas-town/VERSION",
-    "line/cmd/atlas-door/VERSION"
+    "line/cmd/atlas-door/VERSION",
+    "line/cmd/atlas-vc/VERSION",
+    "webapp/handlers/VERSION"
+)
+
+# THE PINS THAT ARE NOT VERSION FILES. `core/src/version.rs` READS the root
+# VERSION (include_str!), so its code needs nothing -- but the test beside it
+# asserts the expected value, and that assertion is a pin like any other.
+# Cargo.toml declares the workspace version and has exactly one `version =`.
+#
+# These used to be a WARNING telling the reader to run a stroke that does not
+# exist ("the spine's version-cross stroke names every file still out of
+# step" -- there is no such leg in tests/prove.py). A bump that leaves them
+# behind ships a Cargo.toml disagreeing with every binary, and `release.ps1`
+# would commit and tag it. So they are moved, not mentioned.
+$PIN_PATTERNS = @(
+    @{ Path = "Cargo.toml";          Pattern = '(?m)^version = "[^"]*"';      Format = 'version = "{0}"' },
+    @{ Path = "core/src/version.rs"; Pattern = 'assert_eq!\(v, "[^"]*"\)';    Format = 'assert_eq!(v, "{0}")' }
 )
 
 function Get-CurrentVersion {
@@ -67,14 +90,40 @@ function Set-Version($newVersion) {
     foreach ($f in $VERSION_FILES) {
         Set-Content -Path $f -Value $newVersion -NoNewline
     }
+    # .NET FILE APIS, NOT Get-Content/Set-Content, AND THAT IS LOAD-BEARING.
+    # The first draft of this used them and CORRUPTED core/src/version.rs on
+    # its first run (2026-09-12): PowerShell 5.1's Get-Content reads a
+    # BOM-less file as ANSI, so every multi-byte UTF-8 sequence became
+    # separate Latin-1 characters (a section sign became two, an em-dash
+    # became three) -- and
+    # `Set-Content -Encoding utf8` then re-encoded that mojibake AND added a
+    # BOM. A version bump must move a version and touch nothing else.
+    #
+    # ReadAllText detects UTF-8 properly; UTF8Encoding($false) writes without
+    # a BOM. The file's own line terminators survive because only the matched
+    # substring is replaced.
+    $noBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($pin in $PIN_PATTERNS) {
+        $full = (Resolve-Path $pin.Path).Path
+        $body = [IO.File]::ReadAllText($full, [Text.Encoding]::UTF8)
+        $want = [string]::Format($pin.Format, $newVersion)
+        if ($body -notmatch $pin.Pattern) {
+            Write-Host "FAIL: no pin matching $($pin.Pattern) in $($pin.Path)" -ForegroundColor Red
+            exit 1
+        }
+        $body = [regex]::Replace($body, $pin.Pattern, $want)
+        [IO.File]::WriteAllText($full, $body, $noBom)
+    }
     Write-Host "Version updated to $newVersion" -ForegroundColor Green
     Write-Host "Files updated:" -ForegroundColor Cyan
     $VERSION_FILES | ForEach-Object { Write-Host "  $_" }
+    $PIN_PATTERNS | ForEach-Object { Write-Host "  $($_.Path)" }
     Write-Host ""
-    Write-Host "These are NOT the only pins. Cargo.toml, core/src/version.rs," -ForegroundColor Yellow
-    Write-Host "the two Go mains, both webapp handlers and two test harnesses" -ForegroundColor Yellow
-    Write-Host "carry the string too. Run 'python tests/prove.py' -- the spine's" -ForegroundColor Yellow
-    Write-Host "version-cross stroke names every file still out of step." -ForegroundColor Yellow
+    Write-Host "DOCS ARE STILL YOURS. ACCEPTANCE, PIPELINES, OLLAMA_PROVER," -ForegroundColor Yellow
+    Write-Host "WORKFLOWS, E2E_SCENARIOS and AGENTS each ASSERT what a binary" -ForegroundColor Yellow
+    Write-Host "prints; they are claims, not pins, and a sweep that moved them" -ForegroundColor Yellow
+    Write-Host "would rewrite the CHANGELOG's history with them. Run" -ForegroundColor Yellow
+    Write-Host "'.\version.ps1 sync' to prove the pins, then read the docs." -ForegroundColor Yellow
 }
 
 function Sync-Check {
@@ -87,12 +136,23 @@ function Sync-Check {
             $allMatch = $false
         }
     }
+    # THE PINS ARE CHECKED TOO, or `sync` says "in sync" over a Cargo.toml
+    # that disagrees with every binary -- which is exactly what it did.
+    foreach ($pin in $PIN_PATTERNS) {
+        $body = Get-Content -Path $pin.Path -Raw
+        $want = [string]::Format($pin.Format, $root)
+        if ($body -notmatch [regex]::Escape($want)) {
+            Write-Host "MISMATCH: $($pin.Path) does not carry '$want'" -ForegroundColor Red
+            $allMatch = $false
+        }
+    }
     if ($root -match '\+') {
         Write-Host "MISMATCH: VERSION is '$root' -- build tags were struck 2026-09-10." -ForegroundColor Red
         $allMatch = $false
     }
     if ($allMatch) {
-        Write-Host "All VERSION files in sync: $root" -ForegroundColor Green
+        $n = $VERSION_FILES.Count + $PIN_PATTERNS.Count
+        Write-Host "All $n pins in sync: $root" -ForegroundColor Green
     } else {
         exit 1
     }

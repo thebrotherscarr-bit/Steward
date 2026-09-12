@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# prove.ps1 — Full ATLAS prove suite
+# prove.ps1 -- Full ATLAS prove suite
 # Usage: .\prove.ps1
 # Exit 0 = all green. Any non-zero = something failed.
 

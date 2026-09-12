@@ -1,7 +1,7 @@
-# ATLAS 0.1.2 — Deliverable
+# ATLAS 0.1.5 — Deliverable
 
-**Date:** 2026-09-08
-**Version:** 0.1.2
+**Date:** 2026-09-12
+**Version:** 0.1.5
 **Covenant:** 1512741580b7239b
 **License:** MIT
 
@@ -9,7 +9,7 @@
 
 ## Proven
 
-Measured on the ground 2026-09-12, at 0.1.4. Every number here was counted
+Measured on the ground 2026-09-12, at 0.1.5. Every number here was counted
 from the disk on that date; where a suite could not be RUN in this ground, it
 says so rather than carrying a PASS it did not earn.
 
@@ -37,12 +37,18 @@ The glass has not had that pass yet.
 
 | Binary | Language | Version | Status |
 |---|---|---|---|
-| `atlas` | Rust | 0.1.2 | PASS |
-| `atlas-mcp` | Go | 0.1.2 | PASS |
-| `atlas-tui` | Go | 0.1.2 | PASS |
-| `atlas-town` | Go | 0.1.2 | PASS |
-| `atlas-door` | Go | 0.1.2 | PASS |
-| `atlas-webapp` | Go | 0.1.2 | PASS |
+Every one of these was ASKED on 2026-09-12 and answered; `atlas-vc` is the
+fifth command and was missing from this table entirely.
+
+| Binary | Language | Version | Status |
+|---|---|---|---|
+| `atlas` | Rust | 0.1.5 | not built in this ground |
+| `atlas-mcp` | Go | 0.1.5 | answers |
+| `atlas-tui` | Go | `atlas-tui 0.1.5` | answers |
+| `atlas-town` | Go | 0.1.5 | answers |
+| `atlas-door` | Go | 0.1.5 | answers |
+| `atlas-vc` | Go | 0.1.5 | answers |
+| `atlas-webapp` | Go | 0.1.5 | answers (`/api/health`) |
 
 ## MCP Tool Surface (78 tools)
 
@@ -157,7 +163,12 @@ The glass has not had that pass yet.
 | qwen3-vl:8b | 6.1GB | vision, completion, tools, thinking | Voice tier |
 | nomic-embed-text-v2-moe | 958MB | embedding | Embedder |
 
-### Test Results (verified 2026-09-08)
+### Test Results — A SNAPSHOT OF 0.1.2, VERIFIED 2026-09-08
+
+Kept as the record of what that release proved. It is NOT a claim about
+this build: the six pipelines below describe a design CI never ran, and
+the counts predate three versions. What is true now is the **Proven**
+table at the top of this file, measured on 2026-09-12.
 
 | Suite | Status |
 |---|---|
@@ -210,19 +221,19 @@ not a feature — named here so it is a decision rather than a surprise.
 
 ```
 atlas/
-├── .github/workflows/     CI/CD (2 workflows: 6 parallel pipelines)
+├── .github/workflows/     prove.yml -- ONE workflow, not two
 ├── agents/                40 .us declarations + docs/
 ├── apps/atlas/            Rust CLI
 ├── core/                  Rust crate (42 tests)
 ├── data/                  master.db
 ├── docs/                  58+ documents
-│   ├── PIPELINES.md       6 CI/CD pipeline specs
+│   ├── PIPELINES.md       6 pipeline SPECS (a design; CI runs prove.yml)
 │   ├── WORKFLOWS.md       6 agent workflow specs
 │   ├── OLLAMA_PROVER.md   Ollama integration prover
 │   └── ACCEPTANCE.md      Pass/fail criteria
 ├── faces/                 Console + bridge
 ├── kernels/               C++ (prove, digest, foldall, bench)
-├── line/                  Go workspace (92 tests)
+├── line/                  Go workspace (229 test fns over 19 pkgs)
 │   ├── cmd/atlas-mcp/     MCP server (78 tools)
 │   ├── cmd/atlas-tui/     Terminal UI
 │   ├── cmd/atlas-town/    Town square
@@ -250,13 +261,16 @@ atlas/
 ├── LICENSE
 ├── README.md
 ├── SECURITY.md
-├── VERSION                0.1.2
+├── VERSION                0.1.5
 ├── prove.ps1              Local prove suite
 ├── version.ps1            Version management
 └── release.ps1            Release automation
 ```
 
-## Git History
+## Git History — AS OF 0.1.2
+
+Three commits from the 0.1.0/0.1.1 era. `CHANGELOG.md` is the live
+history; this block is a fossil and is left as one.
 
 ```
 e20da09 ci/cd: consolidated workflows, version management, local + remote pipelines
@@ -277,7 +291,8 @@ e20da09 ci/cd: consolidated workflows, version management, local + remote pipeli
 .\version.ps1 bump patch
 
 # Release (prove → bump → commit → tag → push)
-.\release.ps1 0.1.2+f2
+# PLAIN SEMVER ONLY -- a build tag is REFUSED (struck 2026-09-10).
+.\release.ps1 0.1.6
 
 # Run webapp
 cd webapp; go run .
