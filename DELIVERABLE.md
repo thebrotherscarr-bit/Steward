@@ -9,15 +9,29 @@
 
 ## Proven
 
+Measured on the ground 2026-09-12, at 0.1.4. Every number here was counted
+from the disk on that date; where a suite could not be RUN in this ground, it
+says so rather than carrying a PASS it did not earn.
+
 | Suite | Count | Status |
 |---|---|---|
-| Rust tests | 85 | PASS |
-| Go tests | 92 | PASS |
-| Python verifiers | 4 | PASS |
-| MCP prove | 58 strokes | PASS |
-| Agent enrollment | 40/40 | PASS |
+| Rust tests (`#[test]` under core/ store/ apps/) | 85 | not run here — the spine is not built in this ground |
+| Go tests, `line` | 229 fns / 19 pkgs | PASS |
+| Go tests, `webapp` | 1 fn / 1 pkg | PASS — and thin; see Known below |
+| Python verifier (`tests/prove.py`) | 1 file, 37 legs | 22 held · 15 absent · 0 broke |
 | Webapp build + vet | — | PASS |
-| Version consistency | 6 files | PASS |
+| Version consistency | 8 VERSION files + Cargo.toml + version.rs | PASS — every binary asked and agreed |
+
+**ABSENT IS NOT A PASS.** All 15 absent legs name the same missing thing: the
+private oracle ground (`ATLAS_ORACLE_ROOT`). They are legs that would cut
+golden vectors against material this repository does not carry, and on a clone
+without it they report ABSENT and exit 0 rather than going red for a checkout
+artifact. Nothing is claimed for them.
+
+**Known thin:** the `webapp` module has one test function. ADR-006 measured
+this before — the protocol layer and the tenant model were the two least
+tested things in the door, and both were given first strokes on 2026-09-11.
+The glass has not had that pass yet.
 
 ## Binaries
 
@@ -164,13 +178,21 @@
 
 ## CI/CD
 
+ONE WORKFLOW, AND IT IS THE ONLY ONE. This table named `ci.yml` and
+`release.yml` for weeks and NEITHER HAS EVER EXISTED; `docs/PIPELINES.md` went
+on describing `ci.yml` orchestrating six parallel jobs. Checked against
+`.github/workflows/` 2026-09-12: one file.
+
 | File | Trigger | Purpose |
 |---|---|---|
-| `.github/workflows/ci.yml` | push/PR to main | 6 parallel pipelines (SPINE/LINE/GOLDEN/AGENT/WEBAPP/OLLAMA) |
-| `.github/workflows/release.yml` | push `v*` tag | Full prove, cross-platform build, GitHub release |
-| `prove.ps1` | local | Full 7-step prove suite |
-| `version.ps1` | local | Version bump/sync/show |
-| `release.ps1` | local | Prove → bump → commit → tag → push |
+| `.github/workflows/prove.yml` | push/PR to main | the battery on Windows, plus the Go half off Windows; gofmt gated across BOTH modules |
+| `prove.ps1` | local | the full prove suite |
+| `version.ps1` | local | version bump/sync/show |
+| `release.ps1` | local | prove → bump → commit → tag → push |
+
+**There is no release workflow.** A `v*` tag builds and publishes nothing on
+its own; `release.ps1` is the local path and a person runs it. That is a gap,
+not a feature — named here so it is a decision rather than a surprise.
 
 ## Documentation
 

@@ -254,16 +254,23 @@
 
 ## Orchestration
 
-All 6 pipelines run in parallel on push/PR. The `ci.yml` workflow orchestrates them as parallel jobs. OLLAMA runs only on manual dispatch or nightly schedule (requires Ollama backend).
+**THE SIX PIPELINES ABOVE ARE A DESIGN, NOT A WORKFLOW.** This section
+described `ci.yml` orchestrating them as parallel jobs, and `ci.yml` has never
+existed — checked against `.github/workflows/` on 2026-09-12, which holds one
+file. The six names are still the right division of the battery and
+`prove.ps1` runs it locally; what CI actually does is narrower:
 
 ```
-push/PR → ci.yml
-  ├── SPINE (Rust)
-  ├── LINE (Go)
-  ├── GOLDEN (Python)
-  ├── AGENT (Declarations)
-  ├── WEBAPP (GUI)
-  └── OLLAMA (manual/nightly)
+push/PR → prove.yml
+  ├── the battery (windows)      tests/prove.py, the whole thing
+  └── the go half, off Windows   go build + go test, line AND webapp
+                                 gofmt -l gated across both modules
 ```
+
+OLLAMA still runs only by hand: it needs a live rack, and a CI job that
+silently skips a model-backed suite is worse than one that was never there.
+
+**No release workflow exists either.** A `v*` tag publishes nothing on its
+own; `release.ps1` is the local path and a person runs it.
 
 For release, `release.yml` runs all 6 as a gate before cross-platform build.
