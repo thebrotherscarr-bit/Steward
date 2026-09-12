@@ -12,12 +12,22 @@ under, because they are the record of what happened.
 
 ## [Unreleased]
 
-### 0.1.5
+### 0.1.5 — THE FLOW CONFIRMATION
 
-Named by its work, not by a word — the name is the operator's to give. What is
-under this heading is the coder flow's correctness arc (the templated
-expectation, the evidence rule, prose no longer scored, the repair path judged)
-and the release path that could not run.
+His word, 2026-09-12: *"0.1.5 the flow confirmation."*
+
+AND THE NAME IS THE FINDING. Every fault under this heading was a flow saying
+a thing had happened when it had not, and every fix was the same move: make the
+CONFIRMATION mean something. A check that asked whether code RAN and called
+that correct. A marker that travelled from one node's objective into another's
+prose. A marker a seat could simply write. A marker quoted out of the very
+requirement it was meant to verify, and found inside the clause that said it
+did NOT match. A repair nobody judged. And under all of it, a release script
+that could not be parsed at all, reporting at the end that work was happening
+somewhere it was not.
+
+None of them was found by reading. Every one was found by FIRING the thing and
+then refusing to believe the green.
 
 ### The release path could not run, and had not been able to for two days
 
