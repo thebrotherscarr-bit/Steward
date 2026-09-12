@@ -184,6 +184,46 @@ workflow file AS IT STANDS AT THAT REF and the fix is not there. THE MARK IS
 NOT MOVED TO FETCH IT: that is the rule this door enforces on everyone else,
 and it is not waived for its author. The fix rides the next number.
 
+**AND A VERSION-CONTROL FLOW, BECAUSE THERE WAS NONE.** His words: *"add the
+workflow if there is no version control workflow existing."* The engine held
+`coder`, `smoke` and `version-bump` -- and `version-bump` only READS
+pyproject twice around a gate. `version-tag` v1, seven nodes, 900s:
+
+    read       run   list the marks in {{world}} and say what the ground
+                     declares, which file said so, and what GitHub has
+    judge      gate  stop if the number is wrong -- the version file is
+                     bumped and SAVED before a mark is cut, never after
+    cut        run   cut {{mark}} with the message {{what}}
+    proof      eval  contains `Cut {{mark}} at`, scored on the EVIDENCE
+    send_gate  gate  the irreversible half, named before it is taken
+    send       run   send that one mark by name
+    sent       eval  contains `Sent {{mark}} to origin.`
+
+THE EDGE CONDITIONS ARE THE DESIGN. `proof -> send_gate` is `pass` and there
+is NO fail edge anywhere, so a cut that did not happen ends the run FAIL and
+the send gate is never offered -- the rule this estate learned the hard way
+today, that no gate is offered for work that failed. Both irreversible steps
+sit behind a `gate`, whose verdict is PAUSED: the engine prepares, the hand
+decides (RULE 6).
+
+**THE COUNCIL HAS NO TAG SKILL, AND THE ROUTE IT DOES HAVE WAS MEASURED, NOT
+ASSUMED.** A `run` node goes to the COUNCIL -- manjuel's Router and its 42
+skills -- and none of them is a tag. Its only road to this new verb is
+`mcp_call`. That road was tested before a single node was written on it, with
+the read-only action and no model in the loop:
+
+    atlas git_tag {"project": "atlas", "action": "list"}   -> v0.1.5, 3dacdbc
+    atlas git_tag                                          -> v0.1.11, c766ce7
+
+So three of the four links are proven: skill -> door -> tool -> answer. THE
+FOURTH IS NOT. Whether the Router reliably dispatches `mcp_call` and writes
+the right JSON into `<content>` needs a model and a real mark, and there is no
+mark left to cut today. **THE FLOW IS SAVED AND VALIDATED, AND IT HAS NEVER
+BEEN FIRED** -- said here rather than discovered later, because a flow that
+has only been read is exactly what this version is named after. The honest
+first firing is the next number; a first-class `git_tag` skill in the core
+would remove the uncertain link altogether, and that is a decision, not a fix.
+
 Both Go modules green and gofmt-clean; the door's own battery PROVEN.
 
 ### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed
