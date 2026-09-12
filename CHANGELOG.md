@@ -29,6 +29,82 @@ somewhere it was not.
 None of them was found by reading. Every one was found by FIRING the thing and
 then refusing to believe the green.
 
+### The glass had one test function in 2,800 lines, and a release workflow that was only ever claimed
+
+Two of the review's open items, closed.
+
+**THE GLASS: 1 test function -> 15, over three packages.** `webapp` is ~2,800
+lines across eight packages and had exactly one stroke in all of it
+(`handlers/ws_test.go`). ADR-006 made the same measurement about the door --
+the protocol layer and the tenant model were its two least-tested things, and
+both were given first strokes on 2026-09-11. The glass never had that pass,
+and the operator named it the one thing to fix before field testing.
+
+    db/db_test.go        the round trip survives reopening (every write calls
+                         Save, and this is where one that does not shows); the
+                         save is tmp-then-rename with no scratch left behind;
+                         newest-first and the limit; upsert replaces rather
+                         than duplicates; GetAgents hands back a COPY so a
+                         caller's mutation cannot reach the store
+    handlers/wall_test   `visible` in all four cases, including the widest
+                         thing it does -- AN UNTENANTED ROW IS VISIBLE TO
+                         EVERY TENANT, deliberate so the glass does not blank
+                         on the day auth goes on, and pinned rather than
+                         assumed; the three filters drop another tenant's rows
+                         and return [] not nil; /health hides global counts
+                         under auth and still answers
+    server/server_test   every embedded file gets a QUOTED validator, same
+                         bytes same tag; the session gate's open paths, its
+                         JSON 401 for /api/*, its redirect for a page, and
+                         /metrics and /ws both behind it; a refused request is
+                         still COUNTED, because a counter that only saw
+                         successes would hide the burst worth seeing
+
+**AND A FINDING THE STROKES TURNED UP: THE AUTH GATE CANNOT BE TURNED ON.**
+`ConfigureAuth` has NO CALLER anywhere in the module. `main.go` never calls
+it, so `authOn` is false for the life of every process, `h.sessions` is never
+initialised, and `ATLAS_AUTH=1` -- documented in two separate comments -- is
+read nowhere. The gate in `server.gated` is correct and inert. Both states are
+pinned: `TestWithAuthOffTheGateIsInert` is what production actually does, and
+`TestWithAuthOnTheGateRefusesTheRightThings` configures it by hand to show the
+mechanism was already right. **The only missing piece is the wiring, and
+wiring it is a decision** -- the env var, the session path, the service wire --
+so it is named here rather than invented.
+
+**Not reachable, said plainly rather than worked around:** the route table is
+built inside `ListenAndServe`, which then binds a port, so the mux itself
+cannot be tested without refactoring that function. `.woff2` MIME registration
+lives in `main.go`'s `func main`, which has nothing to call.
+
+**THE RELEASE WORKFLOW: WRITTEN, NOT DELETED.** `DELIVERABLE.md` named
+`.github/workflows/release.yml` for weeks and it had never existed;
+`release.ps1` signed off with "GitHub Actions will build binaries and create
+the release" while nothing did. The claim is now true.
+
+`release.yml` fires on a `v*` tag and **proves before it publishes** -- a tag
+is the one artifact a stranger takes on faith, so the battery runs on the
+TAGGED commit rather than trusting whatever was green when it was cut:
+
+    the tag equals VERSION   three things must agree -- the ref, the file, and
+                             plain semver. A tag carrying a build moniker, or
+                             pointing at a commit nobody bumped, dies before a
+                             single artifact exists. `release.ps1` would have
+                             produced `v0.1.5+f1` from a plain 0.1.5 two days
+                             ago; this catches that class by arithmetic.
+    ten pins in sync         version.ps1 sync, which held six until today
+    the battery + both Go    a red battery publishes nothing
+    every binary ASKED       six of them, one at a time, measured not asserted
+                             -- atlas-tui prefixes its own name, and until
+                             today it and atlas-vc printed hardcoded literals,
+                             which are exactly the two a released artifact
+                             would have carried
+    a DRAFT release          RULE 6. Everything above the line is proof;
+                             releasing is his click. `workflow_dispatch` runs
+                             every proof and stops there, so this file can be
+                             exercised without cutting anything.
+
+It does not cut the tag. No agent tags.
+
 ### The release path could not run, and had not been able to for two days
 
 **Three faults, stacked, each hiding the one under it.**

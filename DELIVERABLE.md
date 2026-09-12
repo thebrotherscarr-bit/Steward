@@ -189,21 +189,28 @@ table at the top of this file, measured on 2026-09-12.
 
 ## CI/CD
 
-ONE WORKFLOW, AND IT IS THE ONLY ONE. This table named `ci.yml` and
-`release.yml` for weeks and NEITHER HAS EVER EXISTED; `docs/PIPELINES.md` went
-on describing `ci.yml` orchestrating six parallel jobs. Checked against
-`.github/workflows/` 2026-09-12: one file.
+TWO WORKFLOWS, AND THE SECOND WAS WRITTEN BECAUSE THIS TABLE CLAIMED IT.
+This named `ci.yml` and `release.yml` for weeks and NEITHER EXISTED;
+`docs/PIPELINES.md` went on describing `ci.yml` orchestrating six parallel
+jobs. `ci.yml` is still a design and is labelled as one. `release.yml` was
+WRITTEN on 2026-09-12 rather than deleted, so the claim became true instead
+of becoming absent.
 
 | File | Trigger | Purpose |
 |---|---|---|
 | `.github/workflows/prove.yml` | push/PR to main | the battery on Windows, plus the Go half off Windows; gofmt gated across BOTH modules |
+| `.github/workflows/release.yml` | push `v*` tag | proves BEFORE it publishes: the tag must equal `VERSION`, all ten pins must agree, the battery and both Go modules must be green, then every binary is ASKED its version. Publishes a DRAFT -- the gate is the operator's (RULE 6) |
 | `prove.ps1` | local | the full prove suite |
 | `version.ps1` | local | version bump/sync/show |
 | `release.ps1` | local | prove → bump → commit → tag → push |
 
-**There is no release workflow.** A `v*` tag builds and publishes nothing on
-its own; `release.ps1` is the local path and a person runs it. That is a gap,
-not a feature — named here so it is a decision rather than a surprise.
+**A `v*` tag now proves and builds, and stops at a draft.** `release.yml` runs
+the whole battery on the tagged commit rather than trusting whatever was
+green when it was cut, refuses a tag that disagrees with `VERSION` or carries
+a build moniker, and asks each of the six binaries its version before
+attaching any of them. It publishes a DRAFT release: everything before that
+line is proof, and releasing is a hand's click. `release.ps1` remains the
+local path for cutting the tag itself — no agent tags (RULE 6).
 
 ## Documentation
 

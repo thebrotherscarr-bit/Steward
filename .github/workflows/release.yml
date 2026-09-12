@@ -1,0 +1,185 @@
+# WHAT A TAG DOES, WHICH UNTIL NOW WAS NOTHING.
+#
+# `DELIVERABLE.md` named `.github/workflows/release.yml` for weeks and the file
+# HAD NEVER EXISTED; `release.ps1` finished by printing "GitHub Actions will
+# build binaries and create the release", and nothing did. Found 2026-09-12 by
+# listing the directory. This is that file, written so the claim becomes true
+# rather than deleted so the claim becomes absent.
+#
+# IT PROVES BEFORE IT PUBLISHES. A tag is the one artifact a stranger takes on
+# faith, so the battery runs here too rather than trusting that it was green on
+# whatever commit the tag happens to point at. A red battery publishes nothing.
+#
+# THE VERSION IN THE TAG MUST BE THE VERSION IN THE FILES. `version.ps1 sync`
+# proves all ten pins agree, and a separate step proves the tag's own name
+# matches `VERSION`. On 2026-09-12 `release.ps1` would have produced
+# `v0.1.5+f1` from a plain `0.1.5` -- a tag disagreeing with every file it
+# shipped -- so this is the gate that catches that class by arithmetic instead
+# of by reading.
+#
+# PLAIN SEMVER ONLY. The stone moniker was struck 2026-09-10 ("remove the
+# moniker for the stones, no letters in my versions"), and a tag carrying one
+# is refused here as it is in both scripts.
+#
+# NO NETWORK AFTER CHECKOUT, the same property prove.yml keeps: three
+# workspace-own crates, two stdlib-only Go modules, a stdlib-only Python
+# battery. If a release needs a dependency, that is the regression.
+#
+# NOTHING IS AUTOMATIC ABOUT THE TAG ITSELF. RULE 6: no agent tags. A person
+# cuts it; this only acts on one that already exists.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # A dry run against a tag that is already cut, for proving this file without
+  # cutting another one.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # a release is never worth cancelling halfway
+
+permissions:
+  contents: write # the release itself; nothing else
+
+jobs:
+  cut:
+    name: prove, then publish
+    # Windows BY CONSTRUCTION, the same reason prove.yml's gate is: the Rust
+    # spine links the Windows SDK's own SQLite (store/src/ffi.rs,
+    # `#[link(name = "winsqlite3")]`) with no alternative backend. On any other
+    # platform cargo fails at link time, so the binaries are cut here.
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Toolchains, named in the log
+        run: |
+          go version
+          cargo --version
+          rustc --version
+          python --version
+
+      - name: The tag says what the files say
+        # THE ARITHMETIC THAT CATCHES A BAD TAG. Three things must agree: the
+        # ref, VERSION, and plain semver. A tag carrying a build moniker, or
+        # pointing at a commit whose VERSION was never bumped, dies here --
+        # before a single artifact exists.
+        shell: bash
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "tag:     $tag"
+          file="v$(cat VERSION)"
+          echo "VERSION: $file"
+          case "$tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "REFUSED: $tag is not vMAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
+          case "$tag" in
+            *+*) echo "REFUSED: $tag carries a build tag; the stone moniker was struck 2026-09-10"; exit 1 ;;
+          esac
+          if [ "$tag" != "$file" ]; then
+            echo "REFUSED: the tag is $tag but VERSION says $file -- one of them was not bumped"
+            exit 1
+          fi
+          echo "the tag and the files agree"
+
+      - name: All ten pins agree
+        # version.ps1 sync walks the eight VERSION files plus Cargo.toml and
+        # core/src/version.rs's own assertion. It held SIX until 2026-09-12,
+        # and the four it missed were the ones that had printed hardcoded
+        # literals.
+        shell: pwsh
+        run: .\version.ps1 sync
+
+      - name: Build the spine
+        run: cargo build -p atlas --locked --release
+
+      - name: gofmt leaves nothing behind
+        # Both modules, NAMED -- not a bare `gofmt -l .` from the root, which
+        # walks target/ and every vendored tree. A third Go module must be
+        # added here on the day it is created, the same as in prove.yml.
+        shell: bash
+        run: |
+          fail=0
+          for mod in line webapp; do
+            out=$(cd "$mod" && gofmt -l .)
+            if [ -n "$out" ]; then
+              echo "unformatted in $mod:"; echo "$out"; fail=1
+            else
+              echo "$mod: gofmt -l . is empty"
+            fi
+          done
+          exit $fail
+
+      - name: THE BALL
+        # A red battery publishes nothing. Three verdicts, and ABSENT is not a
+        # pass -- the golden legs that need the private oracle ground report
+        # ABSENT here and always will (CLAUDE.md RULE 1). Only FAIL is red.
+        run: python tests/prove.py
+
+      - name: Go tests, both modules
+        shell: bash
+        run: |
+          (cd line && go test ./...)
+          (cd webapp && go test ./...)
+
+      - name: Build every binary
+        # Five commands and the glass. Each reads its own VERSION file, so a
+        # binary that answers the wrong version means a pin was missed -- which
+        # the next step checks by ASKING rather than assuming.
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/atlas.exe dist/ 2>/dev/null || cp target/release/atlas dist/
+          for cmd in atlas-mcp atlas-tui atlas-town atlas-door atlas-vc; do
+            (cd line && go build -o "../dist/$cmd.exe" "./cmd/$cmd")
+          done
+          (cd webapp && go build -o ../dist/atlas-webapp.exe .)
+          ls -l dist
+
+      - name: Every binary answers the tag
+        # MEASURED, NOT ASSERTED. `atlas-tui` prefixes its own name; the rest
+        # answer bare. Until 2026-09-12 atlas-tui fell back to a HARDCODED
+        # literal whenever the spine was absent, and atlas-vc printed one
+        # unconditionally -- exactly the two a released artifact would carry.
+        shell: bash
+        run: |
+          want="$(cat VERSION)"
+          fail=0
+          for b in atlas atlas-mcp atlas-town atlas-door atlas-vc; do
+            got="$(./dist/$b.exe --version | head -1 | tr -d '\r')"
+            if [ "$got" != "$want" ]; then echo "$b said '$got', want '$want'"; fail=1
+            else echo "$b: $got"; fi
+          done
+          got="$(./dist/atlas-tui.exe --version | head -1 | tr -d '\r')"
+          if [ "$got" != "atlas-tui $want" ]; then
+            echo "atlas-tui said '$got', want 'atlas-tui $want'"; fail=1
+          else echo "atlas-tui: $got"; fi
+          exit $fail
+
+      - name: Publish the release
+        # DRAFT, NOT LIVE. RULE 6: the gate is the operator's. Everything above
+        # this line is proof; publishing is his click. `workflow_dispatch` runs
+        # every proof and stops here, so this file can be exercised without
+        # cutting anything.
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: dist/*

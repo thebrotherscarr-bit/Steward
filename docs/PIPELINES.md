@@ -265,12 +265,19 @@ push/PR → prove.yml
   ├── the battery (windows)      tests/prove.py, the whole thing
   └── the go half, off Windows   go build + go test, line AND webapp
                                  gofmt -l gated across both modules
+
+tag v*  → release.yml
+  └── cut (windows)              the tag must equal VERSION; ten pins in sync;
+                                 the battery; both Go modules; every binary
+                                 ASKED its version; then a DRAFT release
 ```
 
 OLLAMA still runs only by hand: it needs a live rack, and a CI job that
 silently skips a model-backed suite is worse than one that was never there.
 
-**No release workflow exists either.** A `v*` tag publishes nothing on its
-own; `release.ps1` is the local path and a person runs it.
+**A release workflow exists as of 2026-09-12.** `release.yml` fires on a `v*`
+tag, proves the tagged commit (pin sync, the battery, both Go modules, every
+binary asked its version), and publishes a DRAFT. It does not cut the tag:
+no agent tags (RULE 6).
 
 For release, `release.yml` runs all 6 as a gate before cross-platform build.
