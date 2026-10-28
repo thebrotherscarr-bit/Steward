@@ -9,10 +9,20 @@ Changes from the guide for local Ollama:
     * Skills and the script runner are read from the parent ``steward/`` folder instead of local
       copies (the copies only exist in the guide for Foundry's ZIP deployment).
 
+Steward's team (each a background agent on its own local model):
+    * Steward (orchestrator) — OLLAMA_MODEL, e.g. gpt-oss:20b: talks to the user, plans, uses tools.
+    * CodeExplorer — the orchestrator's model: explores modules read-only.
+    * Coder        — STEWARD_CODER_MODEL (qwen3-coder:30b): returns exact code edits to apply.
+    * Reasoner     — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
+    * Explainer    — STEWARD_CONVERSATION_MODEL (gemma4:12b): explanations, docs and summaries.
+
 Environment variables:
-    OLLAMA_HOST       — Ollama server (defaults to http://localhost:11434)
-    OLLAMA_MODEL      — model name, e.g. gpt-oss:20b
-    STEWARD_WORKSPACE — repo or folder Steward works in (defaults to ../working)
+    OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
+    OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
+    STEWARD_CODER_MODEL        — coder model (defaults to qwen3-coder:30b)
+    STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
+    STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:12b)
+    STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to ../working)
 """
 
 from __future__ import annotations
@@ -51,6 +61,9 @@ from subprocess_script_runner import subprocess_script_runner  # noqa: E402
 load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR / "working").resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
+_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "qwen3-coder:30b")
+_REASONER_MODEL = os.environ.get("STEWARD_REASONER_MODEL", "deepseek-r1:14b")
+_CONVERSATION_MODEL = os.environ.get("STEWARD_CONVERSATION_MODEL", "gemma4:12b")
 
 # Startup diagnostics go through ``logging`` so every host decides where they appear.
 logger = logging.getLogger(__name__)
@@ -68,8 +81,15 @@ when asked.
   sites) before answering questions about the code or changing it. Never guess at file contents.
 - You have skills for code-review and codebase-map. When a request matches a skill, load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
-- When asked to understand a large codebase or several modules, delegate each module to the
-  background CodeExplorer agent so they are explored concurrently, then combine the findings.
+- You lead a team of background agents, each on its own model. Delegate to them, then apply and
+  verify their output yourself. Start a task once, wait for it, then read its result with
+  get_task_results; never start the same task again while one is running or finished.
+  - CodeExplorer: explores one module or folder read-only. Use one per module, concurrently.
+  - Coder: writes and fixes code. Give it the task and the files involved; it returns the exact
+    edits, which you apply with the file_access tools and then test.
+  - Reasoner: thinks through hard debugging, root-cause and design questions. It cannot read
+    files, so include the relevant code, errors and test output in its input.
+  - Explainer: writes clear explanations, documentation, summaries and commit messages.
 - Use the run_shell tool to run tests, linters, builds and read-only git commands in the workspace.
   Run the tests before and after a change, and report the actual output. Explain what a command
   does before running anything that changes files.
@@ -190,6 +210,50 @@ def _build_explorer_agent(client: OllamaChatClient) -> Any:
     )
 
 
+def _build_coder_agent() -> Any:
+    """Build the coding agent on the coder model; it reads the workspace and returns exact edits."""
+    return Agent(
+        client=OllamaChatClient(model=_CODER_MODEL),
+        name="Coder",
+        description="Writes and fixes code: reads the files involved and returns the exact edits to make.",
+        tools=[list_files, read_file, search_code],
+        instructions=(
+            "You are an expert software engineer. Read the files involved with read_file and search_code "
+            "before writing anything. Return each change as: the file path, then the exact existing text "
+            "to replace and the new text, ready to apply. Keep the existing style and make the smallest "
+            "change that works. You cannot write files yourself, so never claim a change is applied. "
+            "Your final reply is only the edits, with no narration of the steps you took."
+        ),
+    )
+
+
+def _build_reasoner_agent() -> Any:
+    """Build the reasoning agent on the reasoner model; it has no tools and works from its input."""
+    return Agent(
+        client=OllamaChatClient(model=_REASONER_MODEL),
+        name="Reasoner",
+        description="Thinks through hard debugging, root-cause and design questions from the context it is given.",
+        instructions=(
+            "You reason carefully about hard software problems: bugs, root causes, design trade-offs. "
+            "Work only from the code, errors and output in your input. Give your conclusion first, then "
+            "the key reasoning in a few short points, and say what evidence would confirm it."
+        ),
+    )
+
+
+def _build_conversation_agent() -> Any:
+    """Build the conversationalist agent on the conversation model, for prose for the user."""
+    return Agent(
+        client=OllamaChatClient(model=_CONVERSATION_MODEL),
+        name="Explainer",
+        description="Writes clear explanations, documentation, summaries and commit messages for the user.",
+        instructions=(
+            "You write clear, friendly, accurate prose for a software engineer: explanations, docs, "
+            "summaries and commit messages. Use only the facts in your input and keep it concise."
+        ),
+    )
+
+
 # </background>
 
 
@@ -286,7 +350,12 @@ async def build_steward_agent(
         file_access_store=access_store,
         file_memory_store=file_memory_store,
         skills_provider=skills_provider,
-        background_agents=[_build_explorer_agent(client)],
+        background_agents=[
+            _build_explorer_agent(client),
+            _build_coder_agent(),
+            _build_reasoner_agent(),
+            _build_conversation_agent(),
+        ],
         auto_approval_rules=auto_approval_rules,
         context_providers=[MontyCodeActProvider(approval_mode="never_require")],
         mode_provider=AgentModeProvider(default_mode="execute"),

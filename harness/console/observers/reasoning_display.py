@@ -22,7 +22,43 @@ class ReasoningDisplayObserver(ConsoleObserver):
     Some models (like o1) provide reasoning steps that show their
     internal thought process. This observer displays them with a 💭 prefix
     in a dimmed style.
+
+    Local models (e.g. Ollama) stream reasoning one token per update, so chunks
+    are buffered and shown as one block when the thought ends: on the first
+    update without reasoning (before its tool call or text is drawn) or when
+    the stream completes.
     """
+
+    def __init__(self) -> None:
+        self._buffer: list[str] = []
+
+    def _flush(self, ux: IUXStateDriver) -> None:
+        thought = "".join(self._buffer).strip()
+        self._buffer.clear()
+        if thought:
+            ux.append_info_line(f"💭 {escape(thought)}", "dim")
+
+    async def on_response_update(
+        self,
+        ux: IUXStateDriver,
+        update: Any,
+        agent: Agent,
+        session: Any,
+    ) -> None:
+        """Flush buffered reasoning once an update carries no more of it."""
+        contents = getattr(update, "contents", None) or []
+        if self._buffer and not any(self._extract_reasoning(c) for c in contents):
+            self._flush(ux)
+
+    async def on_stream_complete(
+        self,
+        ux: IUXStateDriver,
+        agent: Agent,
+        session: Any,
+    ) -> list | None:
+        """Flush any reasoning left when the stream ends."""
+        self._flush(ux)
+        return None
 
     async def on_content(
         self,
@@ -41,8 +77,7 @@ class ReasoningDisplayObserver(ConsoleObserver):
         """
         reasoning_text = self._extract_reasoning(content)
         if reasoning_text:
-            # Display reasoning in dim style to differentiate from main output
-            ux.append_info_line(f"💭 {escape(reasoning_text)}", "dim")
+            self._buffer.append(reasoning_text)
 
     def _extract_reasoning(self, content: Content) -> str | None:
         """Extract reasoning text from content.
