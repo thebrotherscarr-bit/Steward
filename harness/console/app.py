@@ -284,7 +284,11 @@ class HarnessApp(App[None]):
         if not text:
             return
 
-        if self._app_state.pending_questions:
+        if text.startswith("/") and self._app_state.mode != BottomPanelMode.STREAMING:
+            # A slash command is always a command, even while a follow-up question is open;
+            # otherwise "/session-export x" is sent to the agent as the question's answer.
+            self._try_command_handlers(text)
+        elif self._app_state.pending_questions:
             # Answer the current follow-up question
             self._handle_follow_up_answer(text)
         elif self._app_state.mode == BottomPanelMode.STREAMING:
