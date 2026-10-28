@@ -23,6 +23,8 @@ Environment variables:
     STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
     STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:12b)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to ../working)
+    SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
+    SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from agent_framework import (
     FileSystemAgentFileStore,
     HistoryProvider,
     InMemoryHistoryProvider,
+    MCPStreamableHTTPTool,
     SkillsProvider,
     create_harness_agent,
     tool,
@@ -98,6 +101,12 @@ when asked.
   done only when the tests that cover it pass.
 - To commit, use the git_commit tool with a clear, imperative message. The user will be asked to
   approve it before it runs, so summarize what is being committed first.
+- When the secondbrain_* tools are available, SecondBrain's notes are your long-term memory: the
+  user's plans, rulings, laws and past work. Search them (secondbrain_search_notes, then
+  secondbrain_read_note) before answering about any of those, and cite the note you used. When
+  the user asks you to remember something, write it there with secondbrain_write_note or
+  secondbrain_append_to_note. secondbrain_git_commit goes through SecondBrain's door and is held
+  for the user's approval there; say so when you make one.
 
 ### Important
 
@@ -284,6 +293,48 @@ def _build_shell() -> LocalShellTool:
 # </shell>
 
 
+# <secondbrain>
+# Stage 1 starts small: the notes, git reads and a held commit. Notes writes ask in
+# Steward's console; door writes are held by SecondBrain's own gate, so they are not asked twice.
+_SECONDBRAIN_TOOLS = [
+    "search_notes", "read_note", "list_notes", "search_sessions", "write_note", "append_to_note",
+    "git", "git_diff", "notes", "git_commit",
+]  # hold_list is left out: SecondBrain answers it only to Kyle's glass
+_SECONDBRAIN_ASKS = ["write_note", "append_to_note"]
+
+
+async def _connect_secondbrain(stack: AsyncExitStack) -> MCPStreamableHTTPTool | None:
+    """Connect to SecondBrain's MCP endpoint, or return None when it is not configured or not up."""
+    url = os.environ.get("SECONDBRAIN_MCP_URL")
+    key = os.environ.get("SECONDBRAIN_MCP_KEY")
+    if not url or not key:
+        logger.info("SecondBrain not connected (SECONDBRAIN_MCP_URL / SECONDBRAIN_MCP_KEY not set).")
+        return None
+    secondbrain = MCPStreamableHTTPTool(
+        name="secondbrain",
+        url=url,
+        tool_name_prefix="secondbrain",  # the door's git_commit would clash with Steward's own
+        static_headers={"Authorization": f"Bearer {key}"},
+        allowed_tools=_SECONDBRAIN_TOOLS,
+        approval_mode={
+            "always_require_approval": _SECONDBRAIN_ASKS,
+            "never_require_approval": [t for t in _SECONDBRAIN_TOOLS if t not in _SECONDBRAIN_ASKS],
+        },
+        load_prompts=False,
+        request_timeout=60,
+    )
+    try:
+        await stack.enter_async_context(secondbrain)
+    except Exception as exc:  # SecondBrain down, sharing off or a wrong key: run without it
+        logger.warning("SecondBrain not connected (%s): %s", url, type(exc).__name__)
+        return None
+    logger.info("SecondBrain connected (%s).", url)
+    return secondbrain
+
+
+# </secondbrain>
+
+
 # <build_steward_agent>
 async def build_steward_agent(
     stack: AsyncExitStack,
@@ -322,6 +373,9 @@ async def build_steward_agent(
         logger.info("Shell enabled (confined to %s).", _WORKING_DIR)
     else:
         logger.info("Shell disabled.")
+    secondbrain = await _connect_secondbrain(stack)
+    if secondbrain is not None:
+        tools.append(secondbrain)
 
     access_store = FileSystemAgentFileStore(str(_WORKING_DIR)) if enable_file_access else None
     logger.info("File access %s.", f"enabled ({_WORKING_DIR})" if enable_file_access else "disabled")
