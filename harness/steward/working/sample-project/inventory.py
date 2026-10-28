@@ -1,3 +1,4 @@
+# Steward's practice module
 """A tiny inventory module for Steward to work on. It has a bug that test_inventory.py catches."""
 
 from dataclasses import dataclass
