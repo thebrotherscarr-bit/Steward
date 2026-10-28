@@ -29,6 +29,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -41,12 +42,17 @@ from typing import Annotated, Any
 from agent_framework import (
     Agent,
     AgentModeProvider,
+    AggregatingSkillsSource,
+    ContextProvider,
+    DeduplicatingSkillsSource,
     FileAccessProvider,
     FileSkillsSource,
     FileSystemAgentFileStore,
     HistoryProvider,
     InMemoryHistoryProvider,
+    MCPSkillsSource,
     MCPStreamableHTTPTool,
+    Message,
     SkillsProvider,
     create_harness_agent,
     tool,
@@ -299,8 +305,11 @@ def _build_shell() -> LocalShellTool:
 _SECONDBRAIN_TOOLS = [
     "search_notes", "read_note", "list_notes", "search_sessions", "write_note", "append_to_note",
     "git", "git_diff", "notes", "git_commit",
+    "web_search", "web_fetch",  # Part 1: the web, through SecondBrain's own tools
+    "memory",  # Part 2: SecondBrain's long-term memory notes (agent-memory, user-profile)
+    "skill_save",  # Part 3: new skills are saved to SecondBrain, where they are served from
 ]  # hold_list is left out: SecondBrain answers it only to Kyle's glass
-_SECONDBRAIN_ASKS = ["write_note", "append_to_note"]
+_SECONDBRAIN_ASKS = ["write_note", "append_to_note", "skill_save"]
 
 
 async def _connect_secondbrain(stack: AsyncExitStack) -> MCPStreamableHTTPTool | None:
@@ -330,6 +339,72 @@ async def _connect_secondbrain(stack: AsyncExitStack) -> MCPStreamableHTTPTool |
         return None
     logger.info("SecondBrain connected (%s).", url)
     return secondbrain
+
+
+_EXTRACT_FACTS = """\
+From the exchange below, list the durable facts the USER explicitly states about themselves that are
+worth remembering in every future session: their preferences, conventions, tools, projects, goals
+and ways of working. Only what they say about themselves in so many words: never infer a fact from
+a question they ask, a task they request, or what the assistant did. Most turns have none.
+Answer with a JSON array of short strings, one fact each, and nothing else. Answer [] if none.
+
+USER: {user}
+
+ASSISTANT: {assistant}
+"""
+
+
+class SecondBrainMemoryProvider(ContextProvider):
+    """Long-term memory kept in SecondBrain (MAF Part 2's automatic memory, stored in the vault).
+
+    Before each turn, SecondBrain's two memory notes are put in front of Steward, as SecondBrain's
+    own agent does: ``agent-memory`` (facts, decisions, lessons) and ``user-profile`` (about Kyle).
+    After each turn, durable facts about Kyle are extracted by the model and added to
+    ``user-profile`` with SecondBrain's ``memory`` tool, which dedupes and caps them. The notes are
+    ordinary notes, so Kyle can read and edit everything Steward remembers.
+    """
+
+    def __init__(self, secondbrain: MCPStreamableHTTPTool, client: Any) -> None:
+        super().__init__("secondbrain-memory")
+        self._secondbrain = secondbrain
+        self._client = client
+
+    async def _memory(self, **arguments: Any) -> str:
+        result = await self._secondbrain.call_tool("memory", **arguments)
+        return result if isinstance(result, str) else " ".join(getattr(c, "text", "") or "" for c in result)
+
+    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        try:
+            remembered = await self._memory(target="memory", action="read")
+            about = await self._memory(target="user", action="read")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SecondBrain memory not read: %s", type(exc).__name__)
+            return
+        context.extend_messages(
+            self.source_id,
+            [Message(role="user", contents=[
+                "## Your long-term memory (SecondBrain note agent-memory)\n"
+                f"{remembered}\n\n## About Kyle (SecondBrain note user-profile)\n{about}"
+            ])],
+        )
+
+    async def after_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        user = "\n".join(m.text for m in context.input_messages if m and m.text)
+        assistant = context.response.text if context.response else ""
+        if not user.strip():
+            return
+        try:
+            reply = await self._client.get_response(
+                [Message(role="user", contents=[_EXTRACT_FACTS.format(user=user[-4000:], assistant=assistant[-4000:])])]
+            )
+            facts = json.loads(re.search(r"\[.*\]", reply.text or "[]", re.S).group(0))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No facts extracted this turn: %s", type(exc).__name__)
+            return
+        for fact in facts:
+            if isinstance(fact, str) and fact.strip():
+                outcome = await self._memory(target="user", action="add", text=fact.strip())
+                logger.info("SecondBrain memory: %s", outcome)
 
 
 # </secondbrain>
@@ -382,11 +457,21 @@ async def build_steward_agent(
 
     # ``load_skill`` only reads a skill's own body, so it skips approval; ``run_skill_script``,
     # which executes code, keeps it unless this is an unattended run.
+    # Skills come from two places, aggregated as in the guide's Part 3: Steward's own file skills
+    # (they carry runnable scripts) and SecondBrain's skill notes, served as MCP resources and
+    # discovered with MCPSkillsSource (centrally managed: a skill Kyle or Steward saves in
+    # SecondBrain is picked up without touching Steward).
+    skill_sources: list[Any] = [FileSkillsSource(str(_SKILLS_DIR), script_runner=subprocess_script_runner)]
+    if secondbrain is not None:
+        # The live client of the already-connected secondbrain tool (MAF exposes no public getter).
+        skill_sources.append(
+            MCPSkillsSource(session_provider=lambda: secondbrain._connection.client or secondbrain._connection.session)
+        )
     skills_provider = SkillsProvider(
-        FileSkillsSource(str(_SKILLS_DIR), script_runner=subprocess_script_runner),
+        DeduplicatingSkillsSource(AggregatingSkillsSource(skill_sources)) if len(skill_sources) > 1 else skill_sources[0],
         disable_load_skill_approval=True,
     )
-    logger.info("Local file skills enabled (from %s).", _SKILLS_DIR)
+    logger.info("Skills enabled: files (%s)%s.", _SKILLS_DIR, " and SecondBrain" if secondbrain is not None else "")
 
     auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
     if auto_approve_skill_scripts:
@@ -411,7 +496,10 @@ async def build_steward_agent(
             _build_conversation_agent(),
         ],
         auto_approval_rules=auto_approval_rules,
-        context_providers=[MontyCodeActProvider(approval_mode="never_require")],
+        context_providers=[
+            MontyCodeActProvider(approval_mode="never_require"),
+            *([SecondBrainMemoryProvider(secondbrain, client)] if secondbrain is not None else []),
+        ],
         mode_provider=AgentModeProvider(default_mode="execute"),
         max_context_window_tokens=65_536,
         max_output_tokens=8_192,

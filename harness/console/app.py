@@ -265,6 +265,10 @@ class HarnessApp(App[None]):
         if self._initial_mode:
             self._ux_driver.current_mode = self._initial_mode
 
+        # Safety net: in Windows Terminal a reply could stay unpainted until a click. Re-sync and
+        # repaint four times a second so output always appears without one.
+        self.set_interval(0.25, self._periodic_repaint)
+
         # Focus the text input
         try:
             text_input = self.query_one("#text-input", HarnessTextInput)
@@ -390,6 +394,11 @@ class HarnessApp(App[None]):
         on the main event loop. We use call_later to batch updates.
         """
         self.call_later(self._sync_ui_from_state)
+
+    def _periodic_repaint(self) -> None:
+        """Sync any state change that did not reach the screen, and repaint."""
+        self._sync_ui_from_state()
+        self.screen.refresh()
 
     def _sync_ui_from_state(self) -> None:
         """Synchronize UI components with current application state."""
