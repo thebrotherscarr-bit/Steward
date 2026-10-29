@@ -187,6 +187,19 @@ PART1_GITHUB_INSTRUCTIONS = """
   a pull request with gh pr create. Never push with --force, --all or --mirror.
 """
 
+# Part 2 of the guide, its working-style lines with Steward's workspace in place of the portfolio.
+PART2_INSTRUCTIONS = """
+### Your workspace
+
+- The workspace's files are read with the file_access tools. Read them before answering questions
+  about the code, and never change a file unless asked. To change one, find the line with
+  file_access_grep, read it with file_access_read_lines, and edit it with file_access_replace_lines.
+- When asked for a report, write it to a Markdown file under reports/ and tell the user where you
+  saved it.
+- To commit in the workspace, use the git_commit tool. It takes a real action, so the user will be
+  asked to approve it before it runs: say what you are about to commit first.
+"""
+
 # MAF's own plan and execute steps (AgentModeProvider's defaults), with plan mode held more firmly:
 # on 2026-10-29 Steward skipped MAF's todo, plan-file and approval steps twice and did the work in
 # plan mode (Kyle: "tighten it", through mode_instructions, the Learn page's own setting).
@@ -654,7 +667,7 @@ async def build_steward_agent(
     file_memory_store: Any = None,
     enable_shell: bool = True,
     auto_approve_skill_scripts: bool = False,
-    part: int = 1,
+    part: int = 2,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -674,10 +687,12 @@ async def build_steward_agent(
         A fully configured harness agent with Step 3's capabilities.
     """
     _WORKING_DIR.mkdir(exist_ok=True)
-    if part == 1:
-        # Kyle, 2026-10-29: start again from Part 1, exactly as the guide builds it. The later
-        # Parts' pieces below stay as they are and come back as each Part passes.
-        secondbrain = await _connect_secondbrain(stack, tools=["web_search", "web_fetch"])
+    if part <= 2:
+        # Kyle, 2026-10-29: start again from Part 1, exactly as the guide builds it, and add each
+        # Part as the one before it passes. The later Parts' pieces below come back the same way.
+        secondbrain = await _connect_secondbrain(
+            stack, tools=["web_search", "web_fetch", *(["memory"] if part >= 2 else [])]
+        )
         # Kyle, 2026-10-29: the retry stays on, because ollama/ollama#17638 (gpt-oss tool calls
         # Ollama cannot parse) is open with no fix in MAF or Ollama
         part1_client = _retry_malformed_tool_calls(client or OllamaChatClient())
@@ -689,16 +704,38 @@ async def build_steward_agent(
         # piece) comes in early, rooted at Desktop\Research where the repositories are, every
         # command on Kyle's Approve card (LocalShellTool's default approval)
         part1_shell = await stack.enter_async_context(_build_shell(_RESEARCH_DIR, allow_push=True))
+        part_tools: list[Any] = [get_repo_status, part1_shell.as_function()]
+        instructions = PART1_INSTRUCTIONS + PART1_GITHUB_INSTRUCTIONS
+        part2: dict[str, Any] = {}
+        if part >= 2:
+            # Part 2 of the guide: file access over the workspace (Steward's own store, the guide's
+            # "supply your own AgentFileStore", so MAF's line edits keep a CRLF file CRLF), a tool
+            # that asks before it acts (git_commit, as the guide's place_trade), auto-approval rules
+            # (MAF's read-only file rule and Steward's small-commit rule, the guide's "rule of your
+            # own"), and automatic memory (SecondBrain's notes, in place of Foundry memory).
+            part_tools.append(git_commit)
+            instructions += PART2_INSTRUCTIONS
+            part2 = {
+                "file_access_store": LineEndingFileStore(str(_WORKING_DIR)),
+                "auto_approval_rules": [
+                    FileAccessProvider.read_only_tools_auto_approval_rule,
+                    small_commit_auto_approval_rule,
+                ],
+                "context_providers": (
+                    [SecondBrainMemoryProvider(secondbrain, part1_client)] if secondbrain is not None else []
+                ),
+            }
         return create_harness_agent(
             client=part1_client,
             name="Steward",
-            agent_instructions=PART1_INSTRUCTIONS + PART1_GITHUB_INSTRUCTIONS,
-            tools=[get_repo_status, part1_shell.as_function(), *([secondbrain] if secondbrain is not None else [])],
+            agent_instructions=instructions,
+            tools=[*part_tools, *([secondbrain] if secondbrain is not None else [])],
             history_provider=history_provider or InMemoryHistoryProvider(),
             mode_provider=AgentModeProvider(mode_instructions=PART1_MODE_INSTRUCTIONS),
             max_context_window_tokens=_STEWARD_CONTEXT,
             default_options={"num_ctx": _STEWARD_CONTEXT},
             disable_web_search=True,
+            **part2,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
