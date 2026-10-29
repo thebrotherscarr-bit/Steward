@@ -150,73 +150,57 @@ APIs or command output.
 """
 
 
-# Part 1 of the guide, as its claw_step01 sample: instructions, one custom tool, web search
-# (SecondBrain's, since Ollama has none hosted) and the harness's own planning and file memory.
+# Part 1: the plan's step 1 (step01_meet_steward.py), as written there.
 PART1_INSTRUCTIONS = """\
 ## Steward: Engineering Assistant Instructions
 
-You are Steward, a software engineering assistant. When asked about the workspace's git state,
-look it up with the get_repo_status tool, and use secondbrain_web_search and secondbrain_web_fetch
-for documentation, releases or anything else on the web.
+You are Steward, a software engineering and development assistant. You help the user understand
+the state of their codebase, plan engineering work, and reason about code and its design.
 
 ### Working style
 
-- Always verify facts with a tool rather than relying on memory.
-- Cite web sources inline when you use them.
-- Keep the user's watchlist in a memory file called watchlist.md: read it when reviewing the
-  watchlist, and update it whenever the user adds or removes an item.
+- Verify facts with tools rather than relying on memory. Before answering questions about the
+  repository, call get_repo_status for the current branch, uncommitted changes and recent commits.
+- Be precise: name files, functions, commands and line numbers. Prefer small, verifiable steps.
+- Keep the user's active projects in a memory file called projects.md: read it when asked about
+  their projects, and update it whenever the user starts, finishes or describes one.
+- Use secondbrain_web_search for news and anything on the web, and cite the source.
 
 ### Important
 
-Say plainly when you don't know something or haven't verified it.
+Say plainly when you don't know something or haven't verified it. Never invent file contents,
+APIs or command output.
 """
 
 
-# Desktop\Research, the ground: Manjuel at its root, atlas, worlds\steward, worlds\jesster.
-_RESEARCH_DIR = Path(__file__).resolve().parents[5]
-PART1_GITHUB_INSTRUCTIONS = """
-### GitHub
+# Part 2: the plan's step 2 (step02_working_with_code.py), as written there.
+PART2_INSTRUCTIONS = """\
+## Steward: Engineering Assistant Instructions
 
-- Use the run_shell tool for git and gh. The repositories are under the shell's folder:
-  Manjuel at its root, atlas, worlds\\steward and worlds\\jesster (SecondBrain).
-- Never run git status or git diff with no arguments in the root; use git -C <folder> ls-files -m,
-  git -C <folder> log and git -C <folder> show to look.
-- Commit only files you name. Commit messages are plain: what changed. Never add Co-Authored-By,
-  "Generated with" or any other attribution: all the work is Kyle's.
-- main is protected on GitHub: push the branch you are on (git push -u origin <branch>), then open
-  a pull request with gh pr create. Never push with --force, --all or --mirror.
+You are Steward, a software engineering and development assistant. You work inside the user's
+workspace: you read and understand their code, make careful changes, and commit them when asked.
+
+### Working style
+
+- Read before you write. Use the file_access tools to open the relevant files (and grep for call
+  sites) before answering questions about the code or changing it. Never guess at file contents.
+- Call get_repo_status before and after making changes so you know the branch and what changed.
+- Make the smallest change that solves the problem, in the existing style of the file. Writing a
+  file is an action the user approves, so say which file you will change and why first.
+- When asked for a review, design note or report, write it to a Markdown file with the file_access
+  tools (e.g. reports/review.md) and tell the user where you saved it.
+- Keep the user's active projects in a memory file called projects.md, and update it whenever the
+  user starts, finishes or describes one.
+- To commit, use the git_commit tool with a clear, imperative commit message. The user will be
+  asked to approve it before it runs, so summarize what is being committed first.
+- Remember durable facts the user tells you (languages, conventions, test commands, preferences)
+  and follow them.
+
+### Important
+
+Say plainly when you don't know something or haven't verified it. Never invent file contents,
+APIs or command output.
 """
-
-# Part 2 of the guide, its working-style lines with Steward's workspace in place of the portfolio.
-PART2_INSTRUCTIONS = """
-### Your workspace
-
-- The workspace's files are read with the file_access tools. Read them before answering questions
-  about the code, and never change a file unless asked. To change one, find the line with
-  file_access_grep, read it with file_access_read_lines, and edit it with file_access_replace_lines.
-- When asked for a report, write it to a Markdown file under reports/ and tell the user where you
-  saved it.
-- To commit in the workspace, use the git_commit tool. It takes a real action, so the user will be
-  asked to approve it before it runs: say what you are about to commit first.
-"""
-
-# MAF's own plan and execute steps (AgentModeProvider's defaults), with plan mode held more firmly:
-# on 2026-10-29 Steward skipped MAF's todo, plan-file and approval steps twice and did the work in
-# plan mode (Kyle: "tighten it", through mode_instructions, the Learn page's own setting).
-_MAF_MODES = AgentModeProvider().mode_instructions
-PART1_MODE_INSTRUCTIONS = {
-    **_MAF_MODES,
-    "plan": _MAF_MODES["plan"]
-    + """
-
-Rules that always hold in plan mode:
-- Do not do the work yet. Only look: read files, check the repo, or run one quick search if you
-  need it to ask a sensible question. Never save results and never write any file except plan.md.
-- Before you present the plan, call todos_add with one todo for each step of the plan.
-- Write the plan to a memory file called plan.md.
-- Every plan-mode reply ends with a clarification (with choices) or an approval request for the
-  plan. Never reply with the results of the work.""",
-}
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -400,23 +384,18 @@ def _build_conversation_agent() -> Any:
 
 
 # <shell>
-def _build_shell(workdir: Path = _WORKING_DIR, *, allow_push: bool = False) -> LocalShellTool:
-    """Build a shell confined to ``workdir``; every command is surfaced for approval.
-
-    With ``allow_push`` (Kyle, 2026-10-29: Steward does the GitHub work himself) a plain push of
-    one branch is allowed; a force push, --all and --mirror stay refused (CLAUDE.md RULE 1).
-    """
-    push_rule = r"\bgit\s+push\b.*(\s--force|\s-f\b|\s--mirror|\s--all)" if allow_push else r"\bgit\s+push\b"
+def _build_shell() -> LocalShellTool:
+    """Build a shell confined to the workspace; every command is surfaced for approval."""
     return LocalShellTool(
         mode="persistent",
-        workdir=str(workdir),
+        workdir=str(_WORKING_DIR),
         confine_workdir=True,
         policy=ShellPolicy(
             denylist=[
                 r"\brm\s+-[a-z]*r",
                 r"\bRemove-Item\b.*-Recurse",
                 r"\bdel\s+/s\b",
-                push_rule,
+                r"\bgit\s+push\b",
                 r"\bgit\s+reset\s+--hard\b",
                 r"\bgit\s+clean\b",
                 r"\bsudo\b",
@@ -556,76 +535,44 @@ async def _connect_secondbrain(stack: AsyncExitStack, tools: list[str] = _SECOND
     return secondbrain
 
 
-_EXTRACT_FACTS = """\
-From the exchange below, list the durable facts the USER explicitly states about themselves that are
-worth remembering in every future session: their preferences, conventions, tools, projects, goals
-and ways of working. Only what they say about themselves in so many words: never infer a fact from
-a question they ask, a task they request, or what the assistant did. Most turns have none.
-Answer with a JSON array of short strings, one fact each, and nothing else. Answer [] if none.
-
-USER: {user}
-
-ASSISTANT: {assistant}
-"""
+# <automatic_memory>
+_MEMORY_DIR = Path.cwd() / "agent-memory"
+_MEMORY_SCOPE = "kyle"
 
 
-class SecondBrainMemoryProvider(ContextProvider):
-    """Long-term memory kept in SecondBrain (MAF Part 2's automatic memory, stored in the vault).
+async def _maybe_enable_local_memory() -> Any:
+    """Enable automatic memory (the guide's Foundry memory, run locally with Mem0 on Ollama).
 
-    Before each turn, SecondBrain's two memory notes are put in front of Steward, as SecondBrain's
-    own agent does: ``agent-memory`` (facts, decisions, lessons) and ``user-profile`` (about Kyle).
-    After each turn, durable facts about Kyle are extracted by the model and added to
-    ``user-profile`` with SecondBrain's ``memory`` tool, which dedupes and caps them. The notes are
-    ordinary notes, so Kyle can read and edit everything Steward remembers.
+    One fixed user scope, so extracted facts are recalled across sessions. Returns None (and says
+    so) when Ollama or the store cannot be reached, so Steward still starts.
     """
+    try:
+        from agent_framework_mem0 import Mem0ContextProvider
+        from mem0 import AsyncMemory
 
-    def __init__(self, secondbrain: MCPStreamableHTTPTool, client: Any) -> None:
-        super().__init__("secondbrain-memory")
-        self._secondbrain = secondbrain
-        self._client = client
+        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        _MEMORY_DIR.mkdir(exist_ok=True)
+        memory = AsyncMemory.from_config({
+            "llm": {"provider": "ollama", "config": {"model": os.environ.get("OLLAMA_MODEL", "gpt-oss:20b"), "ollama_base_url": host}},
+            "embedder": {"provider": "ollama", "config": {"model": "nomic-embed-text-v2-moe", "ollama_base_url": host, "embedding_dims": 768}},
+            "vector_store": {"provider": "qdrant", "config": {"path": str(_MEMORY_DIR / "qdrant"), "collection_name": "steward", "embedding_model_dims": 768, "on_disk": True}},
+            "history_db_path": str(_MEMORY_DIR / "history.db"),
+            # As the guide's Foundry store (user_profile_enabled=True, chat_summary_enabled=False):
+            # keep durable facts about the user, not a log of what the assistant did.
+            "custom_instructions": (
+                "Extract only durable facts about the user: their preferences, conventions, tools, "
+                "projects, goals and ways of working. Do not store what the assistant did, explained, "
+                "planned or committed, and do not store one-off requests."
+            ),
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Automatic memory disabled: %s: %s", type(exc).__name__, exc)
+        return None
+    logger.info("Automatic memory enabled (local Mem0, %s).", _MEMORY_DIR)
+    return Mem0ContextProvider(mem0_client=memory, user_id=_MEMORY_SCOPE, search_user_id=_MEMORY_SCOPE)
 
-    async def _memory(self, **arguments: Any) -> str:
-        result = await self._secondbrain.call_tool("memory", **arguments)
-        return result if isinstance(result, str) else " ".join(getattr(c, "text", "") or "" for c in result)
 
-    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        try:
-            remembered = await self._memory(target="memory", action="read")
-            about = await self._memory(target="user", action="read")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("SecondBrain memory not read: %s", type(exc).__name__)
-            return
-        context.extend_messages(
-            self.source_id,
-            [Message(role="user", contents=[
-                "## Your long-term memory (SecondBrain note agent-memory)\n"
-                f"{remembered}\n\n## About Kyle (SecondBrain note user-profile)\n{about}"
-            ])],
-        )
-
-    async def after_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        user = "\n".join(m.text for m in context.input_messages if m and m.text)
-        assistant = context.response.text if context.response else ""
-        if not user.strip():
-            return
-        try:
-            reply = await self._client.get_response(
-                [Message(role="user", contents=[_EXTRACT_FACTS.format(user=user[-4000:], assistant=assistant[-4000:])])]
-            )
-            facts = json.loads(re.search(r"\[.*\]", reply.text or "[]", re.S).group(0))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("No facts extracted this turn: %s", type(exc).__name__)
-            return
-        for fact in facts:
-            if isinstance(fact, str) and fact.strip():
-                # A refused add (the profile is full, a duplicate) is SecondBrain's answer, not a
-                # failed turn: it is logged, and Steward consolidates the note with secondbrain_memory.
-                try:
-                    outcome = await self._memory(target="user", action="add", text=fact.strip())
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("SecondBrain memory refused a fact: %s", exc)
-                    continue
-                logger.info("SecondBrain memory: %s", outcome)
+# </automatic_memory>
 
 
 _CHARTER_NOTE = "steward-charter"
@@ -688,54 +635,53 @@ async def build_steward_agent(
     """
     _WORKING_DIR.mkdir(exist_ok=True)
     if part <= 2:
-        # Kyle, 2026-10-29: start again from Part 1, exactly as the guide builds it, and add each
-        # Part as the one before it passes. The later Parts' pieces below come back the same way.
-        secondbrain = await _connect_secondbrain(
-            stack, tools=["web_search", "web_fetch", *(["memory"] if part >= 2 else [])]
-        )
-        # Kyle, 2026-10-29: the retry stays on, because ollama/ollama#17638 (gpt-oss tool calls
-        # Ollama cannot parse) is open with no fix in MAF or Ollama
-        part1_client = _retry_malformed_tool_calls(client or OllamaChatClient())
-        # MAF's own setting: a tool call that fails validation returns the real error, so the model
-        # can correct it. Ollama shows gpt-oss todos_add's items as any[] (MAF's $ref schema), and
-        # the default "Argument parsing failed." gives him nothing to fix (microsoft/agent-framework#7222).
-        part1_client.function_invocation_configuration["include_detailed_errors"] = True
-        # Kyle, 2026-10-29: Steward does the GitHub work himself, so MAF's shell (the guide's Part 3
-        # piece) comes in early, rooted at Desktop\Research where the repositories are, every
-        # command on Kyle's Approve card (LocalShellTool's default approval)
-        part1_shell = await stack.enter_async_context(_build_shell(_RESEARCH_DIR, allow_push=True))
-        part_tools: list[Any] = [get_repo_status, part1_shell.as_function()]
-        instructions = PART1_INSTRUCTIONS + PART1_GITHUB_INSTRUCTIONS
-        part2: dict[str, Any] = {}
-        if part >= 2:
-            # Part 2 of the guide: file access over the workspace (Steward's own store, the guide's
-            # "supply your own AgentFileStore", so MAF's line edits keep a CRLF file CRLF), a tool
-            # that asks before it acts (git_commit, as the guide's place_trade), auto-approval rules
-            # (MAF's read-only file rule and Steward's small-commit rule, the guide's "rule of your
-            # own"), and automatic memory (SecondBrain's notes, in place of Foundry memory).
-            part_tools.append(git_commit)
-            instructions += PART2_INSTRUCTIONS
-            part2 = {
-                "file_access_store": LineEndingFileStore(str(_WORKING_DIR)),
-                "auto_approval_rules": [
-                    FileAccessProvider.read_only_tools_auto_approval_rule,
-                    small_commit_auto_approval_rule,
-                ],
-                "context_providers": (
-                    [SecondBrainMemoryProvider(secondbrain, part1_client)] if secondbrain is not None else []
-                ),
-            }
+        # Kyle, 2026-10-29: start over at step 1 and follow the plan. Part 1 is
+        # step01_meet_steward.py's construction and Part 2 is step02_working_with_code.py's, each
+        # as written there (Kyle: Part 2 has no web tools, as step 2 has none).
+        tools: list[Any] = [get_repo_status]
+        url = os.environ.get("SECONDBRAIN_MCP_URL")
+        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        if part == 1 and url and key:
+            secondbrain = MCPStreamableHTTPTool(
+                name="secondbrain",
+                url=url,
+                tool_name_prefix="secondbrain",
+                static_headers={"Authorization": f"Bearer {key}"},
+                allowed_tools=["web_search", "web_fetch"],
+                approval_mode="never_require",
+                load_prompts=False,
+            )
+            await stack.enter_async_context(secondbrain)
+            tools.append(secondbrain)
+        if part == 1:
+            return create_harness_agent(
+                client=client or OllamaChatClient(),
+                name="Steward",
+                agent_instructions=PART1_INSTRUCTIONS,
+                tools=tools,
+                history_provider=history_provider,
+                max_context_window_tokens=65_536,
+                max_output_tokens=8_192,
+                disable_web_search=True,
+            )
+        context_providers: list[Any] = []
+        local_memory = await _maybe_enable_local_memory()
+        if local_memory is not None:
+            await stack.enter_async_context(local_memory)
+            context_providers.append(local_memory)
         return create_harness_agent(
-            client=part1_client,
+            client=client or OllamaChatClient(),
             name="Steward",
-            agent_instructions=instructions,
-            tools=[*part_tools, *([secondbrain] if secondbrain is not None else [])],
-            history_provider=history_provider or InMemoryHistoryProvider(),
-            mode_provider=AgentModeProvider(mode_instructions=PART1_MODE_INSTRUCTIONS),
-            max_context_window_tokens=_STEWARD_CONTEXT,
-            default_options={"num_ctx": _STEWARD_CONTEXT},
+            agent_instructions=PART2_INSTRUCTIONS,
+            tools=[*tools, git_commit],
+            history_provider=history_provider,
+            file_access_store=FileSystemAgentFileStore(str(_WORKING_DIR)),
+            auto_approval_rules=[FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule],
+            context_providers=context_providers or None,
+            mode_provider=AgentModeProvider(default_mode="execute"),
+            max_context_window_tokens=65_536,
+            max_output_tokens=8_192,
             disable_web_search=True,
-            **part2,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
@@ -776,6 +722,10 @@ async def build_steward_agent(
         auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         logger.info("Skill script approval disabled (unattended run).")
 
+    local_memory = await _maybe_enable_local_memory()
+    if local_memory is not None:
+        await stack.enter_async_context(local_memory)
+
     # <create_agent>
     return create_harness_agent(
         client=client,
@@ -796,7 +746,8 @@ async def build_steward_agent(
         auto_approval_rules=auto_approval_rules,
         context_providers=[
             MontyCodeActProvider(approval_mode="never_require"),
-            *([CharterProvider(secondbrain), SecondBrainMemoryProvider(secondbrain, client)] if secondbrain is not None else []),
+            *([CharterProvider(secondbrain)] if secondbrain is not None else []),
+            *([local_memory] if local_memory is not None else []),
         ],
         mode_provider=AgentModeProvider(default_mode="execute"),
         max_context_window_tokens=_STEWARD_CONTEXT,

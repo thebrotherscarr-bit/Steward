@@ -1,27 +1,27 @@
-# Short Report on `harness/steward/step04_production_ready/hosted.py`
+# Hosted.py Report
 
-## Purpose
-`hosted.py` implements a local, loopback‑only **Steward** service based on the Responses protocol. It is a stand‑in for the Foundry‑hosted version used in the original guide, but tailored for a single user (Kyle) on a local machine.
+The **`hosted.py`** file implements a local, loopback-only server for the Steward agent, enabling it to serve SecondBrain via the Azure Responses protocol without relying on Foundry. It is designed for local development and testing, using Ollama as the LLM backend.
 
 ## Key Features
-- **Local Hosting** – Listens on `127.0.0.1:STEWARD_PORT` (default 43120).
-- **Background Task Management** – Uses a custom middleware to release background tasks at the end of each request, ensuring resources are cleaned up.
-- **File‑Based Conversation History** – Stores responses in `storage/responses` to allow conversation continuity across restarts.
-- **No Foundry Dependencies** – Works with a local Ollama instance; no Foundry project or credential handling.
-- **Halotraces Integration** – All spans are written to `halo_traces/traces.jsonl`.
 
-## Environment Variables
-- `STEWARD_PORT` – Port to listen on.
-- `OLLAMA_HOST`, `OLLAMA_MODEL`, `SECONDBRAIN_MCP_*` – Configuration for the Ollama client and SecondBrain.
-- `STEWARD_WORKSPACE` – Path to the Steward workspace.
+1. **Local Hosting** – The server listens on `127.0.0.1` using a configurable port (`STEWARD_PORT`, default `43120`).
+2. **Middleware for Background Tasks** – A custom middleware releases background agents per request to keep resources tidy.
+3. **Response Persistence** – Conversation history is stored in a disk‑based `FileResponseStore` under `storage/responses`, allowing continuity across restarts.
+4. **Tracing** – Integrates with `halo_traces` to record trace spans in `halo_traces/traces.jsonl`.
+5. **Environment Variables** – Reads settings such as `OLLAMA_HOST`, `OLLAMA_MODEL`, and others from a `.env` file.
+6. **Single Steward Instance** – Builds the Steward agent once and keeps it warm, avoiding per‑request initialization overhead.
+
+## Workflow
+
+1. `build_steward_agent` is called with an in‑memory history provider.
+2. The agent’s middleware stack is extended with `_release_background_per_request`.
+3. `ResponsesHostServer` wraps the agent and runs asynchronously.
+4. On each request, background providers are released once the response stream finishes.
 
 ## Usage
+
 ```bash
 python harness/steward/step04_production_ready/hosted.py
 ```
 
-The service is then consumed by the SecondBrain client over the Responses protocol.
-
----
-
-This report was generated automatically based on the file’s source code.
+The server is now ready to accept turns from SecondBrain on the local machine.
