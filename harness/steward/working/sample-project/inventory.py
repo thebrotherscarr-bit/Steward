@@ -13,7 +13,7 @@ class Item:
 def order_total(items: list[Item], discount_percent: float = 0.0) -> float:
     """Total price of an order after a percentage discount, rounded to cents."""
     subtotal = sum(item.unit_price * item.quantity for item in items)
-    return round(subtotal * (1 - discount_percent), 2)
+    return round(subtotal * (1 - discount_percent / 100), 2)
 
 
 def low_stock(items: list[Item], threshold: int = 5) -> list[str]:
