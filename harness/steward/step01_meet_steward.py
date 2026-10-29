@@ -10,7 +10,7 @@ All we add is engineering instructions and a custom ``get_repo_status`` tool.
 
 Changes from the guide for local Ollama:
     * ``OllamaChatClient`` replaces ``FoundryChatClient`` (model from OLLAMA_MODEL in .env).
-    * Web search is disabled: the Ollama client doesn't implement it.
+    * Web search comes from SecondBrain's web_search and web_fetch tools (Ollama has no hosted web search).
     * Token budgets are passed so the harness compacts long sessions (Ollama context: 64k).
 
 Environment variables:
@@ -20,12 +20,13 @@ Environment variables:
 """
 
 import asyncio
+from contextlib import AsyncExitStack
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-from agent_framework import create_harness_agent
+from agent_framework import create_harness_agent, MCPStreamableHTTPTool
 from agent_framework.ollama import OllamaChatClient
 from dotenv import load_dotenv
 
@@ -49,6 +50,7 @@ the state of their codebase, plan engineering work, and reason about code and it
 - Be precise: name files, functions, commands and line numbers. Prefer small, verifiable steps.
 - Keep the user's active projects in a memory file called projects.md: read it when asked about
   their projects, and update it whenever the user starts, finishes or describes one.
+- Use secondbrain_web_search for news and anything on the web, and cite the source.
 
 ### Important
 
@@ -84,27 +86,43 @@ async def main() -> None:
     # </create_client>
 
     # <create_agent>
-    agent = create_harness_agent(
-        client=client,
-        name="Steward",
-        agent_instructions=STEWARD_INSTRUCTIONS,
-        tools=get_repo_status,
-        max_context_window_tokens=65_536,
-        max_output_tokens=8_192,
-        disable_web_search=True,
-    )
-    # </create_agent>
+    async with AsyncExitStack() as stack:
+        tools = [get_repo_status]
+        url = os.environ.get("SECONDBRAIN_MCP_URL")
+        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        if url and key:
+            secondbrain = MCPStreamableHTTPTool(
+                name="secondbrain",
+                url=url,
+                tool_name_prefix="secondbrain",
+                static_headers={"Authorization": f"Bearer {key}"},
+                allowed_tools=["web_search", "web_fetch"],
+                approval_mode="never_require",
+                load_prompts=False,
+            )
+            await stack.enter_async_context(secondbrain)
+            tools.append(secondbrain)
+        agent = create_harness_agent(
+            client=client,
+            name="Steward",
+            agent_instructions=STEWARD_INSTRUCTIONS,
+            tools=tools,
+            max_context_window_tokens=65_536,
+            max_output_tokens=8_192,
+            disable_web_search=True,
+        )
+        # </create_agent>
 
-    # <run>
-    await run_agent_async(
-        agent,
-        session=agent.create_session(),
-        observers=build_observers_with_planning(agent),
-        initial_mode="plan",
-        title="🛠️ Steward",
-        placeholder="Ask about the repo, or say 'review my projects'...",
-    )
-    # </run>
+        # <run>
+        await run_agent_async(
+            agent,
+            session=agent.create_session(),
+            observers=build_observers_with_planning(agent),
+            initial_mode="plan",
+            title="🛠️ Steward",
+            placeholder="Ask about the repo, or say 'review my projects'...",
+        )
+        # </run>
 
 
 if __name__ == "__main__":

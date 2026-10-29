@@ -6,3 +6,5 @@ agent-file-memory/
 halo_traces/
 agent-memory/
 steward.log
+agent-memory.old-*/
+storage/

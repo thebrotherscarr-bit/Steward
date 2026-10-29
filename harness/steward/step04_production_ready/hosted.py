@@ -37,6 +37,7 @@ from agent_framework import (
     agent_middleware,
 )
 from agent_framework_foundry_hosting import ResponsesHostServer
+from azure.ai.agentserver.responses import FileResponseStore
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -44,6 +45,8 @@ from agent import build_steward_agent  # noqa: E402
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 logger = logging.getLogger(__name__)
+# The response chain is kept on disk so a conversation continues after a restart.
+_STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
 
 
 def _release_background_per_request(background_providers: list[BackgroundAgentsProvider]) -> Callable[..., Awaitable[None]]:
@@ -140,7 +143,7 @@ async def main() -> None:
         agent.middleware = [_release_background_per_request(background_providers), *(agent.middleware or [])]
         async with agent:
             logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol).", port)
-            server = ResponsesHostServer(agent=agent, history_source="agent")
+            server = ResponsesHostServer(agent=agent, history_source="agent", response_store=FileResponseStore(_STORAGE_DIR))
             await server.run_async(host="127.0.0.1", port=port)
 
 

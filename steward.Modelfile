@@ -1,0 +1,10 @@
+# Steward's own model: steward:N (design note plan-steward-small-model-smart-harness, step 2).
+# Build:  ollama create steward:N -f steward.Modelfile
+# Each version is kept in Ollama, so a reroll can be rolled back by naming the earlier tag.
+#
+# steward:1 (2026-10-29): gpt-oss:20b, the brain Steward already runs on, with his context fixed
+# in the model itself. 65,536 tokens matches his harness budget (agent.py _STEWARD_CONTEXT);
+# measured here: 84.6 tok/s, 12.6 of 14.1 GB on the GPU. Later versions change the base, the
+# context or the sampling only when the eval gate (step 4) says the change is better.
+FROM gpt-oss:20b
+PARAMETER num_ctx 65536
