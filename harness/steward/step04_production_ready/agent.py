@@ -29,6 +29,8 @@ Environment variables:
                                  for approval in an attended run, since the repo root holds .env)
     SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
+    MANJUEL_MCP_ATLAS          — Atlas's door, e.g. http://127.0.0.1:8090/rpc (ADR-0001 item 5)
+    MANJUEL_MCP_ATLAS_KEY      — Steward's own scoped door key, minted from the glass; never printed
 """
 
 from __future__ import annotations
@@ -59,6 +61,7 @@ from agent_framework import (
     HistoryProvider,
     InMemoryHistoryProvider,
     MCPSkillsSource,
+    MCPStdioTool,
     MCPStreamableHTTPTool,
     Message,
     MiddlewareTermination,
@@ -888,6 +891,29 @@ async def build_steward_agent(
         # ("it only reads a skill's own body"); everything else is Part 3's agent.
         part4 = part == 4
         part3_tools: list[Any] = [*tools, git_commit]
+        # ADR-0001 items 5 and 6: Atlas's door, as MAF's local-MCP page runs a stdio server with
+        # allowed_tools. bin/atlas_bridge.py (the ground's own, which Claude Code already uses) posts
+        # each JSON-RPC line to the door with the key from its environment, never from a command
+        # line. The door keeps its own authorization, as MAF says host tools must: writes park as
+        # holds for the operator, and its glass-only tools refuse by name. Only the git tools and
+        # the record are offered, the pieces of the branch-check-keep loop.
+        atlas_key = os.environ.get("MANJUEL_MCP_ATLAS_KEY")
+        if atlas_key:
+            part3_tools.append(
+                await stack.enter_async_context(
+                    MCPStdioTool(
+                        name="atlas",
+                        command=sys.executable,
+                        args=[str(_STEWARD_DIR.parents[3] / "bin" / "atlas_bridge.py")],
+                        # MCPStdioTool's env rides over the MCP SDK's default environment (mcp/client/stdio.py);
+                        # the bridge defaults the door's address itself when MANJUEL_MCP_ATLAS is unset.
+                        env={k: v for k in ("MANJUEL_MCP_ATLAS", "MANJUEL_MCP_ATLAS_KEY") if (v := os.environ.get(k))},
+                        tool_name_prefix="atlas",
+                        allowed_tools=["git", "git_branch", "git_diff", "git_commit", "git_push", "records"],
+                        load_prompts=False,
+                    )
+                )
+            )
         part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require")]
         if not part4 or enable_shell:
             shell = await stack.enter_async_context(_build_shell())

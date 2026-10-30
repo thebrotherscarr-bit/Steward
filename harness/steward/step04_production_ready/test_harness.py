@@ -36,8 +36,8 @@ from agent_framework.observability import ChatTelemetryLayer
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent as steward  # noqa: E402
 
-# Hermetic: no SecondBrain connection, whatever agent.py's load_dotenv() found.
-for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
+# Hermetic: no SecondBrain or Atlas connection, whatever agent.py's load_dotenv() found.
+for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY", "MANJUEL_MCP_ATLAS", "MANJUEL_MCP_ATLAS_KEY"):
     os.environ.pop(_name, None)
 
 SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map")
@@ -101,6 +101,7 @@ def test_modes_memory_skills_and_file_roots_are_offered() -> None:
     assert {"file_access_read", "file_access_write"} <= offered_tools(call)  # file access
     instructions = str(call["options"].get("instructions") or "")
     assert all(skill in instructions for skill in SKILLS), "every file skill is advertised"
+    assert not {t for t in offered_tools(call) if t.startswith("atlas")}, "no door without its key (ADR-0001 item 5)"
     file_access = next(p for p in agent.context_providers if type(p).__name__ == "FileAccessProvider")
     assert Path(file_access.store.root_path).resolve() == steward._WORKING_DIR  # the file root
 
