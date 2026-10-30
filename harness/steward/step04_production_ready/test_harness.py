@@ -36,8 +36,8 @@ from agent_framework.observability import ChatTelemetryLayer
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent as steward  # noqa: E402
 
-# Hermetic: no SecondBrain or Atlas connection, whatever agent.py's load_dotenv() found.
-for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY", "MANJUEL_MCP_ATLAS", "MANJUEL_MCP_ATLAS_KEY"):
+# Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
+for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
     os.environ.pop(_name, None)
 
 SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map")
@@ -101,7 +101,7 @@ def test_modes_memory_skills_and_file_roots_are_offered() -> None:
     assert {"file_access_read", "file_access_write"} <= offered_tools(call)  # file access
     instructions = str(call["options"].get("instructions") or "")
     assert all(skill in instructions for skill in SKILLS), "every file skill is advertised"
-    assert not {t for t in offered_tools(call) if t.startswith("atlas")}, "no door without its key (ADR-0001 item 5)"
+    assert not {t for t in offered_tools(call) if t.startswith("atlas")}, "no door without SecondBrain (ADR-0001 item 5)"
     file_access = next(p for p in agent.context_providers if type(p).__name__ == "FileAccessProvider")
     assert Path(file_access.store.root_path).resolve() == steward._WORKING_DIR  # the file root
 
@@ -151,3 +151,25 @@ def test_loop_stops_at_its_bound() -> None:
     # ten runs: the first run makes two model calls (the todos_add call, then the reply), the rest one each.
     assert len(client.calls) == 2 + 9
     assert any("Never finished" in m.text for m in client.calls[2]["messages"]), "the loop reminds him of the open todo"
+
+
+def test_door_calls_stay_on_stewards_world() -> None:
+    """steward_world_only, MAF's middleware gating: a door call on another world, or none, never reaches the door."""
+    from types import SimpleNamespace
+
+    def gate(name: str, arguments: dict[str, Any]) -> tuple[Any, bool]:
+        reached: list[bool] = []
+
+        async def call_next() -> None:
+            reached.append(True)
+
+        context = SimpleNamespace(function=SimpleNamespace(name=name), arguments=arguments, result=None)
+        asyncio.run(steward.steward_world_only(context, call_next))
+        return context.result, bool(reached)
+
+    result, reached = gate("atlas_git_commit", {"project": "research", "message": "x"})
+    assert not reached and 'project="steward"' in result
+    result, reached = gate("atlas_git_commit", {"message": "x"})
+    assert not reached, "no project means the door's default world, which is refused"
+    assert gate("atlas_git", {"project": "steward"}) == (None, True)
+    assert gate("git_commit", {"message": "x"}) == (None, True), "Steward's own tools are untouched"
