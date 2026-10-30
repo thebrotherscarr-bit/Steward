@@ -16,7 +16,8 @@ def main() -> None:
     parser.add_argument("--staged", action="store_true", help="Only count staged changes.")
     args = parser.parse_args()
 
-    diff_args = ["git", "diff", "--numstat"] + (["--cached"] if args.staged else ["HEAD"]) + ["--", "."]
+    # --relative: paths relative to the folder given, like ls-files below, so they open as given
+    diff_args = ["git", "diff", "--numstat", "--relative"] + (["--cached"] if args.staged else ["HEAD"]) + ["--", "."]
     result = subprocess.run(diff_args, cwd=args.repo, capture_output=True, text=True)
     if result.returncode != 0:
         print(json.dumps({"error": result.stderr.strip() or "git diff failed"}))

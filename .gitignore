@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 agent-file-memory/
 halo_traces/
+improvement_loop/
+.venv-halo/
 agent-memory/
 steward.log
 agent-memory.old-*/

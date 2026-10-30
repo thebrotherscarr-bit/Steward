@@ -1,0 +1,203 @@
+{
+  "type": "session",
+  "session_id": "db1562e0-ad2f-4e6f-9eb4-3294b3016ee0",
+  "service_session_id": null,
+  "state": {
+    "agent_mode": {
+      "current_mode": "execute"
+    },
+    "tool_approval": {
+      "rules": [],
+      "queued_approval_requests": [],
+      "collected_approval_responses": []
+    },
+    "compaction": {},
+    "todo": {},
+    "file_memory": {},
+    "message_injection.pending_messages": [],
+    "in_memory": {
+      "messages": [
+        {
+          "role": "user",
+          "contents": [
+            {
+              "type": "text",
+              "text": "I'm working on Steward and SecondBrain. Add them to my projects.",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_1",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_1",
+              "kind": "user",
+              "index": 0,
+              "has_reasoning": false,
+              "token_count": 44,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        },
+        {
+          "role": "assistant",
+          "contents": [
+            {
+              "type": "text_reasoning",
+              "text": "User says \"Current todo list - none yet\" meaning no todo items. They want to add \"Steward\" and \"SecondBrain\" to projects. They want to update projects.md memory file. Let's read projects.md if exists.",
+              "additional_properties": {}
+            },
+            {
+              "type": "function_call",
+              "call_id": "53947db9-0711-4244-9382-533a45107a9c",
+              "name": "file_memory_read",
+              "arguments": {
+                "file_name": "projects.md"
+              },
+              "hosted": false,
+              "id": "af-call-3f3fd32503844fbaa7f6f619e90700fc",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_6",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_6",
+              "kind": "tool_call",
+              "index": 1,
+              "has_reasoning": true,
+              "token_count": 144,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        },
+        {
+          "role": "tool",
+          "contents": [
+            {
+              "type": "function_result",
+              "call_id": "53947db9-0711-4244-9382-533a45107a9c",
+              "result": "File 'projects.md' not found.",
+              "items": [
+                {
+                  "type": "text",
+                  "text": "File 'projects.md' not found.",
+                  "additional_properties": {}
+                }
+              ],
+              "id": "af-call-3f3fd32503844fbaa7f6f619e90700fc",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_2",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_6",
+              "kind": "tool_call",
+              "index": 1,
+              "has_reasoning": true,
+              "token_count": 63,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        },
+        {
+          "role": "assistant",
+          "contents": [
+            {
+              "type": "text_reasoning",
+              "text": "No file, so need to create. The file should contain entries for Steward and SecondBrain. They might be in a simple format, e.g., list. Let's create a file. Use file_memory_write.",
+              "additional_properties": {}
+            },
+            {
+              "type": "function_call",
+              "call_id": "61028a08-3341-40c2-8826-e05683495dfb",
+              "name": "file_memory_write",
+              "arguments": {
+                "file_name": "projects.md",
+                "content": "- Steward\n- SecondBrain\n",
+                "description": "List of active projects"
+              },
+              "hosted": false,
+              "id": "af-call-6fb4f41ac5f24c98ae3b02bd9b75bd3b",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_3",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_3",
+              "kind": "tool_call",
+              "index": 2,
+              "has_reasoning": true,
+              "token_count": 158,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        },
+        {
+          "role": "tool",
+          "contents": [
+            {
+              "type": "function_result",
+              "call_id": "61028a08-3341-40c2-8826-e05683495dfb",
+              "result": "File 'projects.md' written with description.",
+              "items": [
+                {
+                  "type": "text",
+                  "text": "File 'projects.md' written with description.",
+                  "additional_properties": {}
+                }
+              ],
+              "id": "af-call-6fb4f41ac5f24c98ae3b02bd9b75bd3b",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_4",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_3",
+              "kind": "tool_call",
+              "index": 2,
+              "has_reasoning": true,
+              "token_count": 67,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        },
+        {
+          "role": "assistant",
+          "contents": [
+            {
+              "type": "text",
+              "text": "I\u2019ve added your projects to the session\u2019s memory file.  \n**projects.md** now contains:  \n\n```\n- Steward\n- SecondBrain\n```\n\nFeel free to let me know if you\u2019d like to add more details or make any changes.",
+              "additional_properties": {}
+            }
+          ],
+          "message_id": "msg_5",
+          "additional_properties": {
+            "_group": {
+              "id": "group_msg_5",
+              "kind": "assistant_text",
+              "index": 3,
+              "has_reasoning": false,
+              "token_count": 81,
+              "token_count_basis": 2
+            },
+            "_excluded": false
+          },
+          "type": "message"
+        }
+      ]
+    }
+  }
+}
