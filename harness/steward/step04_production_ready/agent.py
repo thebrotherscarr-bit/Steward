@@ -24,7 +24,9 @@ Environment variables:
     STEWARD_CODER_MODEL        — coder model (defaults to qwen3-coder:30b)
     STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
     STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:26b)
-    STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to ../working)
+    STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
+                                 per ADR-0001 item 11: his own code is in reach; every file read parks
+                                 for approval in an attended run, since the repo root holds .env)
     SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
 """
@@ -87,7 +89,7 @@ sys.path.insert(0, str(_STEWARD_DIR))
 from subprocess_script_runner import subprocess_script_runner  # noqa: E402
 
 load_dotenv()
-_WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR / "working").resolve()
+_WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
 # Kyle, 2026-10-29: gemma4:26b replaces gemma4:12b (better reviewed; measured 60 tok/s vs 52 here).
 # qwen3-coder:30b stays: devstral-small-2:24b, the reviews' 16 GB pick, measured 13 tok/s at an 8k
@@ -901,8 +903,12 @@ async def build_steward_agent(
             part3_providers.append(
                 ShellEnvironmentProvider(shell, ShellEnvironmentProviderOptions(override_family=ShellFamily.POSIX))
             )
-        auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
+        # ADR-0001 item 11: the file root is the repo, whose root holds .env, so file reads keep MAF's
+        # default approval in an attended run. Only an unattended run (evals, the same switch that
+        # auto-approves skill scripts) gets the read-only rule, as MAF's claw evals do.
+        auto_approval_rules: list[Any] = []
         if part4 and auto_approve_skill_scripts:
+            auto_approval_rules.append(FileAccessProvider.read_only_tools_auto_approval_rule)
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         return create_harness_agent(
             client=part3_client,
