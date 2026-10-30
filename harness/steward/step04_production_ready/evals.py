@@ -134,10 +134,17 @@ def explorer_names_files(query: str, response: str) -> dict[str, object]:
 
 
 async def _run_queries(agent: Agent[Any], queries: list[str]) -> list[AgentResponse[Any]]:
-    """Run each query on its own fresh session (the harness's approval middleware needs a session)."""
+    """Run each query on its own fresh session (the harness's approval middleware needs a session).
+
+    Streamed, so each response holds every round of the run: MAF's ToolApprovalMiddleware keeps the
+    auto-approved rounds on its streaming path and returns only the last round otherwise
+    (_harness/_tool_approval.py), and MAF's tool checks read the response (2026-10-30: a
+    non-streaming run reported load_skill "not called" though the trace shows it).
+    """
     responses: list[AgentResponse[Any]] = []
     for query in queries:
-        responses.append(await agent.run(query, session=agent.create_session()))
+        stream = agent.run(query, session=agent.create_session(), stream=True)
+        responses.append(await stream.get_final_response())
     return responses
 
 
