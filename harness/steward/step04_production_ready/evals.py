@@ -175,4 +175,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # a reason can carry characters Windows' console code page cannot print (2026-10-30: U+2011)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     asyncio.run(main())
