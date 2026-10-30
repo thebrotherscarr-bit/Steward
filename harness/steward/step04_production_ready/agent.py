@@ -813,7 +813,11 @@ async def build_steward_agent(
                 httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(30.0, read=300.0))
             )
             secondbrain_client = await stack.enter_async_context(Client(streamable_http_client(url, http_client=http)))
-            tools.append(await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client)))
+            # Kyle, 2026-10-30 (MAF improvement loop, case 1; supersedes "every part" above for Parts
+            # 3 and 4): from Part 3 the web tools are the WebResearchAgent's alone, so Steward delegates
+            # web research instead of searching himself. MAF's fix at the lowest layer, tool selection.
+            if part <= 2:
+                tools.append(await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client)))
         if part == 1:
             return create_harness_agent(
                 client=client or OllamaChatClient(),
