@@ -64,13 +64,19 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
         return _get()
 
 
-def run_steward(replies: list[Any], query: str) -> tuple[ScriptedChatClient, Any, Any]:
-    """One turn of Steward (Part 4, shell off) on the scripted client, in its own session."""
+def run_steward(replies: list[Any], query: str, *, unattended: bool = False) -> tuple[ScriptedChatClient, Any, Any]:
+    """One turn of Steward (Part 4, shell off) on the scripted client, in its own session.
+
+    ``unattended`` is the evals' switch (auto_approve_skill_scripts): reads and skill scripts run without
+    approval, as in MAF's claw evals.
+    """
 
     async def _go() -> tuple[ScriptedChatClient, Any, Any]:
         client = ScriptedChatClient(replies)
         async with AsyncExitStack() as stack:
-            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, auto_approve_skill_scripts=unattended
+            )
             async with agent:
                 response = await agent.run(query, session=agent.create_session())
         return client, agent, response
@@ -117,11 +123,20 @@ def test_file_write_waits_for_approval() -> None:
     assert len(client.calls) == 1
 
 
-def test_file_read_runs_without_approval() -> None:
-    read = Content.from_function_call(
-        call_id="r1", name="file_access_read", arguments={"file_name": "sample-project/inventory.py"}
-    )
-    client, _, response = run_steward([read, "It defines order_total."], "Read inventory.py.")
+INVENTORY = "harness/steward/working/sample-project/inventory.py"
+
+
+def test_file_read_waits_for_approval_when_attended() -> None:
+    # ADR-0001 item 11: the file root is the repo, whose root holds .env, so reads park for approval.
+    read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": INVENTORY})
+    client, _, response = run_steward([read], "Read inventory.py.")
+    assert [r.function_call.name for r in approval_requests(response)] == ["file_access_read"]
+    assert len(client.calls) == 1
+
+
+def test_file_read_runs_without_approval_when_unattended() -> None:
+    read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": INVENTORY})
+    client, _, response = run_steward([read, "It defines order_total."], "Read inventory.py.", unattended=True)
     assert not approval_requests(response)
     assert len(client.calls) == 2, "the read ran and the model was called again"
     results = [str(c.result) for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_result"]

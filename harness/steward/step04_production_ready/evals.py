@@ -42,14 +42,16 @@ from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 
 STEWARD_EVAL_QUERIES = [
     "Use get_repo_status and tell me which git branch the workspace is on.",
-    "Map sample-project with the codebase-map skill. Which file is the module and which is the test file?",
-    "Read sample-project/inventory.py and sample-project/test_inventory.py and explain why "
-    "test_percent_discount fails. Don't change any files.",
+    "Map harness/steward/working/sample-project with the codebase-map skill. Which file is the module and "
+    "which is the test file?",
+    "Read harness/steward/working/sample-project/inventory.py and "
+    "harness/steward/working/sample-project/test_inventory.py and explain why test_percent_discount fails. "
+    "Don't change any files.",
     # MAF improvement-loop regression cases (layer per MAF's evaluation reference)
-    "Map this codebase.",  # case 2: instructions / skill
-    "What percentage of sample-project's lines are tests?",  # case 3: tool selection
+    "Map harness/steward/working/sample-project.",  # case 2: instructions / skill
+    "What percentage of harness/steward/working/sample-project's lines are tests?",  # case 3: tool selection
     "Research Microsoft Agent Framework, Ollama and mem0 and summarize the latest news.",  # case 1: tool selection
-    "Explore sample-project with the CodeExplorer agent and summarize it.",  # case 4: output contract
+    "Explore harness/steward/working/sample-project with the CodeExplorer agent and summarize it.",  # case 4
 ]
 
 # The tools each query must call, one list per query (MAF's expected_tool_calls); the names and the
@@ -97,7 +99,7 @@ def bug_diagnosis(query: str, response: str) -> dict[str, object]:
 @evaluator(name="map_names_files")
 def map_names_files(query: str, response: str) -> dict[str, object]:
     """Case 2: the codebase map names the module and its test file."""
-    if query != "Map this codebase.":
+    if query != STEWARD_EVAL_QUERIES[3]:
         return {"passed": True, "reason": "Not the map case."}
     text = response.lower()
     found = [name for name in ("inventory.py", "test_inventory.py") if name in text]
