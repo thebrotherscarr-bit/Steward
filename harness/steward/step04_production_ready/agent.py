@@ -67,7 +67,13 @@ from agent_framework import (
 )
 from agent_framework.monty import MontyCodeActProvider
 from agent_framework.ollama import OllamaChatClient
-from agent_framework.tools import LocalShellTool, ShellPolicy
+from agent_framework.tools import (
+    LocalShellTool,
+    ShellEnvironmentProvider,
+    ShellEnvironmentProviderOptions,
+    ShellFamily,
+    ShellPolicy,
+)
 from dotenv import load_dotenv
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
@@ -878,11 +884,21 @@ async def build_steward_agent(
         # ("it only reads a skill's own body"); everything else is Part 3's agent.
         part4 = part == 4
         part3_tools: list[Any] = [*tools, git_commit]
+        part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require")]
         if not part4 or enable_shell:
             shell = await stack.enter_async_context(_build_shell())
             # Kyle, 2026-10-29: MAF's run_shell text never names the shell, so it is named here
             # (as_function's description), and Steward's own line-ending store keeps a CRLF file CRLF.
             part3_tools.append(shell.as_function(description=shell.as_function().description + " The shell is bash (Git Bash on Windows)."))
+            # ADR-0001 item 2: MAF's ShellEnvironmentProvider tells Steward his shell, OS, working
+            # directory and tool versions before each run. The harness factory adds it only through
+            # shell_executor, which needs a client with SupportsShellTool, and OllamaChatClient has
+            # none, so it is added as MAF's shell-tools guide does for a plain agent. The provider
+            # assumes PowerShell on Windows (_detect_family), and its PowerShell probe ends a bash
+            # session, so the family is set with MAF's own override_family: the shell is Git Bash.
+            part3_providers.append(
+                ShellEnvironmentProvider(shell, ShellEnvironmentProviderOptions(override_family=ShellFamily.POSIX))
+            )
         auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
         if part4 and auto_approve_skill_scripts:
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
@@ -898,7 +914,7 @@ async def build_steward_agent(
             skills_provider=SkillsProvider(DeduplicatingSkillsSource(skills_source), disable_load_skill_approval=part4),
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
-            context_providers=[MontyCodeActProvider(approval_mode="never_require")],
+            context_providers=part3_providers,
             mode_provider=AgentModeProvider(default_mode="execute"),
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
