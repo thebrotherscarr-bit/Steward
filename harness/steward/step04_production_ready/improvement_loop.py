@@ -72,6 +72,14 @@ EVAL_GENERATION_MODEL = os.environ.get("LOOP_EVAL_GENERATION_MODEL", ANALYSIS_MO
 JUDGE_MODEL = os.environ.get("LOOP_JUDGE_MODEL", ANALYSIS_MODEL)
 HALO_MODEL = os.environ.get("LOOP_HALO_MODEL", ANALYSIS_MODEL)
 PROMPTFOO_VERSION = os.environ.get("PROMPTFOO_VERSION", "0.121.9")
+# The notebook's model settings, with its reasoning_effort: medium, the notebook's own value (Kyle,
+# 2026-10-30: high was tried and scored worse, "set the effort back to medium"). On Ollama it is
+# MAF's and Promptfoo's `think` option (MAF's ollama_agent_reasoning.py) and HALO's
+# ModelConfig.reasoning_effort.
+MODEL_SETTINGS = {
+    "agent_model": AGENT_MODEL,
+    "reasoning_effort": "medium",
+}
 
 
 def format_duration(seconds: float) -> str:
@@ -86,7 +94,8 @@ async def structured(prompt: str, model: str, response_format: type[Any]) -> Any
     from agent_framework.ollama import OllamaChatClient
 
     response = await OllamaChatClient(model=model).get_response(
-        [Message(role="user", contents=[prompt])], options={"response_format": response_format}
+        [Message(role="user", contents=[prompt])],
+        options={"response_format": response_format, "think": MODEL_SETTINGS["reasoning_effort"]},
     )
     return response.value
 
@@ -133,7 +142,10 @@ async def generate_traces(questions: list[str]) -> tuple[list[TraceRecord], dict
                 print(f"Running {label}/{len(questions):02d}: {question}")
                 with get_tracer().start_as_current_span(f"Steward improvement loop {label}") as span:
                     trace_id = format_trace_id(span.get_span_context().trace_id)
-                    response = await agent.run(question, session=agent.create_session())
+                    # the reasoning effort per request, as MAF's ollama_agent_reasoning.py allows
+                    response = await agent.run(
+                        question, session=agent.create_session(), options={"think": MODEL_SETTINGS["reasoning_effort"]}
+                    )
                 traces.append(TraceRecord(trace_id, label, question, response.text, mode="maf"))
     return traces, harness
 
@@ -145,7 +157,7 @@ def serialize_agent_config(agent: Any) -> dict[str, Any]:
     return {
         "version": revision.stdout.strip() or "unknown",
         "system_prompt": agent.default_options.get("instructions") or "",
-        "model_settings": {"agent_model": AGENT_MODEL},
+        "model_settings": MODEL_SETTINGS,
         "tool_policy": {
             "tools": tools,
             "context_providers": [type(p).__name__ for p in agent.context_providers],
@@ -367,7 +379,7 @@ def promptfoo_test_from_eval(item: dict[str, Any], trace: TraceRecord) -> dict[s
     ]
     assertions.append({
         "type": "llm-rubric",
-        "provider": f"ollama:chat:{JUDGE_MODEL}",
+        "provider": {"id": f"ollama:chat:{JUDGE_MODEL}", "config": {"think": MODEL_SETTINGS["reasoning_effort"]}},
         "threshold": 0.8,
         "value": item["rubric"],
     })
@@ -671,12 +683,13 @@ async def run_halo_optimization(context_path: Path) -> str:
     from engine.models.messages import AgentMessage
     from engine.sandbox.sandbox import Sandbox
 
-    agent = HaloAgentConfig(name="root", model=ModelConfig(name=HALO_MODEL), maximum_turns=20)
+    effort = MODEL_SETTINGS["reasoning_effort"]
+    agent = HaloAgentConfig(name="root", model=ModelConfig(name=HALO_MODEL, reasoning_effort=effort), maximum_turns=20)
     config = EngineConfig(
         root_agent=agent,
         subagent=agent.model_copy(update={"name": "sub"}),
-        synthesis_model=ModelConfig(name=HALO_MODEL),
-        compaction_model=ModelConfig(name=HALO_MODEL, temperature=1.0),
+        synthesis_model=ModelConfig(name=HALO_MODEL, reasoning_effort=effort),
+        compaction_model=ModelConfig(name=HALO_MODEL, temperature=1.0, reasoning_effort=effort),
         model_provider=ModelProviderConfig(base_url=OLLAMA_V1, api_key="ollama"),
         maximum_depth=1,
         maximum_parallel_subagents=2,
@@ -763,7 +776,8 @@ async def main() -> None:
         shutil.rmtree(ARTIFACT_DIR)
     HALO_TRACE_PATH.parent.mkdir(parents=True)
     print("Models:", {"agent": AGENT_MODEL, "analysis": ANALYSIS_MODEL, "eval_generation": EVAL_GENERATION_MODEL,
-                      "judge": JUDGE_MODEL, "halo": HALO_MODEL, "promptfoo": PROMPTFOO_VERSION})
+                      "judge": JUDGE_MODEL, "halo": HALO_MODEL, "promptfoo": PROMPTFOO_VERSION,
+                      "reasoning_effort": MODEL_SETTINGS["reasoning_effort"]})
 
     started = time.perf_counter()
     traces, harness = await generate_traces(QUESTIONS)
