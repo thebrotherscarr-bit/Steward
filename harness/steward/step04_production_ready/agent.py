@@ -29,8 +29,6 @@ Environment variables:
                                  for approval in an attended run, since the repo root holds .env)
     SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
-    MANJUEL_MCP_ATLAS          — Atlas's door, e.g. http://127.0.0.1:8090/rpc (ADR-0001 item 5)
-    MANJUEL_MCP_ATLAS_KEY      — Steward's own scoped door key, minted from the glass; never printed
 """
 
 from __future__ import annotations
@@ -61,7 +59,7 @@ from agent_framework import (
     HistoryProvider,
     InMemoryHistoryProvider,
     MCPSkillsSource,
-    MCPStdioTool,
+    FunctionInvocationContext,
     MCPStreamableHTTPTool,
     Message,
     MiddlewareTermination,
@@ -440,6 +438,35 @@ def _build_conversation_agent() -> Any:
 
 
 # </background>
+
+
+# <atlas>
+# The door's git tools and record that Steward may call (ADR-0001 items 5 and 6), by their names on the door.
+_ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "records")
+_STEWARD_WORLD = "steward"
+
+
+async def steward_world_only(
+    context: FunctionInvocationContext,
+    call_next: Callable[[], Awaitable[None]],
+) -> None:
+    """Keep every door call on Steward's own world: MAF's middleware gating (controlling tool availability).
+
+    The door's tools fall back to its default world (research) when no project is named, so a door call
+    that names another world, or none, is answered with corrective feedback and never reaches the door.
+    """
+    if context.function.name.startswith("atlas_"):
+        project = context.arguments.get("project") if hasattr(context.arguments, "get") else None
+        if project != _STEWARD_WORLD:
+            context.result = (
+                f"Error: Atlas's door tools work only on your own repository. Call {context.function.name} "
+                f"again with project=\"{_STEWARD_WORLD}\"."
+            )
+            return
+    await call_next()
+
+
+# </atlas>
 
 
 # <shell>
@@ -891,25 +918,22 @@ async def build_steward_agent(
         # ("it only reads a skill's own body"); everything else is Part 3's agent.
         part4 = part == 4
         part3_tools: list[Any] = [*tools, git_commit]
-        # ADR-0001 items 5 and 6: Atlas's door, as MAF's local-MCP page runs a stdio server with
-        # allowed_tools. bin/atlas_bridge.py (the ground's own, which Claude Code already uses) posts
-        # each JSON-RPC line to the door with the key from its environment, never from a command
-        # line. The door keeps its own authorization, as MAF says host tools must: writes park as
-        # holds for the operator, and its glass-only tools refuse by name. Only the git tools and
-        # the record are offered, the pieces of the branch-check-keep loop.
-        atlas_key = os.environ.get("MANJUEL_MCP_ATLAS_KEY")
-        if atlas_key:
+        # ADR-0001 items 5 and 6: Atlas's door. SecondBrain serves the door's tools on the same MCP
+        # client Steward already holds (its share key, as a client: reads run, writes park as holds for
+        # the operator), and the door carries his repository as the world `steward`. So the door is one
+        # more MCPStreamableHTTPTool on that client, with allowed_tools, as MAF's local-MCP page shows.
+        # The door keeps its own authorization, as MAF says host tools must. Only the git tools and the
+        # record are offered, the pieces of the branch-check-keep loop; steward_world_only keeps every
+        # call on his own world.
+        if secondbrain_client is not None:
             part3_tools.append(
                 await stack.enter_async_context(
-                    MCPStdioTool(
+                    MCPStreamableHTTPTool(
                         name="atlas",
-                        command=sys.executable,
-                        args=[str(_STEWARD_DIR.parents[3] / "bin" / "atlas_bridge.py")],
-                        # MCPStdioTool's env rides over the MCP SDK's default environment (mcp/client/stdio.py);
-                        # the bridge defaults the door's address itself when MANJUEL_MCP_ATLAS is unset.
-                        env={k: v for k in ("MANJUEL_MCP_ATLAS", "MANJUEL_MCP_ATLAS_KEY") if (v := os.environ.get(k))},
+                        mcp_client=secondbrain_client,
                         tool_name_prefix="atlas",
-                        allowed_tools=["git", "git_branch", "git_diff", "git_commit", "git_push", "records"],
+                        allowed_tools=list(_ATLAS_GIT_TOOLS),
+                        approval_mode="never_require",
                         load_prompts=False,
                     )
                 )
@@ -949,6 +973,7 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
+            middleware=[steward_world_only],
             mode_provider=AgentModeProvider(default_mode="execute"),
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
