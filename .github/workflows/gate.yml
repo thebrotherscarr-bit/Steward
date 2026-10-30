@@ -1,0 +1,49 @@
+# THE GATE: A CHANGE TO STEWARD IS KEPT ONLY IF THIS PASSES.
+#
+# Kyle, 2026-10-30: Nigel's approach for Steward -- a pull request, checks that
+# must pass, and the merge into main as the approval gate. "Start with the
+# simplest CI gate we can, and then expand that as needed while steward does
+# the evals."
+#
+# STAGE 1, the simplest gate. No model, no GPU, no network beyond the install:
+#   compile  every Python file in the repo parses (python -m compileall), so a
+#            broken edit never reaches main.
+#   sample   the sample project's own tests pass at the committed state
+#            (working/sample-project). The evals plant the discount bug in the
+#            working copy only; what is committed must stay green.
+#
+# Each later stage is one more step here, added when a case needs it. Evals that
+# need Steward's model (gpt-oss:20b) run on this PC: GitHub's runners have no GPU.
+name: gate
+
+# Proved once per line: by its pull request, main by its own push, and any line
+# by hand (workflow_dispatch), as Manjuel's prove.yml does.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push on the same ref cancels the older run.
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: compile
+        run: python -m compileall -q .
+      - name: sample
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest -q harness/steward/working/sample-project
