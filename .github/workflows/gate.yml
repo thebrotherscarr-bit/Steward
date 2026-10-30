@@ -1,9 +1,8 @@
 # THE GATE: A CHANGE TO STEWARD IS KEPT ONLY IF THIS PASSES.
 #
-# Kyle, 2026-10-30: Nigel's approach for Steward -- a pull request, checks that
-# must pass, and the merge into main as the approval gate. "Start with the
-# simplest CI gate we can, and then expand that as needed while steward does
-# the evals."
+# Nigel's approach for Steward: a pull request, checks that must pass, and the
+# merge into main as the approval gate. It starts with the simplest gate and
+# grows one step at a time.
 #
 # STAGE 1, the simplest gate. No model, no GPU, no network beyond the install:
 #   compile  every Python file in the repo parses (python -m compileall), so a
@@ -12,8 +11,16 @@
 #            (working/sample-project). The evals plant the discount bug in the
 #            working copy only; what is committed must stay green.
 #
-# Each later stage is one more step here, added when a case needs it. Evals that
-# need Steward's model (gpt-oss:20b) run on this PC: GitHub's runners have no GPU.
+# STAGE 2 (ADR-0001: small checks, not model-run evals):
+#   harness  Steward's harness checked with no model, as Microsoft's builder skill
+#            validates a harness: his modes, memory, skills and file root are
+#            offered; git_commit and file writes wait for approval; reads don't;
+#            the harness loop stops at its bound. A scripted chat client, composed
+#            like MAF's own test client, stands in for Ollama (test_harness.py).
+#            The MAF packages are pinned to the versions Steward runs on.
+#
+# Each later stage is one more step here. Anything that needs Steward's model
+# (gpt-oss:20b) runs on this PC: GitHub's runners have no GPU.
 name: gate
 
 # Proved once per line: by its pull request, main by its own push, and any line
@@ -47,3 +54,7 @@ jobs:
         run: |
           python -m pip install --quiet pytest
           python -m pytest -q harness/steward/working/sample-project
+      - name: harness
+        run: |
+          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 mcp==2.3.0 httpx2==2.16.0 python-dotenv==1.2.4
+          python -m pytest -q -p no:cacheprovider harness/steward/step04_production_ready/test_harness.py
