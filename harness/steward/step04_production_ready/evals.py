@@ -1,7 +1,8 @@
 """Local evals for the production-ready Steward (Step 4).
 
 Follows the guide's ``evals.py``: run fixed queries (one fresh session each) and score the answers
-with local evaluators. Foundry evaluators are left out: they need Microsoft Foundry.
+with local evaluators. Foundry evaluators are left out: they need Microsoft Foundry. Every span goes
+to halo_traces/traces.jsonl, as in console_app.py, and a failed check prints its reason.
 
 The shell is disabled and skill scripts are auto-approved for this unattended run, so no query
 stops on an approval prompt. Nothing here writes files or commits.
@@ -19,10 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from agent_framework import Agent, AgentResponse, LocalEvaluator, evaluate_agent, evaluator
+from agent_framework.observability import configure_otel_providers
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent  # noqa: E402
+from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 
 STEWARD_EVAL_QUERIES = [
     "Use get_repo_status and tell me which git branch the workspace is on.",
@@ -72,6 +75,7 @@ async def _run_queries(agent: Agent[Any], queries: list[str]) -> list[AgentRespo
 async def main() -> None:
     """Run the local Steward evals."""
     load_dotenv()
+    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     async with AsyncExitStack() as stack:
         agent = await build_steward_agent(stack, enable_shell=False, auto_approve_skill_scripts=True)
         async with agent:
@@ -83,6 +87,9 @@ async def main() -> None:
             print(f"Local evals: {results[0].passed}/{results[0].total} passed")
             for item in results[0].items:
                 print(f"  [{item.status}] {(item.input_text or '')[:70]}")
+                for score in item.scores:
+                    if score.passed is False:
+                        print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
 
 
 if __name__ == "__main__":

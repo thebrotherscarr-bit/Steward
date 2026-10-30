@@ -4,8 +4,10 @@ Follows Part 4 of MAF's "Build your own claw" series: Step 3's agent is restruct
 factory, ``build_steward_agent``, that thin hosts (``console_app.py``, ``evals.py``) share.
 
 Changes from the guide for local Ollama:
-    * Foundry hosting (``hosted.py``, agent manifests), Purview middleware and Foundry Toolbox
-      skills are left out: they need Microsoft Foundry / Azure.
+    * Foundry deployment (agent manifests) is left out: it needs Microsoft Foundry / Azure.
+    * Local pieces stand in for the rest: Presidio for Purview, SecondBrain's skill notes over MCP
+      for Foundry Toolbox skills, and SecondBrain's web tools for hosted web search (the main agent
+      and WebResearchAgent).
     * Skills and the script runner are read from the parent ``steward/`` folder instead of local
       copies (the copies only exist in the guide for Foundry's ZIP deployment).
 
@@ -37,12 +39,16 @@ import subprocess
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from agent_framework import (
     Agent,
     AgentModeProvider,
     AggregatingSkillsSource,
+    ChatContext,
+    ChatMiddleware,
+    ChatResponse,
     ContextProvider,
     DeduplicatingSkillsSource,
     FileAccessProvider,
@@ -53,6 +59,8 @@ from agent_framework import (
     MCPSkillsSource,
     MCPStreamableHTTPTool,
     Message,
+    MiddlewareTermination,
+    ResponseStream,
     SkillsProvider,
     create_harness_agent,
     tool,
@@ -61,7 +69,10 @@ from agent_framework.monty import MontyCodeActProvider
 from agent_framework.ollama import OllamaChatClient
 from agent_framework.tools import LocalShellTool, ShellPolicy
 from dotenv import load_dotenv
+from mcp import Client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import Field
+import httpx2
 
 _STEWARD_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_STEWARD_DIR))
@@ -203,6 +214,40 @@ APIs or command output.
 """
 
 
+# Part 3: the plan's step 3 (step03_scaling_capabilities.py), as written there.
+PART3_INSTRUCTIONS = """\
+## Steward: Engineering Assistant Instructions
+
+You are Steward, a software engineering and development assistant. You work inside the user's
+workspace: you map and understand codebases, review changes, fix bugs, run tests, and commit work
+when asked.
+
+### Working style
+
+- Read before you write. Use the file_access tools to open the relevant files (and grep for call
+  sites) before answering questions about the code or changing it. Never guess at file contents.
+- You have skills for code-review and codebase-map. When a request matches a skill, load it and
+  follow its instructions (read its references, run its scripts) rather than improvising.
+- When asked to understand a large codebase or several modules, delegate each module to the
+  background CodeExplorer agent so they are explored concurrently, then combine the findings.
+- When asked to research several libraries, tools or topics on the web, delegate each one to the
+  background WebResearchAgent so they run concurrently, then summarize the findings together.
+- Use the run_shell tool to run tests, linters, builds and read-only git commands in the workspace.
+  Run the tests before and after a change, and report the actual output. Explain what a command
+  does before running anything that changes files.
+- Use CodeAct (Python) for any calculation instead of estimating.
+- Make the smallest change that solves the problem, in the existing style of the file. A change is
+  done only when the tests that cover it pass.
+- To commit, use the git_commit tool with a clear, imperative message. The user will be asked to
+  approve it before it runs, so summarize what is being committed first.
+
+### Important
+
+Say plainly when you don't know something or haven't verified it. Never invent file contents,
+APIs or command output.
+"""
+
+
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=_WORKING_DIR, capture_output=True, text=True, timeout=30)
 
@@ -215,7 +260,8 @@ def get_repo_status() -> dict[str, object]:
     return {
         "workspace": str(_WORKING_DIR),
         "branch": _git("branch", "--show-current").stdout.strip(),
-        "changes": _git("status", "--porcelain", "--", ".").stdout.splitlines(),
+        # --short lists paths relative to the workspace, so they open with file access as given
+        "changes": _git("status", "--short", "--", ".").stdout.splitlines(),
         "recent_commits": _git("log", "--oneline", "-5").stdout.splitlines(),
     }
 
@@ -387,6 +433,8 @@ def _build_conversation_agent() -> Any:
 def _build_shell() -> LocalShellTool:
     """Build a shell confined to the workspace; every command is surfaced for approval."""
     return LocalShellTool(
+        # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override
+        shell=[r"C:\Program Files\Git\bin\bash.exe"],
         mode="persistent",
         workdir=str(_WORKING_DIR),
         confine_workdir=True,
@@ -403,7 +451,8 @@ def _build_shell() -> LocalShellTool:
                 r"\bshutdown\b",
             ],
         ),
-        timeout=120,
+        # Kyle, 2026-10-29: long enough for Steward to run the improvement loop (about 20 minutes)
+        timeout=3600,
     )
 
 
@@ -604,6 +653,115 @@ class CharterProvider(ContextProvider):
 # </secondbrain>
 
 
+# <governance>
+# The guide's Purview step, on this PC: Microsoft Presidio (open source, offline) screens what goes to
+# the model and what comes back, in the same place and the same way as the guide's
+# PurviewChatPolicyMiddleware (chat middleware: the prompt before the call, the whole response after
+# it, a streamed response buffered and screened before any of it is released). Opt-in, as Purview
+# is: on when PRESIDIO_ENTITIES lists the entity types to block.
+_PRESIDIO_SCORE = 0.5
+
+
+class PresidioChatPolicyMiddleware(ChatMiddleware):
+    """Block a prompt or a response that contains one of the listed Presidio entity types."""
+
+    def __init__(self, entities: list[str]) -> None:
+        from presidio_analyzer import AnalyzerEngine
+
+        self._analyzer = AnalyzerEngine()
+        self._entities = entities
+
+    def _found(self, messages: Any) -> list[str]:
+        text = "\n".join(m.text for m in messages if m is not None and m.text)
+        if not text.strip():
+            return []
+        results = self._analyzer.analyze(text=text, entities=self._entities, language="en", score_threshold=_PRESIDIO_SCORE)
+        return sorted({r.entity_type for r in results})
+
+    def _screened(self, response: ChatResponse[Any]) -> ChatResponse[Any]:
+        found = self._found(response.messages)
+        if not found:
+            return response
+        logger.warning("Presidio blocked a response (%s).", ", ".join(found))
+        return ChatResponse(
+            messages=[Message(role="system", contents=["Response blocked by policy"])],
+            response_id=response.response_id,
+            conversation_id=response.conversation_id,
+            model=response.model,
+            finish_reason=response.finish_reason,
+            usage_details=response.usage_details,
+        )
+
+    async def process(self, context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        found = self._found(context.messages)
+        if found:
+            logger.warning("Presidio blocked a prompt (%s).", ", ".join(found))
+            blocked = ChatResponse(messages=[Message(role="system", contents=["Prompt blocked by policy"])])
+            if context.stream:
+                # A streamed call must get a ResponseStream back: MAF's own to_updates, "where a
+                # complete response has to be emitted as a stream".
+                async def _updates() -> Any:
+                    for update in blocked.to_updates():
+                        yield update
+
+                context.result = ResponseStream(_updates(), finalizer=lambda _: blocked)
+            else:
+                context.result = blocked
+            raise MiddlewareTermination
+        await call_next()
+        if isinstance(context.result, ResponseStream):
+
+            async def _transform(final: ChatResponse[Any]) -> ChatResponse[Any]:
+                return self._screened(final)
+
+            context.stream_result_transforms.append(_transform)
+            context.stream_result_to_updates = ChatResponse.to_updates
+            context.stream_buffer_updates = True
+            return
+        if context.result is not None:
+            context.result = self._screened(context.result)
+
+
+def _build_governance_middleware() -> list[ChatMiddleware]:
+    """The guide's _build_purview_middleware, with Presidio: on only when PRESIDIO_ENTITIES is set."""
+    entities = [e.strip() for e in os.environ.get("PRESIDIO_ENTITIES", "").split(",") if e.strip()]
+    if not entities:
+        logger.info("Presidio disabled. Set PRESIDIO_ENTITIES to enable chat policy screening.")
+        return []
+    logger.info("Presidio enabled (blocks %s).", ", ".join(entities))
+    return [PresidioChatPolicyMiddleware(entities)]
+
+
+# </governance>
+
+
+def _secondbrain_web_tools(client: Client) -> MCPStreamableHTTPTool:
+    """SecondBrain's web_search and web_fetch over the shared client (Ollama has no hosted web search)."""
+    return MCPStreamableHTTPTool(
+        name="secondbrain",
+        mcp_client=client,
+        tool_name_prefix="secondbrain",
+        allowed_tools=["web_search", "web_fetch"],
+        approval_mode="never_require",
+        load_prompts=False,
+    )
+
+
+def _build_web_research_agent(client: OllamaChatClient, web_tools: MCPStreamableHTTPTool) -> Agent[Any]:
+    """The guide's lean, web-search-only research agent (claw_step04 _build_research_agent)."""
+    return Agent(
+        client=client,
+        name="WebResearchAgent",
+        description="Searches the web for recent news and documentation about a single library, tool or topic.",
+        tools=[web_tools],
+        instructions=(
+            "You research a single library, tool or topic. Use the web search tool to find the most recent, "
+            "relevant news and documentation, then return a short, factual summary (3-4 bullet points) "
+            "with no preamble."
+        ),
+    )
+
+
 # <build_steward_agent>
 async def build_steward_agent(
     stack: AsyncExitStack,
@@ -614,7 +772,7 @@ async def build_steward_agent(
     file_memory_store: Any = None,
     enable_shell: bool = True,
     auto_approve_skill_scripts: bool = False,
-    part: int = 2,
+    part: int = 4,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -634,25 +792,28 @@ async def build_steward_agent(
         A fully configured harness agent with Step 3's capabilities.
     """
     _WORKING_DIR.mkdir(exist_ok=True)
-    if part <= 2:
+    if part <= 4:
         # Kyle, 2026-10-29: start over at step 1 and follow the plan. Part 1 is
-        # step01_meet_steward.py's construction and Part 2 is step02_working_with_code.py's, each
-        # as written there (Kyle: Part 2 has no web tools, as step 2 has none).
+        # step01_meet_steward.py's construction, Part 2 is step02_working_with_code.py's and Part 3 is
+        # step03_scaling_capabilities.py's, each as written there.
+        # Part 4 is Part 3's agent with MAF's claw_step04 factory switches for its hosts.
+        # Web search is the harness default in every MAF step (none of claw_step02..04 turns it off);
+        # Ollama has no hosted web search, so every part gets SecondBrain's web_search and web_fetch,
+        # as Part 1 does. (Kyle, 2026-10-29: "fix the shit that you left out", superseding his earlier
+        # "Part 2 has no web tools".)
         tools: list[Any] = [get_repo_status]
         url = os.environ.get("SECONDBRAIN_MCP_URL")
         key = os.environ.get("SECONDBRAIN_MCP_KEY")
-        if part == 1 and url and key:
-            secondbrain = MCPStreamableHTTPTool(
-                name="secondbrain",
-                url=url,
-                tool_name_prefix="secondbrain",
-                static_headers={"Authorization": f"Bearer {key}"},
-                allowed_tools=["web_search", "web_fetch"],
-                approval_mode="never_require",
-                load_prompts=False,
+        secondbrain_client: Client | None = None
+        if url and key:
+            # One high-level MCP client for SecondBrain, as MAF's mcp_based_skill sample opens one: the
+            # web tools and (from Part 3) MCPSkillsSource share it. The key rides on its http client,
+            # with the MCP SDK's own timeouts (create_mcp_http_client: 30 s, 300 s to read).
+            http = await stack.enter_async_context(
+                httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(30.0, read=300.0))
             )
-            await stack.enter_async_context(secondbrain)
-            tools.append(secondbrain)
+            secondbrain_client = await stack.enter_async_context(Client(streamable_http_client(url, http_client=http)))
+            tools.append(await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client)))
         if part == 1:
             return create_harness_agent(
                 client=client or OllamaChatClient(),
@@ -664,20 +825,76 @@ async def build_steward_agent(
                 max_output_tokens=8_192,
                 disable_web_search=True,
             )
-        context_providers: list[Any] = []
-        local_memory = await _maybe_enable_local_memory()
-        if local_memory is not None:
-            await stack.enter_async_context(local_memory)
-            context_providers.append(local_memory)
+        if part == 2:
+            context_providers: list[Any] = []
+            local_memory = await _maybe_enable_local_memory()
+            if local_memory is not None:
+                await stack.enter_async_context(local_memory)
+                context_providers.append(local_memory)
+            return create_harness_agent(
+                client=client or OllamaChatClient(),
+                name="Steward",
+                agent_instructions=PART2_INSTRUCTIONS,
+                tools=[*tools, git_commit],
+                history_provider=history_provider,
+                file_access_store=FileSystemAgentFileStore(str(_WORKING_DIR)),
+                auto_approval_rules=[FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule],
+                context_providers=context_providers or None,
+                mode_provider=AgentModeProvider(default_mode="execute"),
+                max_context_window_tokens=65_536,
+                max_output_tokens=8_192,
+                disable_web_search=True,
+            )
+        # Part 4 adds governance on the chat client, as the guide adds Purview (Presidio, locally)
+        part3_client = client or (OllamaChatClient(middleware=_build_governance_middleware()) if part == 4 else OllamaChatClient())
+        explorer_agent = Agent(
+            client=part3_client,
+            name="CodeExplorer",
+            description="Explores one module, folder or question in the workspace (read-only) and summarizes it.",
+            tools=[list_files, read_file, search_code],
+            instructions=(
+                "You explore one part of a codebase. Use list_files, read_file and search_code to find out "
+                "what it does, its main entry points and functions, what it depends on, and anything that "
+                "looks wrong. Return a short, factual summary (4-6 bullet points) naming files and functions, "
+                "with no preamble. Only report what you read."
+            ),
+        )
+        background_agents: list[Any] = [explorer_agent]
+        skill_sources: list[Any] = [FileSkillsSource(str(_SKILLS_DIR), script_runner=subprocess_script_runner)]
+        if secondbrain_client is not None:
+            # The guide's background research agent and its managed (Foundry Toolbox) skills, on this PC:
+            # the research agent searches with SecondBrain's web tools, and SecondBrain's skill notes are
+            # read with MCPSkillsSource over the same client, beside the file skills (claw_step04).
+            web_tools = await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client))
+            background_agents.append(_build_web_research_agent(part3_client, web_tools))
+            skill_sources.append(MCPSkillsSource(client=secondbrain_client))
+        skills_source = skill_sources[0] if len(skill_sources) == 1 else AggregatingSkillsSource(skill_sources)
+        # Part 4, as MAF's claw_step04 build_claw_agent: the shell and file access can be switched off
+        # for a host, skill scripts auto-approved for unattended evals, and load_skill asks no approval
+        # ("it only reads a skill's own body"); everything else is Part 3's agent.
+        part4 = part == 4
+        part3_tools: list[Any] = [*tools, git_commit]
+        if not part4 or enable_shell:
+            shell = await stack.enter_async_context(_build_shell())
+            # Kyle, 2026-10-29: MAF's run_shell text never names the shell, so it is named here
+            # (as_function's description), and Steward's own line-ending store keeps a CRLF file CRLF.
+            part3_tools.append(shell.as_function(description=shell.as_function().description + " The shell is bash (Git Bash on Windows)."))
+        auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
+        if part4 and auto_approve_skill_scripts:
+            auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         return create_harness_agent(
-            client=client or OllamaChatClient(),
+            client=part3_client,
             name="Steward",
-            agent_instructions=PART2_INSTRUCTIONS,
-            tools=[*tools, git_commit],
+            description="Software engineering and development assistant." if part4 else None,
+            agent_instructions=PART3_INSTRUCTIONS,
+            tools=part3_tools,
             history_provider=history_provider,
-            file_access_store=FileSystemAgentFileStore(str(_WORKING_DIR)),
-            auto_approval_rules=[FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule],
-            context_providers=context_providers or None,
+            file_access_store=LineEndingFileStore(str(_WORKING_DIR)) if not part4 or enable_file_access else None,
+            file_memory_store=file_memory_store,
+            skills_provider=SkillsProvider(DeduplicatingSkillsSource(skills_source), disable_load_skill_approval=part4),
+            background_agents=background_agents,
+            auto_approval_rules=auto_approval_rules,
+            context_providers=[MontyCodeActProvider(approval_mode="never_require")],
             mode_provider=AgentModeProvider(default_mode="execute"),
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,

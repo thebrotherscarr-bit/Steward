@@ -25,12 +25,16 @@ failing test.
 ## Changes from the guide (local Ollama)
 
 - `OllamaChatClient` replaces `FoundryChatClient`.
-- Web search is disabled, because the Ollama client doesn't support it.
+- The Ollama client has no hosted web search. Step 1 and the step 4 factory use SecondBrain's
+  `web_search` and `web_fetch` over MCP instead; steps 2 and 3 run without web search.
 - The shell is passed as `shell.as_function()`, because the Ollama client doesn't implement
   `SupportsShellTool`.
-- Left out because they need Microsoft Foundry or Azure: Foundry memory, Foundry Toolbox skills,
-  Purview, Foundry hosting and Foundry evaluators.
-- The web-search research sub-agent became a read-only code explorer.
+- Foundry memory is Mem0 running locally (step 2 on). Left out because they need Microsoft Foundry
+  or Azure: Foundry hosting and Foundry evaluators.
+- The step 4 factory replaces the rest with local pieces: Purview with Presidio
+  (`PRESIDIO_ENTITIES`), Foundry Toolbox skills with SecondBrain's skill notes over MCP
+  (`MCPSkillsSource`), and the web-search research sub-agent with `WebResearchAgent` on
+  SecondBrain's web tools. Step 3 has a read-only code explorer in its place.
 
 ## Step 1: Meet Steward
 
@@ -77,7 +81,13 @@ failing test.
 ```
 
 `evals.py` runs three fixed queries (repo status, codebase map, bug diagnosis) with the shell off
-and skill scripts auto-approved, then scores them with local evaluators.
+and skill scripts auto-approved, then scores them with local evaluators. Like the console, it writes
+every span to `halo_traces/traces.jsonl`, and a failed check prints its reason.
+
+With the factory (SecondBrain's Agent tab or `console_app.py`), Step 3's list adds:
+
+7. `Research Microsoft Agent Framework, Ollama and mem0 with the WebResearchAgent and summarize the latest news.` (background research agent)
+8. `How do I set up a flow in SecondBrain?` (loads a SecondBrain skill over MCP)
 
 ## Known limits on gpt-oss:20b
 

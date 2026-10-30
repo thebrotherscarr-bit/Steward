@@ -140,7 +140,8 @@ def span_to_halo_jsonl_line(span: ReadableSpan, resource_attributes: dict[str, A
     return {
         "trace_id": _hex(ctx.trace_id, 32),
         "span_id": _hex(ctx.span_id, 16),
-        "parent_span_id": _hex(span.parent.span_id, 16) if span.parent else None,
+        # The cookbook writes "" for a root span (HALO's SpanRecord requires a string).
+        "parent_span_id": _hex(span.parent.span_id, 16) if span.parent else "",
         "trace_state": "",
         "name": f"{operation}.{span.name}" if operation else span.name,
         "kind": kind,
