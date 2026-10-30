@@ -63,6 +63,8 @@ from agent_framework import (
     ResponseStream,
     SkillsProvider,
     create_harness_agent,
+    todos_remaining,
+    todos_remaining_message,
     tool,
 )
 from agent_framework.monty import MontyCodeActProvider
@@ -919,6 +921,12 @@ async def build_steward_agent(
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
             disable_web_search=True,
+            # ADR-0001 item 3, as MAF's harness_research.py sample: in execute mode the harness
+            # re-invokes Steward while his todos are still open, reminding him which ones, and stops
+            # for any approval; plan mode stays interactive. Ten passes per turn at most.
+            loop_should_continue=todos_remaining(looping_modes=["execute"]),
+            loop_next_message=todos_remaining_message,
+            loop_max_iterations=10,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
