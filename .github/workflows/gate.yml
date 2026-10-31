@@ -60,5 +60,5 @@ jobs:
           python -m pytest -q harness/steward/working/sample-project
       - name: harness
         run: |
-          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 agent-framework-devui==1.0.0b261022 agent-framework-hosting-mcp==1.0.0a261030 mcp==2.3.0 httpx2==2.16.0 python-dotenv==1.2.4
+          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 agent-framework-devui==1.0.0b261022 agent-framework-hosting-mcp==1.0.0a261030 mcp==2.3.0 tenacity==9.1.4 httpx2==2.16.0 python-dotenv==1.2.4
           python -m pytest -q -p no:cacheprovider harness/steward/step04_production_ready/test_harness.py
