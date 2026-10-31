@@ -135,12 +135,95 @@ def test_file_write_waits_for_approval() -> None:
 INVENTORY = "harness/steward/working/sample-project/inventory.py"
 
 
-def test_file_read_waits_for_approval_when_attended() -> None:
-    # ADR-0001 item 11: the file root is the repo, whose root holds .env, so reads park for approval.
+def function_results(call: dict[str, Any]) -> list[str]:
+    return [str(c.result) for m in call["messages"] for c in m.contents if c.type == "function_result"]
+
+
+def test_file_read_runs_without_approval_when_attended() -> None:
+    # plan-steward-context-memory-reads, piece 1 (supersedes ADR-0001 item 11's card per read): reads run.
     read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": INVENTORY})
-    client, _, response = run_steward([read], "Read inventory.py.")
-    assert [r.function_call.name for r in approval_requests(response)] == ["file_access_read"]
-    assert len(client.calls) == 1
+    client, _, response = run_steward([read, "It defines order_total."], "Read inventory.py.")
+    assert not approval_requests(response)
+    assert any("def order_total" in r for r in function_results(client.calls[1]))
+
+
+def test_env_is_never_read_searched_or_listed(tmp_path: Path) -> None:
+    """Piece 1: the store keeps .env out, so a read that runs without a card never reaches a key."""
+    (tmp_path / ".env").write_text("SECONDBRAIN_MCP_KEY=planted-secret\n")
+    (tmp_path / "a.txt").write_text("hello\n")
+    store = steward.LineEndingFileStore(str(tmp_path))
+
+    async def _go() -> tuple[bool, list[Any], list[str]]:
+        try:
+            await store.read(".env")
+            refused = False
+        except ValueError:
+            refused = True
+        hits = await store.search("", "planted-secret", recursive=True)
+        return refused, hits, [e.name for e in await store.list_children("")]
+
+    refused, hits, names = asyncio.run(_go())
+    assert refused and not hits and names == ["a.txt"]
+    # Through Steward's own tool, in an attended run: no card, and no key.
+    read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": ".env"})
+    client, _, response = run_steward([read, "Refused."], "Read .env.")
+    assert not approval_requests(response)
+    assert any("never read" in r for r in function_results(client.calls[1]))
+
+
+def test_charter_and_notes_reach_him_every_turn(monkeypatch: Any) -> None:
+    """Piece 2: with SecondBrain up, his notes are offered and the Charter is in his instructions."""
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("secondbrain")
+
+    @server.tool()
+    def read_note(id: str) -> str:
+        return "CHARTER: what we are building, what binds you." if id == "steward-charter" else f"no note {id}"
+
+    @server.tool()
+    def search_notes(query: str) -> str:
+        return "[]"
+
+    @server.tool()
+    def list_notes() -> str:
+        return "[]"
+
+    # SecondBrain in process: the MCP SDK's Client connects to a server object without a network.
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    client, _, _ = run_steward(["Hello."], "Hello")
+    call = client.calls[0]
+    assert {"secondbrain_search_notes", "secondbrain_read_note", "secondbrain_list_notes"} <= offered_tools(call)
+    assert "CHARTER: what we are building" in str(call["options"].get("instructions") or "")
+
+
+def test_memory_lasts_between_sessions(tmp_path: Path) -> None:
+    """Piece 3: a memory saved in one session is in front of him in the next."""
+    from agent_framework import FileSystemAgentFileStore
+
+    write = Content.from_function_call(
+        call_id="m1",
+        name="file_memory_write",
+        arguments={"file_name": "lesson.md", "content": "Run test_harness.py after every change.", "description": "the check to run"},
+    )
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient([write, "Saved.", "Hello again."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, file_memory_store=FileSystemAgentFileStore(tmp_path)
+            )
+            async with agent:
+                await agent.run("Remember this.", session=agent.create_session())
+                await agent.run("Hello", session=agent.create_session())
+        return client
+
+    client = asyncio.run(_go())
+    later = client.calls[2]
+    seen = str(later["options"].get("instructions") or "") + " ".join(m.text for m in later["messages"])
+    assert "lesson.md" in seen, "the new session is shown the memory saved in the first"
 
 
 def test_file_read_runs_without_approval_when_unattended() -> None:

@@ -25,8 +25,9 @@ Environment variables:
     STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
     STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:26b)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
-                                 per ADR-0001 item 11: his own code is in reach; every file read parks
-                                 for approval in an attended run, since the repo root holds .env)
+                                 per ADR-0001 item 11: his own code is in reach; reads run without a
+                                 card and writes ask, and the file store never reads, searches or
+                                 lists a .env file)
     SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
 """
@@ -54,6 +55,7 @@ from agent_framework import (
     ContextProvider,
     DeduplicatingSkillsSource,
     FileAccessProvider,
+    FileMemoryProvider,
     FileSkillsSource,
     FileSystemAgentFileStore,
     HistoryProvider,
@@ -563,9 +565,24 @@ class LineEndingFileStore(FileSystemAgentFileStore):
     the endings the file already had on disk (CRLF stays CRLF, LF stays LF, new files are LF).
     """
 
+    # Kyle, 2026-10-31 (the note plan-steward-context-memory-reads, piece 1): reads run without a card,
+    # so the store itself keeps every .env file out (RULE 7): never read, searched or listed, approved or not.
+    @staticmethod
+    def _is_env(path: str) -> bool:
+        return Path(str(path).replace("\\", "/")).name.lower().startswith(".env")
+
     async def read(self, path: str) -> str | None:
+        if self._is_env(path):
+            raise ValueError(".env files hold keys and are never read.")
         content = await super().read(path)
         return content.replace("\r\n", "\n") if content is not None else None
+
+    async def search(self, directory: str, regex_pattern: str, glob_pattern: str | None = None, *, recursive: bool = False) -> Any:
+        found = await super().search(directory, regex_pattern, glob_pattern, recursive=recursive)
+        return [r for r in found if not self._is_env(r.file_name)]
+
+    async def list_children(self, directory: str = "") -> Any:
+        return [e for e in await super().list_children(directory) if not self._is_env(e.name)]
 
     async def write(self, path: str, content: str, *, overwrite: bool = True) -> None:
         existing = await super().read(path) if await self.file_exists(path) else None
@@ -665,6 +682,10 @@ async def _maybe_enable_local_memory() -> Any:
 
 
 _CHARTER_NOTE = "steward-charter"
+# The notes Steward reads in the live path (plan-steward-context-memory-reads, piece 2); reads only.
+_SECONDBRAIN_NOTES_TOOLS = ("search_notes", "read_note", "list_notes")
+# His file memory's one scope, the same in every session (piece 3).
+_FILE_MEMORY_SCOPE = "steward"
 
 
 class CharterProvider(ContextProvider):
@@ -939,6 +960,28 @@ async def build_steward_agent(
                 )
             )
         part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require")]
+        if secondbrain_client is not None:
+            # plan-steward-context-memory-reads, piece 2: his notes, to look up the plans and rulings
+            # himself (reads, never a card), and his Charter, read through them and put in his
+            # instructions before every turn (CharterProvider, design step 1).
+            notes = await stack.enter_async_context(
+                MCPStreamableHTTPTool(
+                    name="secondbrain_notes",
+                    mcp_client=secondbrain_client,
+                    tool_name_prefix="secondbrain",
+                    allowed_tools=list(_SECONDBRAIN_NOTES_TOOLS),
+                    approval_mode="never_require",
+                    load_prompts=False,
+                )
+            )
+            part3_tools.append(notes)
+            part3_providers.append(CharterProvider(notes))
+        # plan-steward-context-memory-reads, piece 3: MAF's file memory with one explicit scope, so what
+        # he saves in one session is in front of him in the next ("Pass an explicit scope to group
+        # memories differently ... across sessions"); the factory's per-session one is switched off.
+        part3_providers.append(
+            FileMemoryProvider(file_memory_store or FileSystemAgentFileStore(Path.cwd() / "agent-file-memory"), scope=_FILE_MEMORY_SCOPE)
+        )
         if not part4 or enable_shell:
             shell = await stack.enter_async_context(_build_shell())
             # Kyle, 2026-10-29: MAF's run_shell text never names the shell, so it is named here
@@ -953,12 +996,13 @@ async def build_steward_agent(
             part3_providers.append(
                 ShellEnvironmentProvider(shell, ShellEnvironmentProviderOptions(override_family=ShellFamily.POSIX))
             )
-        # ADR-0001 item 11: the file root is the repo, whose root holds .env, so file reads keep MAF's
-        # default approval in an attended run. Only an unattended run (evals, the same switch that
-        # auto-approves skill scripts) gets the read-only rule, as MAF's claw evals do.
-        auto_approval_rules: list[Any] = []
+        # ADR-0001 item 11 kept file reads on a card in an attended run, because the repo root holds .env.
+        # Superseded 2026-10-31 (plan-steward-context-memory-reads, piece 1): a card per read ended his
+        # turns at SecondBrain's 20 approval rounds, so LineEndingFileStore keeps .env out and MAF's
+        # read-only rule approves the reads in every run; writes still ask. Only an unattended run (evals)
+        # also auto-approves skill scripts, as MAF's claw evals do.
+        auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
         if part4 and auto_approve_skill_scripts:
-            auto_approval_rules.append(FileAccessProvider.read_only_tools_auto_approval_rule)
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         return create_harness_agent(
             client=part3_client,
@@ -968,7 +1012,7 @@ async def build_steward_agent(
             tools=part3_tools,
             history_provider=history_provider,
             file_access_store=LineEndingFileStore(str(_WORKING_DIR)) if not part4 or enable_file_access else None,
-            file_memory_store=file_memory_store,
+            disable_file_memory=True,  # his scoped FileMemoryProvider is in context_providers
             skills_provider=SkillsProvider(DeduplicatingSkillsSource(skills_source), disable_load_skill_approval=part4),
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
