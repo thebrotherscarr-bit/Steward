@@ -209,3 +209,34 @@ def test_devui_shows_stewards_runs_and_traces() -> None:
     asyncio.run(stack.aclose())
     assert "Hello from Steward." in events, "the run's reply reaches DevUI"
     assert "response.trace.completed" in events and "invoke_agent Steward" in events, "and so does its trace"
+
+
+def test_mcp_hosting_serves_steward_as_one_tool() -> None:
+    """ADR-0001 item 10: mcp_app.py serves Steward as one MCP tool; a reused session_id continues his conversation."""
+    from agent_framework import InMemoryHistoryProvider
+    from starlette.testclient import TestClient
+
+    import mcp_app
+
+    stack = AsyncExitStack()
+    client = ScriptedChatClient(["First answer.", "Second answer."])
+    agent = asyncio.run(
+        steward.build_steward_agent(stack, client=client, enable_shell=False, history_provider=InMemoryHistoryProvider())
+    )
+    headers = {"Accept": "application/json, text/event-stream"}
+
+    def rpc(http: TestClient, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        return http.post("/mcp", json=body, headers=headers).json()["result"]
+
+    with TestClient(mcp_app.build_mcp_app(agent), base_url=f"http://{mcp_app.HOST}:{mcp_app.PORT}") as http:
+        tools = rpc(http, "tools/list", {})["tools"]
+        assert [(t["name"], t["inputSchema"]["required"]) for t in tools] == [("Steward", ["task", "session_id"])]
+        call = {"name": "Steward", "arguments": {"task": "Hello", "session_id": "s1"}}
+        first = rpc(http, "tools/call", call)
+        call["arguments"]["task"] = "And again"
+        second = rpc(http, "tools/call", call)
+    asyncio.run(stack.aclose())
+    assert [b["text"] for b in first["content"]] == ["First answer."]
+    assert [b["text"] for b in second["content"]] == ["Second answer."]
+    assert any("Hello" in m.text for m in client.calls[1]["messages"]), "the second call continues the first's session"
