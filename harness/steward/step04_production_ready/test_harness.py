@@ -240,3 +240,42 @@ def test_mcp_hosting_serves_steward_as_one_tool() -> None:
     assert [b["text"] for b in first["content"]] == ["First answer."]
     assert [b["text"] for b in second["content"]] == ["Second answer."]
     assert any("Hello" in m.text for m in client.calls[1]["messages"]), "the second call continues the first's session"
+
+
+def test_improvement_loop_workflow_repairs_reviews_and_resumes(tmp_path: Path) -> None:
+    """ADR-0001 item 12: approvals cross the workflow, failing checks go back to Steward, the review resumes from a checkpoint."""
+    from agent_framework import FileCheckpointStorage
+
+    import improvement_loop_workflow as loop
+
+    runs = tmp_path / "runs"
+    # A check that fails on its first run and passes after: one repair, then the review.
+    check = (
+        sys.executable, "-c",
+        f"import pathlib, sys; p = pathlib.Path(r'{runs}'); n = int(p.read_text()) if p.exists() else 0; "
+        "p.write_text(str(n + 1)); sys.exit(0 if n else 1)",
+    )
+    commit = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": "x"})
+    client = ScriptedChatClient([commit, "Attempt one.", "Attempt two."])
+    storage = FileCheckpointStorage(storage_path=tmp_path / "checkpoints")
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            workflow = loop.create_workflow(agent, storage, checks=[check])
+            events = await workflow.run("Make a change.")
+            [approval] = events.get_request_info_events()
+            assert approval.data.function_call.name == "git_commit", "Steward's own approval reaches Kyle"
+            events = await workflow.run(responses={approval.request_id: approval.data.to_function_approval_response(False)})
+            [review] = events.get_request_info_events()
+            assert (review.data.attempt, review.data.passed, review.data.summary) == (2, True, "Attempt two.")
+            # A new run of the same graph resumes from the last checkpoint and re-asks the pending review.
+            latest = max(await storage.list_checkpoints(workflow_name=workflow.name), key=lambda c: c.timestamp)
+            resumed = loop.create_workflow(agent, storage, checks=[check])
+            [again] = (await resumed.run(checkpoint_id=latest.checkpoint_id)).get_request_info_events()
+            return (await resumed.run(responses={again.request_id: "keep"})).get_outputs()
+
+    [result] = asyncio.run(_go())
+    assert (result.decision, result.passed, result.attempts) == ("keep", True, 2)
+    assert len(client.calls) == 3, "the rejected commit, then one attempt per check run"
+    assert runs.read_text() == "2", "the checks ran after each attempt"
