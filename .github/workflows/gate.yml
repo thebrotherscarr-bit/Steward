@@ -15,7 +15,8 @@
 #   harness  Steward's harness checked with no model, as Microsoft's builder skill
 #            validates a harness: his modes, memory, skills and file root are
 #            offered; git_commit and file writes wait for approval; reads don't;
-#            the harness loop stops at its bound. A scripted chat client, composed
+#            the harness loop stops at its bound; DevUI serves him and streams each
+#            run's trace (devui_app.py). A scripted chat client, composed
 #            like MAF's own test client, stands in for Ollama (test_harness.py).
 #            The MAF packages are pinned to the versions Steward runs on.
 #
@@ -56,5 +57,5 @@ jobs:
           python -m pytest -q harness/steward/working/sample-project
       - name: harness
         run: |
-          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 mcp==2.3.0 httpx2==2.16.0 python-dotenv==1.2.4
+          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 agent-framework-devui==1.0.0b261022 mcp==2.3.0 httpx2==2.16.0 python-dotenv==1.2.4
           python -m pytest -q -p no:cacheprovider harness/steward/step04_production_ready/test_harness.py

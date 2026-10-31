@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import AsyncIterable, Awaitable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -27,9 +27,11 @@ from agent_framework import (
     BaseChatClient,
     ChatMiddlewareLayer,
     ChatResponse,
+    ChatResponseUpdate,
     Content,
     FunctionInvocationLayer,
     Message,
+    ResponseStream,
 )
 from agent_framework.observability import ChatTelemetryLayer
 
@@ -53,10 +55,16 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
 
     def _inner_get_response(
         self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any
-    ) -> Awaitable[ChatResponse]:
+    ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
         self.calls.append({"messages": list(messages), "options": dict(options)})
         reply = self.replies.pop(0) if self.replies else "done"
         content = reply if isinstance(reply, Content) else Content.from_text(reply)
+        if stream:
+            # As MockBaseChatClient._get_streaming_response: the reply as one update, finalized from updates.
+            async def _stream() -> AsyncIterable[ChatResponseUpdate]:
+                yield ChatResponseUpdate(contents=[content], role="assistant", finish_reason="stop")
+
+            return ResponseStream(_stream(), finalizer=lambda updates: ChatResponse.from_updates(updates))
 
         async def _get() -> ChatResponse:
             return ChatResponse(messages=Message(role="assistant", contents=[content]))
@@ -173,3 +181,31 @@ def test_door_calls_stay_on_stewards_world() -> None:
     assert not reached, "no project means the door's default world, which is refused"
     assert gate("atlas_git", {"project": "steward"}) == (None, True)
     assert gate("git_commit", {"message": "x"}) == (None, True), "Steward's own tools are untouched"
+
+
+def test_devui_shows_stewards_runs_and_traces() -> None:
+    """ADR-0001 item 7: DevUI, run as devui_app.py runs it, serves Steward and streams his run's trace."""
+    from agent_framework.observability import configure_otel_providers
+    from fastapi.testclient import TestClient
+
+    import devui_app
+
+    configure_otel_providers(enable_sensitive_data=True)
+    stack = AsyncExitStack()
+    client = ScriptedChatClient(["Hello from Steward."])
+    agent = asyncio.run(steward.build_steward_agent(stack, client=client, enable_shell=False))
+    server = devui_app.build_dev_server(agent, "test-token")
+    # DevUI answers only requests addressed to its loopback host.
+    with TestClient(server.get_app(), base_url=f"http://{devui_app.HOST}:{devui_app.PORT}") as http:
+        auth = {"Authorization": "Bearer test-token"}
+        assert http.get("/v1/entities").status_code == 401, "DevUI asks for its token"
+        entities = http.get("/v1/entities", headers=auth).json()["entities"]
+        assert [e["name"] for e in entities] == ["Steward"]
+        entity = entities[0]["id"]
+        # The UI runs each chat in a conversation, which carries the session the harness needs.
+        conversation = http.post("/v1/conversations", json={"metadata": {"entity_id": entity}}, headers=auth).json()
+        body = {"metadata": {"entity_id": entity}, "input": "Hello", "stream": True, "conversation": conversation["id"]}
+        events = http.post("/v1/responses", json=body, headers=auth).text
+    asyncio.run(stack.aclose())
+    assert "Hello from Steward." in events, "the run's reply reaches DevUI"
+    assert "response.trace.completed" in events and "invoke_agent Steward" in events, "and so does its trace"
