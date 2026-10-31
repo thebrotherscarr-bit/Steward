@@ -8,5 +8,7 @@ improvement_loop/
 .venv-halo/
 agent-memory/
 steward.log
+steward-mcp.log
+state/
 agent-memory.old-*/
 storage/
