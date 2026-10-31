@@ -444,7 +444,9 @@ def _build_conversation_agent() -> Any:
 
 # <atlas>
 # The door's git tools and record that Steward may call (ADR-0001 items 5 and 6), by their names on the door.
-_ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "records")
+# git_pr since 2026-10-31 (Kyle: "Yes, give it to him"): SecondBrain's door parks his open and merge for
+# Kyle's Approve like every other write, so a change goes from his line to main through the door alone.
+_ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "git_pr", "records")
 _STEWARD_WORLD = "steward"
 
 
