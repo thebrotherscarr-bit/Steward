@@ -386,6 +386,33 @@ def test_a_plan_mode_reply_without_todos_or_plan_is_asked_again() -> None:
     assert len(asyncio.run(_go(["Prose."], None)).calls) == 1, "a host that does not ask for the plan is not looped"
 
 
+def test_finished_work_is_not_asked_for_a_plan() -> None:
+    """Live test 2026-11-01: an execute run that finishes its todos returns to plan mode, and is not then asked for a plan."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    import hosted
+
+    todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Write it"}]})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "Written."}]})
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient([todo, done, "Done: the file is written."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, plan_reply_check=hosted.planning_response_in
+            )
+            async with agent:
+                session = agent.create_session()
+                modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                await agent.run("Work through the plan.", session=session)
+        return client
+
+    client = asyncio.run(_go())
+    assert len(client.calls) == 3, "no plan was asked of the finished run"
+    assert not any(steward.PLAN_REPLY_NUDGE in m.text for c in client.calls for m in c["messages"])
+
+
 def test_door_calls_stay_on_stewards_world() -> None:
     """steward_world_only, MAF's middleware gating: a door call on another world, or none, never reaches the door."""
     from types import SimpleNamespace
