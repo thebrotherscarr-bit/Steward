@@ -69,6 +69,7 @@ from agent_framework import (
     SkillsProvider,
     TodoProvider,
     create_harness_agent,
+    get_agent_mode,
     todos_remaining,
     todos_remaining_message,
     tool,
@@ -500,6 +501,70 @@ async def steward_world_only(
 
 
 # </atlas>
+
+
+# <plan_mode_gate>
+# Kyle, 2026-10-31 ("yes, build the gate"): in plan mode he read "write a file" as leave to write it, and
+# once wrote to his memory store and called that proof plan mode worked. The rule was in his prompt and
+# he did not follow it, so the harness holds it, as steward_world_only holds the door: while his session
+# is in plan mode, a tool that changes the workspace, the repository or the world is refused with
+# corrective feedback, and only the user's Approve (set_agent_mode, from the console or hosted.py) moves
+# him to execute. Reads, todos, skills' instructions and his memory file stay open: MAF's plan mode
+# explores with tools and writes the plan to a memory file (_mode.py, plan steps 3 and 5).
+_PLAN_MODE = "plan"
+_CHANGES_THINGS = frozenset({
+    *FileAccessProvider._WRITE_TOOL_NAMES,  # MAF's own set: file_access_write, _replace, _replace_lines, _delete
+    "git_commit",
+    "run_shell",
+    SkillsProvider.RUN_SKILL_SCRIPT_TOOL_NAME,
+    *(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr")),
+})
+
+
+def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[..., Awaitable[None]]]:
+    """The plan-mode gate, as MAF's middleware gating: two middlewares for the agent's ``middleware`` list.
+
+    MAF asks a tool's approval before function middleware runs, so a refusal there would come after an
+    approval card. The chat middleware therefore stops offering the tools that change things while the
+    session is in plan mode (tool selection, the lowest layer); the function middleware refuses his own
+    mode_set out of plan mode, and any such tool that is called anyway, with corrective feedback.
+    """
+
+    def in_plan_mode(session: Any) -> bool:
+        if session is None:
+            return False
+        mode = get_agent_mode(
+            session,
+            source_id=mode_provider.source_id,
+            default_mode=mode_provider.default_mode,
+            available_modes=mode_provider.available_modes,
+        )
+        return mode == _PLAN_MODE
+
+    async def plan_mode_tools(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        if in_plan_mode(context.session) and context.options and context.options.get("tools"):
+            offered = [t for t in context.options["tools"] if getattr(t, "name", None) not in _CHANGES_THINGS]
+            context.options = {**context.options, "tools": offered}
+        await call_next()
+
+    async def plan_mode_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        name = context.function.name
+        asked = context.arguments.get("mode") if hasattr(context.arguments, "get") else None
+        switching = name == "mode_set" and str(asked or "").strip().lower() != _PLAN_MODE
+        if (name in _CHANGES_THINGS or switching) and in_plan_mode(context.session):
+            context.result = (
+                f"Refused: you are in plan mode, and {name} "
+                + ("leaves it." if switching else "changes things.")
+                + " Add the work as todos (todos_add) and present the plan for the user's approval;"
+                " the user's Approve switches you to execute mode, and then this tool will run."
+            )
+            return
+        await call_next()
+
+    return [plan_mode_tools, plan_mode_calls]
+
+
+# </plan_mode_gate>
 
 
 # <shell>
@@ -1035,6 +1100,12 @@ async def build_steward_agent(
         auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
         if part4 and auto_approve_skill_scripts:
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
+        # Kyle, 2026-10-31 ("just change the line"): every session starts in plan mode, MAF's own default
+        # (the first mode in _mode.py's DEFAULT_MODE_MAP). Plan mode analyses the request, explores with
+        # the tools he has, writes the plan to memory and asks approval before mode_set("execute"). Started
+        # in execute, he acted at once and reached for files and the shell over the tools in his list
+        # (asked to read a note, he searched files and never called secondbrain_read_note).
+        mode_provider = AgentModeProvider(default_mode="plan")
         return create_harness_agent(
             client=part3_client,
             name="Steward",
@@ -1048,13 +1119,8 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
-            middleware=[steward_world_only],
-            # Kyle, 2026-10-31 ("just change the line"): every session starts in plan mode, MAF's own default
-            # (the first mode in _mode.py's DEFAULT_MODE_MAP). Plan mode analyses the request, explores with
-            # the tools he has, writes the plan to memory and asks approval before mode_set("execute"). Started
-            # in execute, he acted at once and reached for files and the shell over the tools in his list
-            # (asked to read a note, he searched files and never called secondbrain_read_note).
-            mode_provider=AgentModeProvider(default_mode="plan"),
+            middleware=[steward_world_only, *plan_mode_reads_only(mode_provider)],
+            mode_provider=mode_provider,
             # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
             todo_provider=TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS),
             max_context_window_tokens=65_536,

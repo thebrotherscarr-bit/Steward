@@ -72,12 +72,15 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
         return _get()
 
 
-def run_steward(replies: list[Any], query: str, *, unattended: bool = False) -> tuple[ScriptedChatClient, Any, Any]:
+def run_steward(
+    replies: list[Any], query: str, *, unattended: bool = False, mode: str | None = None
+) -> tuple[ScriptedChatClient, Any, Any]:
     """One turn of Steward (Part 4, shell off) on the scripted client, in its own session.
 
     ``unattended`` is the evals' switch (auto_approve_skill_scripts): reads and skill scripts run without
-    approval, as in MAF's claw evals.
+    approval, as in MAF's claw evals. ``mode`` puts the session in that mode first, as the user's Approve does.
     """
+    from agent_framework import AgentModeProvider, set_agent_mode
 
     async def _go() -> tuple[ScriptedChatClient, Any, Any]:
         client = ScriptedChatClient(replies)
@@ -86,7 +89,11 @@ def run_steward(replies: list[Any], query: str, *, unattended: bool = False) -> 
                 stack, client=client, enable_shell=False, auto_approve_skill_scripts=unattended
             )
             async with agent:
-                response = await agent.run(query, session=agent.create_session())
+                session = agent.create_session()
+                if mode:
+                    provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                    set_agent_mode(session, mode, source_id=provider.source_id, available_modes=provider.available_modes)
+                response = await agent.run(query, session=session)
         return client, agent, response
 
     return asyncio.run(_go())
@@ -101,7 +108,8 @@ def approval_requests(response: Any) -> list[Any]:
 
 
 def test_modes_memory_skills_and_file_roots_are_offered() -> None:
-    client, agent, _ = run_steward(["Hello."], "Hello")
+    # In execute mode, where every tool is offered (plan mode offers only what changes nothing: the gate's check).
+    client, agent, _ = run_steward(["Hello."], "Hello", mode="execute")
     call = client.calls[0]
     assert {"mode_get", "mode_set", "todos_add", "todos_complete"} <= offered_tools(call)  # modes, todos
     assert {"file_memory_read", "file_memory_write"} <= offered_tools(call)  # memory
@@ -282,15 +290,38 @@ def test_the_agent_tab_plans_then_executes_on_approve() -> None:
 
 
 def test_loop_stops_at_its_bound() -> None:
-    # Sessions start in plan mode, which stays interactive; the loop runs in execute mode, entered as he
-    # enters it once a plan is approved: mode_set("execute").
-    execute = Content.from_function_call(call_id="x1", name="mode_set", arguments={"mode": "execute"})
+    # Sessions start in plan mode, which stays interactive; the loop runs in execute mode, which the user's
+    # Approve puts the session in (only the Approve: his own mode_set("execute") is refused in plan mode).
     todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Never finished"}]})
-    client, _, response = run_steward([execute, todo], "Work through the plan.")
+    client, _, response = run_steward([todo], "Work through the plan.", mode="execute")
     # One open todo in execute mode keeps the harness loop going (todos_remaining) until its bound of
-    # ten runs: the first run makes three model calls (mode_set, todos_add, then the reply), the rest one each.
-    assert len(client.calls) == 3 + 9
-    assert any("Never finished" in m.text for m in client.calls[3]["messages"]), "the loop reminds him of the open todo"
+    # ten runs: the first run makes two model calls (todos_add, then the reply), the rest one each.
+    assert len(client.calls) == 2 + 9
+    assert any("Never finished" in m.text for m in client.calls[2]["messages"]), "the loop reminds him of the open todo"
+
+
+def test_plan_mode_refuses_what_changes_things_until_approve() -> None:
+    """The plan-mode gate: plan mode offers nothing that changes things and refuses his own switch to execute; Approve opens them."""
+    # Plan mode: no tool that changes things is offered; reads, todos, skills and his memory are.
+    client, _, _ = run_steward(["Here is the plan."], "Do it.")
+    offered = offered_tools(client.calls[0])
+    assert not offered & steward._CHANGES_THINGS, "nothing that changes things is offered in plan mode"
+    assert {"file_access_read", "todos_add", "load_skill", "file_memory_write", "mode_set"} <= offered
+    # His own mode_set out of plan mode is refused: only the user's Approve switches him.
+    switch = Content.from_function_call(call_id="s1", name="mode_set", arguments={"mode": "execute"})
+    client, _, response = run_steward([switch, "Here is the plan."], "Do it.")
+    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1]))
+    assert "operating in the plan mode" in str(client.calls[1]["options"].get("instructions") or ""), "still in plan mode"
+    # A changing tool named anyway does not run in plan mode (its card is MAF's, raised before middleware).
+    write = Content.from_function_call(
+        call_id="w1", name="file_access_write", arguments={"file_name": "test_harness_gate_probe.txt", "content": "x"}
+    )
+    client, _, response = run_steward([write, "Here is the plan."], "Do it.")
+    assert not (steward._WORKING_DIR / "test_harness_gate_probe.txt").exists()
+    # After Approve (execute mode), everything is offered and the write goes to its approval card as before.
+    client, _, response = run_steward([write], "Do it.", mode="execute")
+    assert steward._CHANGES_THINGS - {"run_shell", "atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr"} <= offered_tools(client.calls[0])
+    assert [r.function_call.name for r in approval_requests(response)] == ["file_access_write"]
 
 
 def test_door_calls_stay_on_stewards_world() -> None:
