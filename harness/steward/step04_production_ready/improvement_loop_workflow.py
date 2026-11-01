@@ -37,6 +37,7 @@ from agent_framework import (
     AgentExecutor,
     AgentExecutorRequest,
     AgentExecutorResponse,
+    AgentModeProvider,
     Content,
     Executor,
     FileCheckpointStorage,
@@ -47,6 +48,7 @@ from agent_framework import (
     handler,
     register_checkpoint_type,
     response_handler,
+    set_agent_mode,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -251,7 +253,12 @@ def create_workflow(agent: Any, checkpoint_storage: FileCheckpointStorage, check
     register_checkpoint_type(CheckReport)
     register_checkpoint_type(ReviewRequest)
     register_checkpoint_type(LoopResult)
-    attempt = AgentExecutor(agent, id="steward")
+    # The loop is the user's go for the change, so Steward works it in execute mode (2026-11-01: plan mode's
+    # gate refuses changes); the application sets the mode, as MAF allows, and every write still asks its card.
+    session = agent.create_session()
+    modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+    attempt = AgentExecutor(agent, session=session, id="steward")
     prepare = PrepareTask(id="prepare", agent_id="steward")
     checks_executor = RunChecks(id="checks", checks=checks)
     repair = AskForRepair(id="repair", agent_id="steward")

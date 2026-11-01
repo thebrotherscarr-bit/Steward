@@ -41,12 +41,14 @@ import re
 import subprocess
 import sys
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from agent_framework import (
     Agent,
+    AgentContext,
     AgentModeProvider,
     AggregatingSkillsSource,
     ChatContext,
@@ -279,10 +281,12 @@ _MAF_TODO_STEPS = (
 )
 _STEWARD_TODO_STEPS = (
     "1. There is no simple task: one step can still go wrong. Turn every task into manageable todo items "
-    "and add them to the list with todos_add before you act, and keep the list current until the task is done.\n"
+    "and add them to the list with todos_add before you act, and keep the list current until the task is done. "
+    "Each item is an object with a title, never a bare string: "
+    'todos_add(todos=[{"title": "Read the file"}, {"title": "Write the change"}]).\n'
     "2. When the task matches one of your skills, load it with load_skill and add the skill's steps as the "
     "todo items; follow the skill rather than improvising.\n"
-    "3. The todo items are the plan: in plan mode, present them for approval before switching to execute mode.\n\n"
+    "3. The todo items are the plan: in plan mode, present them for the user's approval before execute mode.\n\n"
 )
 _MAF_TODO_INSTRUCTIONS = TodoProvider().instructions
 if _MAF_TODO_STEPS not in _MAF_TODO_INSTRUCTIONS:
@@ -504,32 +508,113 @@ async def steward_world_only(
 # </atlas>
 
 
-# <plan_mode_gate>
-# Kyle, 2026-10-31 ("yes, build the gate"): in plan mode he read "write a file" as leave to write it, and
-# once wrote to his memory store and called that proof plan mode worked. The rule was in his prompt and
-# he did not follow it, so the harness holds it, as steward_world_only holds the door: while his session
-# is in plan mode, a tool that changes the workspace, the repository or the world is refused with
-# corrective feedback, and only the user's Allow on request_execute (ApprovedModeSwitch, below) moves
-# him to execute. Reads, todos, skills' instructions and his memory file stay open: MAF's plan mode
-# explores with tools and writes the plan to a memory file (_mode.py, plan steps 3 and 5).
+# <plan_mode>
+# Kyle, 2026-11-01 ("MAF says to have it in, don't skip it"): plan mode as the guide builds it. MAF's own
+# mode_set stays (the guide never hides it), and the plan is presented as the guide's console presents it,
+# PlanningResponse structured output in plan mode, set by the host (console_app.py's planning observer,
+# hosted.py's plan_mode_turns). His rules go in through MAF's own options: the todo text (TodoProvider
+# instructions=) and the plan-mode text (AgentModeProvider mode_instructions=, "Customize modes with
+# AgentModeProvider(mode_instructions={...})"). Tools stay offered in every mode, as in MAF: the approvals
+# are the gate (writes, git_commit and the shell each ask), and the tool policy is stated in the plan-mode
+# text (the cookbook: "State a tool policy inside the instructions"). evals.py's plan-before-act cases check
+# that he follows it.
 _PLAN_MODE = "plan"
+_EXECUTE_MODE = "execute"
 _CHANGES_THINGS = frozenset({
     *FileAccessProvider._WRITE_TOOL_NAMES,  # MAF's own set: file_access_write, _replace, _replace_lines, _delete
     "git_commit",
     "run_shell",
-    SkillsProvider.RUN_SKILL_SCRIPT_TOOL_NAME,
+    # Skill scripts are not here (Kyle, 2026-10-31: "unless he has an actual skill he is calling, there is no
+    # simple task"): a matching skill is followed directly, and its scripts keep their own approval card.
     *(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr")),
 })
+PLAN_MODE_TOOL_POLICY = (
+    "\n\nTool policy in plan mode: you have the tools that change things ("
+    + ", ".join(sorted(_CHANGES_THINGS))
+    + "), and each asks the user's approval when called. In plan mode do not call them. Add the work as todos "
+    "(todos_add), then present the plan for the user's approval. Once the user approves, you are in execute "
+    "mode, and you use those tools to do the todos."
+)
+_MAF_MODE_INSTRUCTIONS = AgentModeProvider().mode_instructions
+# Gate run 2 (2026-11-01): in plan mode he edited a file as an "exploratory check", MAF's plan step 3. The
+# rule goes in that step, where he acts on it: explore with tools that only read.
+_MAF_PLAN_STEP_3 = (
+    "3. If needed, use the provided tools to do some exploratory checks to help build a plan and determine "
+    "what clarifying questions you may need from the user.\n"
+)
+_STEWARD_PLAN_STEP_3 = (
+    "3. If needed, use the provided tools that only read (file_access_read, file_access_read_lines, "
+    "file_access_ls, file_access_grep, get_repo_status) to do some exploratory checks to help build a plan and "
+    "determine what clarifying questions you may need from the user. Never call a tool that changes things in "
+    "plan mode: the change itself is a todo in the plan.\n"
+)
+if _MAF_PLAN_STEP_3 not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
+    # MAF changed its plan-mode text: refuse to start rather than lose the rule.
+    raise RuntimeError("MAF's plan-mode instructions changed; update _MAF_PLAN_STEP_3 in agent.py.")
+STEWARD_MODE_INSTRUCTIONS = {
+    **_MAF_MODE_INSTRUCTIONS,
+    _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE].replace(_MAF_PLAN_STEP_3, _STEWARD_PLAN_STEP_3)
+    + PLAN_MODE_TOOL_POLICY,
+}
 
 
-def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[..., Awaitable[None]]]:
-    """The plan-mode gate, as MAF's middleware gating: two middlewares for the agent's ``middleware`` list.
+class ReturnToPlanWhenDone(ContextProvider):
+    """Back to plan mode once no todo is open after an execute run (Kyle, 2026-10-31), so each request is planned.
 
-    MAF asks a tool's approval before function middleware runs, so a refusal there would come after an
-    approval card. The chat middleware therefore stops offering the tools that change things while the
-    session is in plan mode (tool selection, the lowest layer); the function middleware refuses any such
-    tool that is called anyway, with corrective feedback.
+    The application changing the mode, as MAF's Learn page allows ("Applications can also change the mode
+    directly, which causes the provider to inject a mode-change notification on the next run").
     """
+
+    def __init__(self, mode_provider: AgentModeProvider, todo_provider: TodoProvider) -> None:
+        super().__init__("return-to-plan")
+        self._modes = mode_provider
+        self._todos = todo_provider
+
+    async def after_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        if session is None:
+            return
+        mode = get_agent_mode(
+            session,
+            source_id=self._modes.source_id,
+            default_mode=self._modes.default_mode,
+            available_modes=self._modes.available_modes,
+        )
+        if mode != _EXECUTE_MODE:
+            return
+        # Not while the run waits on an approval card: that run is paused, not finished.
+        response = getattr(context, "response", None)
+        if response is not None and any(
+            c.type == "function_approval_request" for m in response.messages for c in m.contents
+        ):
+            return
+        items = await self._todos.store.load_items(session, source_id=self._todos.source_id)
+        # Only when there was a plan and all of it is done.
+        if items and all(item.is_complete for item in items):
+            set_agent_mode(session, _PLAN_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes)
+
+
+# Gate run 4 (2026-11-01): with the rule stated in plan step 3 he still edited files in plan mode, 3 runs of 5.
+# The cookbook's answer when a rule is present but not followed is a deterministic gate in code ("A gate: do
+# not move on until the required files exist"): in plan mode a tool that changes things is refused with
+# corrective feedback, so he plans instead. Tools stay offered, as in MAF. MAF asks a tool's approval before
+# function middleware runs, so the refusal must come without a card, or the user would click Allow and then
+# see a refusal: in plan mode MAF's auto-approval rule lets such a call past the card, and the function
+# middleware then refuses it. The refusal checks the run's session and the call's session both, so an
+# auto-approved call can never run. In execute mode none of this applies and every write asks as before.
+_RUN_SESSION: ContextVar[Any] = ContextVar("steward_run_session", default=None)
+PLAN_MODE_REFUSAL = (
+    "Refused: you are in plan mode, and {name} changes things. Do not call it yet. Add the work as todos "
+    "(todos_add) and present the plan for the user's approval; once the user approves, you are in execute "
+    "mode and can call it."
+)
+PLAN_MODE_TODOS_NOT_DONE = (
+    "Refused: you are in plan mode and nothing has been done yet, so no todo is complete. Todos are marked "
+    "done in execute mode, after the work is done. Present the plan for the user's approval."
+)
+
+
+def plan_mode_gate(mode_provider: AgentModeProvider) -> tuple[list[Callable[..., Awaitable[None]]], Callable[[Any], bool]]:
+    """The plan-mode gate: (middleware for the agent's list, an auto-approval rule)."""
 
     def in_plan_mode(session: Any) -> bool:
         if session is None:
@@ -542,95 +627,91 @@ def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[...,
         )
         return mode == _PLAN_MODE
 
-    async def plan_mode_tools(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
-        if in_plan_mode(context.session) and context.options and context.options.get("tools"):
-            offered = [t for t in context.options["tools"] if getattr(t, "name", None) not in _CHANGES_THINGS]
-            context.options = {**context.options, "tools": offered}
+    async def remember_run_session(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        # Not reset after the run: a streamed run is consumed after this returns, and its approvals with it.
+        _RUN_SESSION.set(context.session)
         await call_next()
 
-    async def plan_mode_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    async def refuse_in_plan_mode(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
         name = context.function.name
-        if name in _CHANGES_THINGS and in_plan_mode(context.session):
-            context.result = (
-                f"Refused: you are in plan mode, and {name} changes things. Add the work as todos (todos_add)"
-                " and call request_execute with the plan; the user's Allow switches you to execute mode."
-            )
+        planning = in_plan_mode(context.session) or in_plan_mode(_RUN_SESSION.get())
+        if name in _CHANGES_THINGS and planning:
+            context.result = PLAN_MODE_REFUSAL.format(name=name)
+            return
+        # Gate run 5: after a refusal he marked the todo done. In plan mode nothing has run yet.
+        if name == "todos_complete" and planning:
+            context.result = PLAN_MODE_TODOS_NOT_DONE
             return
         await call_next()
 
-    return [plan_mode_tools, plan_mode_calls]
+    def past_the_card_to_be_refused(call: Any) -> bool:
+        """Auto-approval rule: in plan mode, a changing call skips the card; refuse_in_plan_mode refuses it."""
+        return getattr(call, "name", None) in _CHANGES_THINGS and in_plan_mode(_RUN_SESSION.get())
+
+    return [remember_run_session, refuse_in_plan_mode], past_the_card_to_be_refused
 
 
-# </plan_mode_gate>
-
-
-# <approved_mode_switch>
-# Kyle, 2026-10-31 ("it doesn't need to present a card at every single turn"): plan mode is plain
-# conversation, and the one card is the switch to execute. MAF's mode provider runs without its own
-# mode_set (expose_mode_set=False: "Replacement tools can be supplied"), and request_execute is that
-# replacement: it carries the plan and always asks approval, so it is the Agent tab's Allow/Deny card.
-# Allow switches him to execute; Deny keeps him in plan mode. When no todo is left open after an
-# execute run, he is put back in plan mode, so the next request is planned again.
-_EXECUTE_MODE = "execute"
-_MAF_PLAN_APPROVAL = (
-    "6. Present the plan to the user and ask for approval to switch to execute mode and process the plan.\n"
-    "7. When approval is granted, always switch to execute mode (using the `mode_set` tool), "
-    "and follow the steps for *Execute mode*."
+# Gate runs 6 and 8 (2026-11-01): the host asked for PlanningResponse on every call, and still one plan-mode
+# reply in about seven came back as prose (the cookbook: a schema "is not guaranteed"). The harness loop
+# (create_harness_agent's loop_should_continue, MAF's AgentLoopMiddleware, which already runs execute-mode
+# todos) asks once or twice more for the plan when a plan-mode reply holds none, and only for a host that
+# asked for it (plan_reply_check). Otherwise the loop is MAF's todos_remaining, unchanged.
+PLAN_REPLY_NUDGE = (
+    "Your last reply did not hold the plan. Reply now with only the plan for the user's approval, as the "
+    "PlanningResponse JSON object: an approval whose message lists your todos in order, or a clarification "
+    "with your questions."
 )
-_STEWARD_PLAN_APPROVAL = (
-    "6. Present the plan by calling request_execute with a short summary of it. That call is the user's "
-    "approval card: on Allow you are switched to execute mode; on Deny you stay in plan mode, so ask what to change.\n"
-    "7. Never act on the plan before the user's Allow."
+_PLAN_REPLY_RETRIES = 2
+# Gate run 9: he answered a change request in plan mode with no todos at all (Kyle, 2026-10-31: "he should
+# have the todo list at all times"). A plan-mode reply with an empty todo list is asked once more.
+PLAN_TODOS_NUDGE = (
+    "Your todo list is empty. Add the work as todos with todos_add first, each an object with a title, then "
+    "present the plan for the user's approval as the PlanningResponse JSON object."
 )
-_MAF_MODE_INSTRUCTIONS = AgentModeProvider().mode_instructions
-if _MAF_PLAN_APPROVAL not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
-    # MAF changed its plan-mode text: refuse to start rather than keep a mode_set he no longer has.
-    raise RuntimeError("MAF's plan-mode instructions changed; update _MAF_PLAN_APPROVAL in agent.py.")
-STEWARD_MODE_INSTRUCTIONS = {
-    **_MAF_MODE_INSTRUCTIONS,
-    _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE].replace(_MAF_PLAN_APPROVAL, _STEWARD_PLAN_APPROVAL),
-}
 
 
-class ApprovedModeSwitch(ContextProvider):
-    """request_execute in plan mode (approval always required), and back to plan mode when the todos are done."""
+def plan_reply_loop(
+    mode_provider: AgentModeProvider, plan_reply_check: Callable[[str], Any] | None, todo_provider: TodoProvider | None = None
+) -> tuple[Callable[..., Awaitable[Any]], Callable[..., Awaitable[str | None]]]:
+    """The harness loop's (should_continue, next_message): the todos and the plan asked for again, then MAF's todo loop."""
+    todo_loop = todos_remaining(looping_modes=[_EXECUTE_MODE])
 
-    def __init__(self, mode_provider: AgentModeProvider, todo_provider: TodoProvider) -> None:
-        super().__init__("approved-mode-switch")
-        self._modes = mode_provider
-        self._todos = todo_provider
-
-    def _mode(self, session: Any) -> str:
-        return get_agent_mode(
+    async def plan_missing(session: Any, last_result: Any, iteration: int) -> str | None:
+        """'todos' or 'plan' when a plan-mode reply lacks them, else None."""
+        if plan_reply_check is None or session is None or iteration > _PLAN_REPLY_RETRIES:
+            return None
+        mode = get_agent_mode(
             session,
-            source_id=self._modes.source_id,
-            default_mode=self._modes.default_mode,
-            available_modes=self._modes.available_modes,
+            source_id=mode_provider.source_id,
+            default_mode=mode_provider.default_mode,
+            available_modes=mode_provider.available_modes,
         )
+        if mode != _PLAN_MODE or last_result is None:
+            return None
+        messages = list(getattr(last_result, "messages", None) or [])
+        if any(c.type == "function_approval_request" for m in messages for c in m.contents):
+            return None  # waiting on a card, not finished
+        if todo_provider is not None and not await todo_provider.store.load_items(session, source_id=todo_provider.source_id):
+            return "todos"
+        last = next((m.text for m in reversed(messages) if m.role == "assistant" and (m.text or "").strip()), "")
+        return "plan" if plan_reply_check(last) is None else None
 
-    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        if self._mode(session) != _PLAN_MODE:
-            return
+    async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
+        if missing := await plan_missing(session, last_result, iteration):
+            return (True, missing)
+        return await todo_loop(session=session, last_result=last_result, iteration=iteration, **kwargs)
 
-        @tool(name="request_execute", approval_mode="always_require")
-        def request_execute(
-            plan: Annotated[str, Field(min_length=1, description="A short summary of the plan: the todos, in order.")],
-        ) -> str:
-            """Ask the user to approve your plan; on their Allow you are switched to execute mode."""
-            set_agent_mode(session, _EXECUTE_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes, notify=False)
-            return "Approved by the user: you are in execute mode now. Work through your todos and mark each one done."
+    async def next_message(*, feedback: str | None = None, **kwargs: Any) -> str | None:
+        if feedback == "plan":
+            return PLAN_REPLY_NUDGE
+        if feedback == "todos":
+            return PLAN_TODOS_NUDGE
+        return await todos_remaining_message(feedback=feedback, **kwargs)
 
-        context.extend_tools(self.source_id, [request_execute])
-
-    async def after_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        if session is None or self._mode(session) != _EXECUTE_MODE:
-            return
-        items = await self._todos.store.load_items(session, source_id=self._todos.source_id)
-        if not any(not item.is_complete for item in items):
-            set_agent_mode(session, _PLAN_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes)
+    return should_continue, next_message
 
 
-# </approved_mode_switch>
+# </plan_mode>
 
 
 # <shell>
@@ -996,6 +1077,7 @@ async def build_steward_agent(
     enable_shell: bool = True,
     auto_approve_skill_scripts: bool = False,
     part: int = 4,
+    plan_reply_check: Callable[[str], Any] | None = None,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -1010,6 +1092,9 @@ async def build_steward_agent(
         auto_approve_skill_scripts: When True, ``run_skill_script`` is auto-approved so skills complete
             without a human in the loop. Intended for unattended runs such as ``evals.py``; it only
             covers the skill tools — git_commit, the shell and file writes keep their approvals.
+        plan_reply_check: For a host that asks for the guide's PlanningResponse in plan mode (hosted.py's
+            plan_mode_turns): reads a reply's plan, or returns None. When a plan-mode reply holds no
+            plan, the harness loop asks for it again, at most twice (see plan_reply_loop).
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -1074,6 +1159,10 @@ async def build_steward_agent(
             )
         # Part 4 adds governance on the chat client, as the guide adds Purview (Presidio, locally)
         part3_client = client or (OllamaChatClient(middleware=_build_governance_middleware()) if part == 4 else OllamaChatClient())
+        if client is None:
+            # Gate run 3 (2026-11-01): a todos_add call Ollama could not parse ("error parsing tool call") ended
+            # the whole run. The retry written for that gpt-oss fault was only on the old path; Parts 3 and 4 get it.
+            part3_client = _retry_malformed_tool_calls(part3_client)
         explorer_agent = Agent(
             client=part3_client,
             name="CodeExplorer",
@@ -1171,11 +1260,14 @@ async def build_steward_agent(
         # the tools he has, writes the plan to memory and asks approval before mode_set("execute"). Started
         # in execute, he acted at once and reached for files and the shell over the tools in his list
         # (asked to read a note, he searched files and never called secondbrain_read_note).
-        # Kyle, 2026-10-31: the one card is the switch to execute (ApprovedModeSwitch), so MAF's free mode_set is off.
-        mode_provider = AgentModeProvider(default_mode="plan", expose_mode_set=False, mode_instructions=STEWARD_MODE_INSTRUCTIONS)
+        # Plan mode first, MAF's default, with his tool policy in the plan-mode text (STEWARD_MODE_INSTRUCTIONS).
+        mode_provider = AgentModeProvider(default_mode="plan", mode_instructions=STEWARD_MODE_INSTRUCTIONS)
         # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
         todo_provider = TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS)
-        part3_providers.append(ApprovedModeSwitch(mode_provider, todo_provider))
+        part3_providers.append(ReturnToPlanWhenDone(mode_provider, todo_provider))
+        gate_middleware, gate_rule = plan_mode_gate(mode_provider)
+        auto_approval_rules.insert(0, gate_rule)
+        loop_should_continue, loop_next_message = plan_reply_loop(mode_provider, plan_reply_check, todo_provider)
         return create_harness_agent(
             client=part3_client,
             name="Steward",
@@ -1189,7 +1281,7 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
-            middleware=[steward_world_only, *plan_mode_reads_only(mode_provider)],
+            middleware=[steward_world_only, *gate_middleware],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
             max_context_window_tokens=65_536,
@@ -1198,8 +1290,8 @@ async def build_steward_agent(
             # ADR-0001 item 3, as MAF's harness_research.py sample: in execute mode the harness
             # re-invokes Steward while his todos are still open, reminding him which ones, and stops
             # for any approval; plan mode stays interactive. Ten passes per turn at most.
-            loop_should_continue=todos_remaining(looping_modes=["execute"]),
-            loop_next_message=todos_remaining_message,
+            loop_should_continue=loop_should_continue,
+            loop_next_message=loop_next_message,
             loop_max_iterations=10,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
