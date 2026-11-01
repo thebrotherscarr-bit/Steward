@@ -144,9 +144,13 @@ def planning_response_in(text: str) -> PlanningResponse | None:
     start = 0
     while (start := text.find("{", start)) != -1:
         try:
-            return PlanningResponse.model_validate_json(text[start:])
+            plan = PlanningResponse.model_validate_json(text[start:])
         except ValueError:
             start += 1
+            continue
+        # Plan run 13: an approval with an empty questions list is valid JSON and holds no plan; the Agent tab's
+        # reader (utils/planning.ts) refuses it too, so the harness loop asks again.
+        return plan if plan.questions else None
     return None
 
 

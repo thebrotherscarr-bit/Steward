@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
 from agent_framework import (
     Agent,
     AgentResponse,
+    ConversationSplit,
     ExpectedToolCall,
     LocalEvaluator,
     evaluate_agent,
@@ -259,9 +260,33 @@ async def _run_queries(agent: Agent[Any], queries: list[str], *, mode: str | Non
         session = agent.create_session()
         if mode:
             set_agent_mode(session, mode, source_id=modes.source_id, available_modes=modes.available_modes)
-        stream = agent.run(query, session=session, stream=True)
-        responses.append(await stream.get_final_response())
+        # Every iteration's updates: the harness loop streams each iteration, and get_final_response() keeps only
+        # the last (2026-11-01: a CodeExplorer delegation in the first iteration was scored "not called").
+        updates = [update async for update in agent.run(query, session=session, stream=True)]
+        responses.append(AgentResponse.from_updates(updates))
     return responses
+
+
+@contextmanager
+def discount_bug_planted() -> Any:
+    """The discount bug, planted in the working copy for the run and put back after it, whatever happens.
+
+    The gate says "The evals plant the discount bug in the working copy only", and nothing did: once the
+    committed sample project was fixed (87947b5, 2026-10-29), the bug-diagnosis case asked about a test
+    that passes. The committed file stays fixed, so the gate's sample tests stay green.
+    """
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
+    original = module.read_bytes()
+    fixed, planted = b"subtotal * (1 - discount_percent / 100)", b"subtotal * (1 - discount_percent)"
+    if fixed not in original:
+        raise RuntimeError(f"{module} no longer holds the fixed discount line; update discount_bug_planted.")
+    module.write_bytes(original.replace(fixed, planted))
+    try:
+        yield
+    finally:
+        module.write_bytes(original)
 
 
 async def main() -> None:
@@ -281,13 +306,17 @@ async def main() -> None:
                 explorer_names_files,
                 tool_call_args_match,
             )
-            responses = await _run_queries(agent, STEWARD_EVAL_QUERIES, mode="execute")
+            with discount_bug_planted():
+                responses = await _run_queries(agent, STEWARD_EVAL_QUERIES, mode="execute")
             results = await evaluate_agent(
                 agent=agent,
                 queries=STEWARD_EVAL_QUERIES,
                 responses=responses,
                 expected_tool_calls=STEWARD_EXPECTED_TOOL_CALLS,
                 evaluators=local,
+                # The question is the first user message and the answer every iteration after it: the loop's
+                # nudges are user messages, and the default (the last turn) scored a nudge and the last iteration.
+                conversation_split=ConversationSplit.FULL,
             )
             print(f"Local evals: {results[0].passed}/{results[0].total} passed")
             for item in results[0].items:
@@ -319,6 +348,7 @@ async def plan_main() -> None:
                 queries=PLAN_BEFORE_ACT_QUERIES,
                 responses=responses,
                 evaluators=LocalEvaluator(plan_before_act),
+                conversation_split=ConversationSplit.FULL,
             )
     result = results[0]
     rate = result.passed / result.total if result.total else 0.0

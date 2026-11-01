@@ -360,6 +360,7 @@ def test_plan_mode_marks_no_todo_done_and_the_plan_is_read_in_code() -> None:
     prefixed = 'We added the todo. Now present the plan.{"type": "approval", "questions": [{"message": "1. Write it."}]}'
     assert hosted.planning_response_in(prefixed).questions[0].message == "1. Write it."
     assert hosted.planning_response_in("plain words") is None
+    assert hosted.planning_response_in('{"type": "approval", "questions": []}') is None, "an empty plan is no plan"
 
 
 def test_a_plan_mode_reply_without_todos_or_plan_is_asked_again() -> None:
@@ -411,6 +412,122 @@ def test_finished_work_is_not_asked_for_a_plan() -> None:
     client = asyncio.run(_go())
     assert len(client.calls) == 3, "no plan was asked of the finished run"
     assert not any(steward.PLAN_REPLY_NUDGE in m.text for c in client.calls for m in c["messages"])
+
+
+def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> None:
+    """RequestHints: the fast path adds task-specific guidance only when the request asks for it."""
+
+    def hints_for(query: str) -> str:
+        client, _, _ = run_steward(["ok"], query, mode="execute")
+        text = str(client.calls[0]["options"].get("instructions") or "")
+        return text.split("## For this request", 1)[1] if "## For this request" in text else ""
+
+    assert 'load_skill("codebase-map")' in hints_for("Map harness/steward/working/sample-project.")
+    assert "WebResearchAgent" in hints_for("Research Ollama and mem0 and summarize the latest news.")
+    assert "execute_code" in hints_for("What percentage of the lines are tests?")
+    assert "CodeExplorer" in hints_for("Explore it with the CodeExplorer agent.")
+    assert hints_for("Hello, how are you?") == "", "nothing is added when nothing matches"
+    assert hints_for("Fix the import in C:/Users/novad/Desktop/Research/worlds/x.py.") == "", "a word inside a path never counts"
+
+
+def test_a_clearly_misspelled_tool_name_is_repaired_and_an_unclear_one_is_not() -> None:
+    """repair_tool_names: "totos_add" (his most common slip) runs todos_add, streamed or not; an unknown name stays unknown."""
+    slip = Content.from_function_call(call_id="t1", name="totos_add", arguments={"todos": [{"title": "Write it"}]})
+    client, _, _ = run_steward([slip, "Planned."], "Plan it.")
+    assert any('"title": "Write it"' in r for r in function_results(client.calls[1])), "the todo was made"
+
+    async def _streamed() -> ScriptedChatClient:
+        c = ScriptedChatClient([slip, "Planned."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=c, enable_shell=False)
+            async with agent:
+                await agent.run("Plan it.", session=agent.create_session(), stream=True).get_final_response()
+        return c
+
+    assert any('"title": "Write it"' in r for r in function_results(asyncio.run(_streamed()).calls[1])), "streamed too"
+    unknown = Content.from_function_call(call_id="u1", name="unknown_tool", arguments={})
+    client, _, _ = run_steward([unknown, "Ok."], "Do it.")
+    assert any("not found" in r for r in function_results(client.calls[1]))
+    assert steward.repaired_tool_name("file_acess_read", {"file_access_read", "file_access_write"}) == "file_access_read"
+    assert steward.repaired_tool_name("mod_x", {"mode_set", "mode_get"}) is None
+
+
+def test_work_that_skips_the_tool_its_request_needs_is_asked_once_and_hints_outlive_the_approve() -> None:
+    """The evidence check: a count finished without CodeAct is asked once; a hint is kept through the Approve turn."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    count = Content.from_function_call(call_id="x1", name="execute_code", arguments={"code": "print(round(100 * 24 / 44, 1))"})
+    question = "What percentage of the lines are tests?"
+    client, _, _ = run_steward(["About half.", count, "54.5%"], question, mode="execute")
+    assert len(client.calls) == 3, "one nudge, then the count, then the answer"
+    assert any(steward.REQUIRED_TOOLS_NUDGE in m.text and "execute_code" in m.text for m in client.calls[1]["messages"])
+    client, _, _ = run_steward([count, "54.5%"], question, mode="execute")
+    assert len(client.calls) == 2, "no nudge when the tool was used"
+
+    async def _approve() -> ScriptedChatClient:
+        c = ScriptedChatClient(["Plan: research it.", "Done."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=c, enable_shell=False)
+            async with agent:
+                session = agent.create_session()
+                await agent.run("Research Ollama and summarize the latest news.", session=session)
+                modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                await agent.run("Approve and switch to execute mode", session=session)
+        return c
+
+    c = asyncio.run(_approve())
+    assert "WebResearchAgent" in str(c.calls[1]["options"].get("instructions") or ""), "the hint reaches the Approve turn"
+
+
+def test_only_the_users_approve_leaves_plan_mode() -> None:
+    """Regression run 10: in plan mode his own mode_set("execute") is refused; only the user's Approve switches him."""
+    switch = Content.from_function_call(call_id="s1", name="mode_set", arguments={"mode": "execute"})
+    client, _, _ = run_steward([switch, "Here is the plan."], "Do it.")
+    assert any(r == steward.PLAN_MODE_SWITCH_REFUSAL for r in function_results(client.calls[1]))
+    assert "operating in the plan mode" in str(client.calls[1]["options"].get("instructions") or ""), "still in plan mode"
+    assert "do not call mode_set for it" in str(client.calls[0]["options"].get("instructions") or ""), "step 7 says so"
+    back = Content.from_function_call(call_id="s2", name="mode_set", arguments={"mode": "plan"})
+    client, _, _ = run_steward([back, "Back to planning."], "Plan it again.", mode="execute")
+    assert not any("Refused" in r for r in function_results(client.calls[1])), "switching to plan is always allowed"
+
+
+def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_question() -> None:
+    """Regression run 11: CodeAct counts files through a read-only mount; "report the pass count" asks for no count."""
+    count = Content.from_function_call(call_id="x1", name="execute_code", arguments={"code": (
+        "print(len(open('harness/steward/working/sample-project/inventory.py').read().splitlines()))")})
+    write = Content.from_function_call(call_id="x2", name="execute_code", arguments={"code": (
+        "open('harness/test_harness_codeact_probe.txt', 'w').write('x')")})
+    client, _, _ = run_steward([count, write, "ok"], "Count the lines.", mode="execute")
+    assert function_results(client.calls[1])[0].strip() == "20", "an exact count, read from the file"
+    assert not (steward._WORKING_DIR / "harness" / "test_harness_codeact_probe.txt").exists(), "and nothing written"
+    asked = [hint for pattern, hint, _ in steward.REQUEST_HINTS if pattern.search("Report the pass count and every failing line.")]
+    assert asked == []
+
+
+def test_a_run_that_added_todos_is_never_told_its_list_is_empty(monkeypatch: Any) -> None:
+    """Live run 14: even if the store reads empty, a run that called todos_add is not nudged to add todos."""
+    from agent_framework._harness._todo import TodoSessionStore
+
+    import hosted
+
+    async def empty(self: Any, session: Any, *, source_id: str) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(TodoSessionStore, "load_items", empty)
+    todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Write it"}]})
+    plan = '{"type": "approval", "questions": [{"message": "1. Write it."}]}'
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient([todo, plan, plan])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, plan_reply_check=hosted.planning_response_in)
+            async with agent:
+                await agent.run("Write it.", session=agent.create_session())
+        return client
+
+    client = asyncio.run(_go())
+    assert len(client.calls) == 2, "the plan stood; no false 'empty' nudge"
 
 
 def test_door_calls_stay_on_stewards_world() -> None:
