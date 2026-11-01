@@ -67,6 +67,7 @@ from agent_framework import (
     MiddlewareTermination,
     ResponseStream,
     SkillsProvider,
+    TodoProvider,
     create_harness_agent,
     todos_remaining,
     todos_remaining_message,
@@ -259,6 +260,34 @@ when asked.
 Say plainly when you don't know something or haven't verified it. Never invent file contents,
 APIs or command output.
 """
+
+
+# <todo_instructions>
+# Kyle, 2026-10-31: "he should have the todo list at all times and default to plan mode. a simple task
+# can be easily messed up. unless he has an actual skill he is calling, there is no simple task."
+# MAF's own todo text (TodoProvider's default, _harness/_todo.py) lets a "simple" ask skip the list
+# and be done at once; asked to write one file in plan mode, he read that as leave to skip the plan.
+# So his TodoProvider gets MAF's text with that choice replaced (instructions=, MAF's override): every
+# task is turned into todos, and a matching skill's steps are the todos.
+_MAF_TODO_STEPS = (
+    "1. Determine whether the ask requires multiple steps to complete (complex) or can be completed "
+    "using a single step (simple).\n"
+    "2. If complex, turn the task into manageable todo items and add them to the list.\n"
+    "3. If simple, don't add a todo item, but rather just complete the task directly.\n\n"
+)
+_STEWARD_TODO_STEPS = (
+    "1. There is no simple task: one step can still go wrong. Turn every task into manageable todo items "
+    "and add them to the list with todos_add before you act, and keep the list current until the task is done.\n"
+    "2. When the task matches one of your skills, load it with load_skill and add the skill's steps as the "
+    "todo items; follow the skill rather than improvising.\n"
+    "3. The todo items are the plan: in plan mode, present them for approval before switching to execute mode.\n\n"
+)
+_MAF_TODO_INSTRUCTIONS = TodoProvider().instructions
+if _MAF_TODO_STEPS not in _MAF_TODO_INSTRUCTIONS:
+    # MAF changed its todo text: refuse to start rather than silently keep the "simple task" exception.
+    raise RuntimeError("MAF's TodoProvider instructions changed; update _MAF_TODO_STEPS in agent.py.")
+STEWARD_TODO_INSTRUCTIONS = _MAF_TODO_INSTRUCTIONS.replace(_MAF_TODO_STEPS, _STEWARD_TODO_STEPS)
+# </todo_instructions>
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -1026,6 +1055,8 @@ async def build_steward_agent(
             # in execute, he acted at once and reached for files and the shell over the tools in his list
             # (asked to read a note, he searched files and never called secondbrain_read_note).
             mode_provider=AgentModeProvider(default_mode="plan"),
+            # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
+            todo_provider=TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS),
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
             disable_web_search=True,
