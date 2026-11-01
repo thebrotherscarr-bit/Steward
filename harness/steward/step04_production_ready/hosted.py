@@ -30,21 +30,30 @@ from pathlib import Path
 
 from agent_framework import (
     AgentContext,
+    AgentModeProvider,
     AgentResponseUpdate,
     BackgroundAgentsProvider,
     InMemoryHistoryProvider,
     ResponseStream,
     agent_middleware,
+    get_agent_mode,
+    set_agent_mode,
 )
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.ai.agentserver.responses import FileResponseStore
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent  # noqa: E402
+from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 logger = logging.getLogger(__name__)
+# A turn's request metadata key naming the mode to switch to before it runs: the Agent tab's Approve
+# sends {"agent_mode": "execute"}, as the console's Approve calls set_agent_mode.
+AGENT_MODE_KEY = "agent_mode"
+PLAN_MODE = "plan"
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
 
@@ -124,6 +133,52 @@ def _release_background_per_request(background_providers: list[BackgroundAgentsP
     return request_background_lifetime
 
 
+def planning_response_in(text: str) -> PlanningResponse | None:
+    """The PlanningResponse in a plan-mode reply, or None.
+
+    With tools offered, gpt-oss writes a short preamble before the constrained JSON in the same reply
+    (gate runs 2 and 4, 2026-11-01: 'We added todo. Now present the plan for approval.{"type":...}').
+    The cookbook: "Validate JSON ... in code". The plan is the JSON object that ends the reply.
+    """
+    text = (text or "").strip()
+    start = 0
+    while (start := text.find("{", start)) != -1:
+        try:
+            return PlanningResponse.model_validate_json(text[start:])
+        except ValueError:
+            start += 1
+    return None
+
+
+def plan_mode_turns(mode_provider: AgentModeProvider) -> Callable[..., Awaitable[None]]:
+    """The guide's planning observer, on the server, where the session's mode lives.
+
+    Part 1, "How plan mode works": in plan mode the console asks for PlanningResponse as
+    response_format, so the reply is a clarification or a plan to approve, and its Approve
+    switches the session to execute mode (harness/console/observers/planning_output.py,
+    configure_run_options and _build_approval_action). The Agent tab cannot reach the session,
+    so an approval comes as request metadata {"agent_mode": "execute"}, and both are done here.
+    """
+    modes = {"source_id": mode_provider.source_id, "available_modes": mode_provider.available_modes}
+
+    @agent_middleware
+    async def plan_mode_turn(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        options = dict(context.options or {})
+        metadata = dict(options.pop("metadata", None) or {})
+        switch_to = metadata.pop(AGENT_MODE_KEY, None)
+        if metadata:
+            options["metadata"] = metadata
+        if context.session is not None:
+            if switch_to:
+                set_agent_mode(context.session, str(switch_to), **modes)
+            if get_agent_mode(context.session, default_mode=mode_provider.default_mode, **modes) == PLAN_MODE:
+                options["response_format"] = PlanningResponse
+        context.options = options
+        await call_next()
+
+    return plan_mode_turn
+
+
 async def main() -> None:
     """Serve Steward on 127.0.0.1:STEWARD_PORT until stopped."""
     load_dotenv()
@@ -136,11 +191,18 @@ async def main() -> None:
         # Steward keeps each conversation's history in its session (history_source="agent"), so an
         # approval answer comes back through the harness's approval layer instead of being replayed
         # to Ollama as history, which the Ollama client cannot read.
-        agent = await build_steward_agent(stack, history_provider=InMemoryHistoryProvider())
+        agent = await build_steward_agent(
+            stack, history_provider=InMemoryHistoryProvider(), plan_reply_check=planning_response_in
+        )
         background_providers = [
             provider for provider in agent.context_providers if isinstance(provider, BackgroundAgentsProvider)
         ]
-        agent.middleware = [_release_background_per_request(background_providers), *(agent.middleware or [])]
+        mode_provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+        agent.middleware = [
+            _release_background_per_request(background_providers),
+            plan_mode_turns(mode_provider),
+            *(agent.middleware or []),
+        ]
         async with agent:
             logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol).", port)
             server = ResponsesHostServer(agent=agent, history_source="agent", response_store=FileResponseStore(_STORAGE_DIR))
