@@ -235,13 +235,23 @@ def test_file_read_runs_without_approval_when_unattended() -> None:
     assert any("def order_total" in r for r in results)
 
 
+def test_a_new_session_starts_in_plan_mode() -> None:
+    """Every session starts in MAF's plan mode: he works out what he has and asks before he acts."""
+    client, _, _ = run_steward(["Hello."], "Hello")
+    instructions = str(client.calls[0]["options"].get("instructions") or "")
+    assert "You are currently operating in the plan mode." in instructions
+
+
 def test_loop_stops_at_its_bound() -> None:
+    # Sessions start in plan mode, which stays interactive; the loop runs in execute mode, entered as he
+    # enters it once a plan is approved: mode_set("execute").
+    execute = Content.from_function_call(call_id="x1", name="mode_set", arguments={"mode": "execute"})
     todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Never finished"}]})
-    client, _, response = run_steward([todo], "Work through the plan.")
+    client, _, response = run_steward([execute, todo], "Work through the plan.")
     # One open todo in execute mode keeps the harness loop going (todos_remaining) until its bound of
-    # ten runs: the first run makes two model calls (the todos_add call, then the reply), the rest one each.
-    assert len(client.calls) == 2 + 9
-    assert any("Never finished" in m.text for m in client.calls[2]["messages"]), "the loop reminds him of the open todo"
+    # ten runs: the first run makes three model calls (mode_set, todos_add, then the reply), the rest one each.
+    assert len(client.calls) == 3 + 9
+    assert any("Never finished" in m.text for m in client.calls[3]["messages"]), "the loop reminds him of the open todo"
 
 
 def test_door_calls_stay_on_stewards_world() -> None:

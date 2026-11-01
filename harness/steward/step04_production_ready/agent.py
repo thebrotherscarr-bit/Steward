@@ -1020,7 +1020,12 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[steward_world_only],
-            mode_provider=AgentModeProvider(default_mode="execute"),
+            # Kyle, 2026-10-31 ("just change the line"): every session starts in plan mode, MAF's own default
+            # (the first mode in _mode.py's DEFAULT_MODE_MAP). Plan mode analyses the request, explores with
+            # the tools he has, writes the plan to memory and asks approval before mode_set("execute"). Started
+            # in execute, he acted at once and reached for files and the shell over the tools in his list
+            # (asked to read a note, he searched files and never called secondbrain_read_note).
+            mode_provider=AgentModeProvider(default_mode="plan"),
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
             disable_web_search=True,
