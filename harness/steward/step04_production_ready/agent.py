@@ -34,6 +34,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import os
@@ -78,6 +79,7 @@ from agent_framework import (
     tool,
 )
 from agent_framework.monty import MontyCodeActProvider
+from agent_framework_monty import FileMount
 from agent_framework.ollama import OllamaChatClient
 from agent_framework.tools import (
     LocalShellTool,
@@ -548,14 +550,181 @@ _STEWARD_PLAN_STEP_3 = (
     "determine what clarifying questions you may need from the user. Never call a tool that changes things in "
     "plan mode: the change itself is a todo in the plan.\n"
 )
-if _MAF_PLAN_STEP_3 not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
-    # MAF changed its plan-mode text: refuse to start rather than lose the rule.
-    raise RuntimeError("MAF's plan-mode instructions changed; update _MAF_PLAN_STEP_3 in agent.py.")
+# Regression run 10: the switch to execute is the user's Approve (the gate refuses his own mode_set out of plan
+# mode), so step 7 says what MAF itself says when the application does the switching (expose_mode_set=False).
+_MAF_PLAN_STEP_7 = (
+    "7. When approval is granted, always switch to execute mode (using the `mode_set` tool), "
+    "and follow the steps for *Execute mode*."
+)
+_STEWARD_PLAN_STEP_7 = (
+    "7. When the user approves, the application switches you to execute mode; do not call mode_set for it. "
+    "Follow the steps for *Execute mode* once the mode has changed."
+)
+for _step in (_MAF_PLAN_STEP_3, _MAF_PLAN_STEP_7):
+    if _step not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
+        # MAF changed its plan-mode text: refuse to start rather than lose the rule.
+        raise RuntimeError("MAF's plan-mode instructions changed; update the plan steps in agent.py.")
 STEWARD_MODE_INSTRUCTIONS = {
     **_MAF_MODE_INSTRUCTIONS,
-    _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE].replace(_MAF_PLAN_STEP_3, _STEWARD_PLAN_STEP_3)
+    _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]
+    .replace(_MAF_PLAN_STEP_3, _STEWARD_PLAN_STEP_3)
+    .replace(_MAF_PLAN_STEP_7, _STEWARD_PLAN_STEP_7)
     + PLAN_MODE_TOOL_POLICY,
 }
+
+
+# Regression runs 5-7 (2026-11-01, SecondBrain connected): asked to map a project, even "with the codebase-map
+# skill", he read files by hand and never loaded the skill; asked to research three topics, he called no tool at
+# all, or summarised an old memory file; asked for a share of lines, he estimated without CodeAct. Each rule is in
+# his instructions and was not followed. The cookbook: "Task-specific guidance injected only when it is needed";
+# Kyle's ruling on the harness study (2026-10-20): the model chooses, with "regex ... a fast path". So when the
+# request itself clearly asks for one of these, one line naming the tool is added to that turn's instructions;
+# he still chooses, and nothing is added when nothing matches. The patterns follow the skills' own descriptions.
+# Each entry: (the request's pattern, the line he is given, the tool the work needs). A word inside a path never
+# counts (_word): every path in this ground holds "Research", which matched the research pattern (2026-11-01).
+def CODEACT_MOUNTS() -> list[FileMount]:
+    """CodeAct's view of the files: the workspace's harness folder at /harness, read-only (regression runs 11, 13).
+
+    MAF's Monty CodeAct reads files only through mounts. Read-only, so CodeAct is never a way around a write's card;
+    harness/ and not the workspace root, which holds .env (RULE 7). At /harness (Monty's working folder is /), so
+    the workspace-relative path he writes, harness/..., opens as it is (run 13: /input/harness was refused to him).
+    """
+    harness = _WORKING_DIR / "harness"
+    return [FileMount(host_path=harness, mount_path="/harness", mode="read-only")] if harness.is_dir() else []
+
+
+def _word(alternatives: str) -> str:
+    return r"(?<![\\/])\b(?:" + alternatives + r")\b(?![\\/])"
+
+
+REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
+    (
+        re.compile(_word("map|codebase-map") + r"|how (?:is|it's) (?:it |this )?structured|where (?:do i|to) start", re.I),
+        'This request matches your codebase-map skill: call load_skill("codebase-map") first and follow it, running its script.',
+        ("load_skill", "run_skill_script"),
+    ),
+    (
+        re.compile(_word("review"), re.I),
+        'This request matches your code-review skill: call load_skill("code-review") first and follow it.',
+        ("load_skill",),
+    ),
+    (
+        re.compile(_word("research|latest news"), re.I),
+        "This request is web research: start one WebResearchAgent background task per topic "
+        "(background_agents_start_task), wait for them, and combine what they found. Never answer it from memory or local files.",
+        ("background_agents_start_task",),
+    ),
+    (
+        re.compile(_word("codeexplorer"), re.I),
+        "This request names the CodeExplorer agent: start it as a background task (background_agents_start_task), "
+        # Regression run 12: his summary named none of the files CodeExplorer read; the guide's CodeExplorer brief
+        # asks for a summary "naming files and functions".
+        "wait for it, and summarise only what it read, naming the files and functions it found.",
+        ("background_agents_start_task",),
+    ),
+    (
+        re.compile(_word("percentage|percent|how many") + r"|\bcount (?:the|how|all)\b", re.I),
+        # Kyle, 2026-11-01: a project's lines are its code files' lines, not its README or docs. Run 11: pasting file
+        # text into CodeAct truncated it (inventory.py "18"); CodeAct reads harness/ itself (CODEACT_MOUNTS).
+        "This request asks for a number: count it with CodeAct (execute_code), never estimate. In CodeAct the "
+        "workspace's harness folder opens by its workspace path (harness/...): count each file's lines with "
+        "len(open(path).read().splitlines()), and never paste file text into the code. A project's lines are its "
+        "code files' lines, not its README or other docs, unless the request says otherwise.",
+        ("execute_code",),
+    ),
+)
+# Regression run 9: in the Agent tab the work runs on the user's Approve turn, which matches no pattern, so a hint
+# that lived only on the matching turn never reached the work. The request's hints and the tools they need are kept
+# in his session until the work is done (ReturnToPlanWhenDone clears them), and the tools he calls are recorded, so
+# the harness loop can check the work used them (the cookbook's evidence-coverage check before finishing).
+HINTS_KEY = "steward_request_hints"
+CALLED_KEY = "steward_called_tools"
+NUDGED_KEY = "steward_required_nudged"
+
+
+def unmet_requirements(session: Any) -> list[list[str]]:
+    """The stored [hint, tools] pairs with a tool he has not called for this request."""
+    if session is None:
+        return []
+    called = set(session.state.get(CALLED_KEY) or [])
+    return [pair for pair in session.state.get(HINTS_KEY) or [] if any(tool not in called for tool in pair[1])]
+
+
+class RequestHints(ContextProvider):
+    """The fast path: task-specific guidance for each REQUEST_HINTS pattern the request matches, kept for its work."""
+
+    def __init__(self) -> None:
+        super().__init__("request-hints")
+
+    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        asked = next((m.text for m in reversed(context.input_messages or []) if m.role == "user" and (m.text or "").strip()), "")
+        matched = [[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
+        if session is None:
+            hints = matched
+        else:
+            stored = session.state.get(HINTS_KEY) or []
+            # A new request with new hints replaces them; a loop nudge or a todo title that repeats them does not.
+            if matched and any(pair not in stored for pair in matched):
+                session.state[HINTS_KEY] = matched
+                session.state[CALLED_KEY] = []
+                session.state[NUDGED_KEY] = []
+            hints = session.state.get(HINTS_KEY) or []
+        if hints:
+            context.extend_instructions(self.source_id, "## For this request\n\n" + "\n".join(f"- {pair[0]}" for pair in hints))
+
+
+async def record_called_tools(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware: each tool he calls, kept for the request's evidence check (unmet_requirements)."""
+    session = context.session or _RUN_SESSION.get()
+    if session is not None and session.state.get(HINTS_KEY):
+        called = session.state.setdefault(CALLED_KEY, [])
+        if context.function.name not in called:
+            called.append(context.function.name)
+    await call_next()
+
+
+# Live runs 2026-11-01: he calls "totos_add" about as often as "todos_add" (and once "tos_get_remaining"); MAF
+# answers "not found" and he retries, a wasted round each time. The name is nowhere in his instructions: the model
+# writes it piece by piece and mangles an odd word. The harness absorbs it: before MAF looks a call up, a name
+# that is not one of the tools offered but is a clear near match to exactly one of them (score >= 0.8, and 0.1
+# ahead of the next) is repaired. Anything unclear is left as it is, so MAF still answers "not found".
+_NAME_CUTOFF = 0.8
+_NAME_MARGIN = 0.1
+
+
+def repaired_tool_name(name: str, offered: set[str]) -> str | None:
+    """The one offered tool a misspelled name clearly means, or None."""
+    if not name or name in offered:
+        return None
+    scored = sorted(((difflib.SequenceMatcher(None, name, o).ratio(), o) for o in offered), reverse=True)
+    if not scored or scored[0][0] < _NAME_CUTOFF:
+        return None
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < _NAME_MARGIN:
+        return None
+    return scored[0][1]
+
+
+async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Chat middleware: repair clearly misspelled tool names in the model's reply, streamed or not."""
+    offered = {n for n in (getattr(t, "name", None) for t in (context.options or {}).get("tools") or []) if n}
+
+    def fix(contents: Any) -> None:
+        for c in contents or []:
+            if c.type == "function_call" and (right := repaired_tool_name(c.name, offered)):
+                logger.info("Tool name repaired: %s -> %s", c.name, right)
+                c.name = right
+
+    await call_next()
+    if isinstance(context.result, ResponseStream):
+
+        def fix_update(update: Any) -> Any:
+            fix(getattr(update, "contents", None))
+            return update
+
+        context.stream_transform_hooks.append(fix_update)
+    elif context.result is not None:
+        for message in context.result.messages:
+            fix(message.contents)
 
 
 # Session state set when the harness returns him to plan mode because every todo is done; read once by plan_reply_loop.
@@ -592,11 +761,13 @@ class ReturnToPlanWhenDone(ContextProvider):
         ):
             return
         items = await self._todos.store.load_items(session, source_id=self._todos.source_id)
-        # Only when there was a plan and all of it is done.
-        if items and all(item.is_complete for item in items):
+        # Only when there was a plan and all of it is done, with the tools the request needed (unmet_requirements).
+        if items and all(item.is_complete for item in items) and not unmet_requirements(session):
             set_agent_mode(session, _PLAN_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes)
             # The work is done: the harness loop does not ask this run for a plan (plan_reply_loop).
             session.state[RETURNED_TO_PLAN_KEY] = True
+            for key in (HINTS_KEY, CALLED_KEY, NUDGED_KEY):
+                session.state.pop(key, None)
 
 
 # Gate run 4 (2026-11-01): with the rule stated in plan step 3 he still edited files in plan mode, 3 runs of 5.
@@ -612,6 +783,10 @@ PLAN_MODE_REFUSAL = (
     "Refused: you are in plan mode, and {name} changes things. Do not call it yet. Add the work as todos "
     "(todos_add) and present the plan for the user's approval; once the user approves, you are in execute "
     "mode and can call it."
+)
+PLAN_MODE_SWITCH_REFUSAL = (
+    "Refused: only the user's Approve switches you to execute mode. Present the plan for the user's approval; "
+    "when the user approves, you are switched to execute mode without calling mode_set."
 )
 PLAN_MODE_TODOS_NOT_DONE = (
     "Refused: you are in plan mode and nothing has been done yet, so no todo is complete. Todos are marked "
@@ -648,6 +823,15 @@ def plan_mode_gate(mode_provider: AgentModeProvider) -> tuple[list[Callable[...,
         if name == "todos_complete" and planning:
             context.result = PLAN_MODE_TODOS_NOT_DONE
             return
+        # Regression run 10 (live, 2026-11-01): in plan mode he called mode_set("execute") himself and went on to
+        # run the command, skipping the user's plan card. MAF only instructs the model to use mode_set when the
+        # user allows it; the user's Approve switches the session itself (hosted.py, the console: set_agent_mode),
+        # so his own mode_set out of plan mode is refused.
+        if name == "mode_set" and planning:
+            asked = context.arguments.get("mode") if hasattr(context.arguments, "get") else None
+            if str(asked or "").strip().lower() != _PLAN_MODE:
+                context.result = PLAN_MODE_SWITCH_REFUSAL
+                return
         await call_next()
 
     def past_the_card_to_be_refused(call: Any) -> bool:
@@ -674,6 +858,11 @@ PLAN_TODOS_NUDGE = (
     "Your todo list is empty. Add the work as todos with todos_add first, each an object with a title, then "
     "present the plan for the user's approval as the PlanningResponse JSON object."
 )
+
+
+# Regression run 9: the cookbook's evidence-coverage check before finishing. When execute-mode work would end
+# without a tool its request needs, the loop asks once, naming it (unmet_requirements).
+REQUIRED_TOOLS_NUDGE = "Before you finish: this request needs a tool you have not used yet. Do this now, then finish:"
 
 
 def plan_reply_loop(
@@ -703,21 +892,59 @@ def plan_reply_loop(
         if any(c.type == "function_approval_request" for m in messages for c in m.contents):
             return None  # waiting on a card, not finished
         if todo_provider is not None and not await todo_provider.store.load_items(session, source_id=todo_provider.source_id):
-            return "todos"
+            # Live run 14 (2026-11-01): todos_add succeeded, yet this read the list empty and nudged a good plan into
+            # "{}"; not reproduced on the hosted server with a scripted model, so the cause is unproven. His own run
+            # showing todos_add wins over the store, and the mismatch is logged for the next time.
+            added = any(c.type == "function_call" and c.name == "todos_add" for m in messages for c in m.contents)
+            if not added:
+                return "todos"
+            logger.warning(
+                "Plan loop: todos_add ran in this run but the todo store reads empty (session %s); not nudged.",
+                getattr(session, "session_id", None),
+            )
         last = next((m.text for m in reversed(messages) if m.role == "assistant" and (m.text or "").strip()), "")
         return "plan" if plan_reply_check(last) is None else None
+
+    def required_missing(session: Any, last_result: Any) -> bool:
+        """In execute mode, a finished run that did not use a tool its request needs, not yet asked about."""
+        if session is None:
+            return False
+        mode = get_agent_mode(
+            session,
+            source_id=mode_provider.source_id,
+            default_mode=mode_provider.default_mode,
+            available_modes=mode_provider.available_modes,
+        )
+        if mode != _EXECUTE_MODE:
+            return False
+        messages = list(getattr(last_result, "messages", None) or [])
+        if any(c.type == "function_approval_request" for m in messages for c in m.contents):
+            return False  # waiting on a card, not finished
+        nudged = session.state.setdefault(NUDGED_KEY, [])
+        fresh = [pair for pair in unmet_requirements(session) if pair[0] not in nudged]
+        if not fresh:
+            return False
+        nudged.extend(pair[0] for pair in fresh)
+        return True
 
     async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
         if missing := await plan_missing(session, last_result, iteration):
             return (True, missing)
-        return await todo_loop(session=session, last_result=last_result, iteration=iteration, **kwargs)
+        if await todo_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
+            return True
+        if required_missing(session, last_result):
+            return (True, "required")
+        return False
 
-    async def next_message(*, feedback: str | None = None, **kwargs: Any) -> str | None:
+    async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> str | None:
         if feedback == "plan":
             return PLAN_REPLY_NUDGE
         if feedback == "todos":
             return PLAN_TODOS_NUDGE
-        return await todos_remaining_message(feedback=feedback, **kwargs)
+        if feedback == "required":
+            lines = "\n".join(f"- {pair[0]}" for pair in unmet_requirements(session))
+            return f"{REQUIRED_TOOLS_NUDGE}\n{lines}"
+        return await todos_remaining_message(feedback=feedback, session=session, **kwargs)
 
     return should_continue, next_message
 
@@ -1221,7 +1448,7 @@ async def build_steward_agent(
                     )
                 )
             )
-        part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require")]
+        part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())]
         if secondbrain_client is not None:
             # plan-steward-context-memory-reads, piece 2: his notes, to look up the plans and rulings
             # himself (reads, never a card), and his Charter, read through them and put in his
@@ -1276,6 +1503,7 @@ async def build_steward_agent(
         # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
         todo_provider = TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS)
         part3_providers.append(ReturnToPlanWhenDone(mode_provider, todo_provider))
+        part3_providers.append(RequestHints())
         gate_middleware, gate_rule = plan_mode_gate(mode_provider)
         auto_approval_rules.insert(0, gate_rule)
         loop_should_continue, loop_next_message = plan_reply_loop(mode_provider, plan_reply_check, todo_provider)
@@ -1292,7 +1520,7 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
-            middleware=[steward_world_only, *gate_middleware],
+            middleware=[steward_world_only, *gate_middleware, repair_tool_names, record_called_tools],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
             max_context_window_tokens=65_536,
