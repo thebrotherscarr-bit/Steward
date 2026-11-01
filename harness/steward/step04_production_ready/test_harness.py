@@ -78,7 +78,7 @@ def run_steward(
     """One turn of Steward (Part 4, shell off) on the scripted client, in its own session.
 
     ``unattended`` is the evals' switch (auto_approve_skill_scripts): reads and skill scripts run without
-    approval, as in MAF's claw evals. ``mode`` puts the session in that mode first, as the user's Approve does.
+    approval, as in MAF's claw evals. ``mode`` puts the session in that mode first, as the user's Allow does.
     """
     from agent_framework import AgentModeProvider, set_agent_mode
 
@@ -111,7 +111,7 @@ def test_modes_memory_skills_and_file_roots_are_offered() -> None:
     # In execute mode, where every tool is offered (plan mode offers only what changes nothing: the gate's check).
     client, agent, _ = run_steward(["Hello."], "Hello", mode="execute")
     call = client.calls[0]
-    assert {"mode_get", "mode_set", "todos_add", "todos_complete"} <= offered_tools(call)  # modes, todos
+    assert {"mode_get", "todos_add", "todos_complete"} <= offered_tools(call)  # modes, todos
     assert {"file_memory_read", "file_memory_write"} <= offered_tools(call)  # memory
     assert {"load_skill", "read_skill_resource"} <= offered_tools(call)  # skills
     assert {"file_access_read", "file_access_write"} <= offered_tools(call)  # file access
@@ -259,39 +259,62 @@ def test_every_task_gets_todos_and_no_simple_task_skips_the_plan() -> None:
     assert "Use todos_complete to mark items as done" in instructions, "MAF's own todo guidance stays"
 
 
-def test_the_agent_tab_plans_then_executes_on_approve() -> None:
-    """Part 1's plan mode on the hosted path (hosted.py): a plan-mode turn asks for PlanningResponse; Approve switches to execute."""
-    from agent_framework import AgentModeProvider
+def test_one_card_switches_to_execute_and_finished_todos_return_to_plan() -> None:
+    """The one card: request_execute carries the plan and asks approval; Allow is execute; done todos are plan again."""
+    from agent_framework import Message
 
-    import hosted
-    from console.observers.planning_models import PlanningResponse
+    todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Write the file"}]})
+    ask = Content.from_function_call(call_id="e1", name="request_execute", arguments={"plan": "1. Write the file."})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "Written."}]})
 
-    plan = '{"type": "approval", "questions": [{"message": "1. Read the note. 2. Report."}]}'
-
-    async def _go() -> ScriptedChatClient:
-        client = ScriptedChatClient([plan, "Done."])
+    async def _go() -> tuple[ScriptedChatClient, Any]:
+        client = ScriptedChatClient([todo, ask, done, "Done.", "Hello."])
         async with AsyncExitStack() as stack:
             agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
-            mode_provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
-            agent.middleware = [hosted.plan_mode_turns(mode_provider), *(agent.middleware or [])]
             async with agent:
                 session = agent.create_session()
-                await agent.run("Read the ADR note and report.", session=session)
-                approve = {"metadata": {hosted.AGENT_MODE_KEY: "execute"}}
-                await agent.run("Approve and switch to execute mode", session=session, options=approve)
+                planned = await agent.run("Write the file.", session=session)
+                [card] = approval_requests(planned)
+                allow = Message(role="user", contents=[card.to_function_approval_response(True)])
+                await agent.run([allow], session=session)
+                await agent.run("Hello", session=session)
+        return client, card
+
+    client, card = asyncio.run(_go())
+    assert card.function_call.name == "request_execute", "the plan reaches the user as an approval card"
+    assert "mode_set" not in offered_tools(client.calls[0]), "MAF's free mode_set is off; the card is the only switch"
+    assert "request_execute" in offered_tools(client.calls[0]) and "file_access_write" not in offered_tools(client.calls[0])
+    # Allow: the switch runs and says so (MAF's own mode_set works the same way: the run's instructions are
+    # built at its start, and the next run is told in execute mode), and the gate opens at once.
+    assert any("you are in execute mode now" in r for r in function_results(client.calls[2])), "Allow: execute"
+    assert "file_access_write" in offered_tools(client.calls[2])
+    assert "operating in the plan mode" in str(client.calls[4]["options"].get("instructions") or ""), "todos done: plan"
+    assert "file_access_write" not in offered_tools(client.calls[4])
+
+
+def test_deny_keeps_him_in_plan_mode() -> None:
+    from agent_framework import Message
+
+    ask = Content.from_function_call(call_id="e1", name="request_execute", arguments={"plan": "1. Write the file."})
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient([ask, "What should change?"])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                session = agent.create_session()
+                [card] = approval_requests(await agent.run("Write the file.", session=session))
+                await agent.run([Message(role="user", contents=[card.to_function_approval_response(False)])], session=session)
         return client
 
     client = asyncio.run(_go())
-    planned, approved = client.calls[0]["options"], client.calls[1]["options"]
-    assert planned.get("response_format") is PlanningResponse, "plan mode asks for the console's PlanningResponse"
-    assert "operating in the plan mode" in str(planned.get("instructions") or "")
-    assert "operating in the execute mode" in str(approved.get("instructions") or ""), "Approve switched the session"
-    assert approved.get("response_format") is None and "metadata" not in approved, "and the switch never reaches the model"
+    assert "operating in the plan mode" in str(client.calls[1]["options"].get("instructions") or "")
+    assert "file_access_write" not in offered_tools(client.calls[1])
 
 
 def test_loop_stops_at_its_bound() -> None:
     # Sessions start in plan mode, which stays interactive; the loop runs in execute mode, which the user's
-    # Approve puts the session in (only the Approve: his own mode_set("execute") is refused in plan mode).
+    # Allow on request_execute puts the session in.
     todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Never finished"}]})
     client, _, response = run_steward([todo], "Work through the plan.", mode="execute")
     # One open todo in execute mode keeps the harness loop going (todos_remaining) until its bound of
@@ -301,24 +324,19 @@ def test_loop_stops_at_its_bound() -> None:
 
 
 def test_plan_mode_refuses_what_changes_things_until_approve() -> None:
-    """The plan-mode gate: plan mode offers nothing that changes things and refuses his own switch to execute; Approve opens them."""
+    """The plan-mode gate: plan mode offers nothing that changes things; execute mode (after Allow) offers them."""
     # Plan mode: no tool that changes things is offered; reads, todos, skills and his memory are.
     client, _, _ = run_steward(["Here is the plan."], "Do it.")
     offered = offered_tools(client.calls[0])
     assert not offered & steward._CHANGES_THINGS, "nothing that changes things is offered in plan mode"
-    assert {"file_access_read", "todos_add", "load_skill", "file_memory_write", "mode_set"} <= offered
-    # His own mode_set out of plan mode is refused: only the user's Approve switches him.
-    switch = Content.from_function_call(call_id="s1", name="mode_set", arguments={"mode": "execute"})
-    client, _, response = run_steward([switch, "Here is the plan."], "Do it.")
-    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1]))
-    assert "operating in the plan mode" in str(client.calls[1]["options"].get("instructions") or ""), "still in plan mode"
+    assert {"file_access_read", "todos_add", "load_skill", "file_memory_write", "request_execute"} <= offered
     # A changing tool named anyway does not run in plan mode (its card is MAF's, raised before middleware).
     write = Content.from_function_call(
         call_id="w1", name="file_access_write", arguments={"file_name": "test_harness_gate_probe.txt", "content": "x"}
     )
     client, _, response = run_steward([write, "Here is the plan."], "Do it.")
     assert not (steward._WORKING_DIR / "test_harness_gate_probe.txt").exists()
-    # After Approve (execute mode), everything is offered and the write goes to its approval card as before.
+    # After Allow (execute mode), everything is offered and the write goes to its approval card as before.
     client, _, response = run_steward([write], "Do it.", mode="execute")
     assert steward._CHANGES_THINGS - {"run_shell", "atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr"} <= offered_tools(client.calls[0])
     assert [r.function_call.name for r in approval_requests(response)] == ["file_access_write"]

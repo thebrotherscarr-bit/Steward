@@ -70,6 +70,7 @@ from agent_framework import (
     TodoProvider,
     create_harness_agent,
     get_agent_mode,
+    set_agent_mode,
     todos_remaining,
     todos_remaining_message,
     tool,
@@ -508,7 +509,7 @@ async def steward_world_only(
 # once wrote to his memory store and called that proof plan mode worked. The rule was in his prompt and
 # he did not follow it, so the harness holds it, as steward_world_only holds the door: while his session
 # is in plan mode, a tool that changes the workspace, the repository or the world is refused with
-# corrective feedback, and only the user's Approve (set_agent_mode, from the console or hosted.py) moves
+# corrective feedback, and only the user's Allow on request_execute (ApprovedModeSwitch, below) moves
 # him to execute. Reads, todos, skills' instructions and his memory file stay open: MAF's plan mode
 # explores with tools and writes the plan to a memory file (_mode.py, plan steps 3 and 5).
 _PLAN_MODE = "plan"
@@ -526,8 +527,8 @@ def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[...,
 
     MAF asks a tool's approval before function middleware runs, so a refusal there would come after an
     approval card. The chat middleware therefore stops offering the tools that change things while the
-    session is in plan mode (tool selection, the lowest layer); the function middleware refuses his own
-    mode_set out of plan mode, and any such tool that is called anyway, with corrective feedback.
+    session is in plan mode (tool selection, the lowest layer); the function middleware refuses any such
+    tool that is called anyway, with corrective feedback.
     """
 
     def in_plan_mode(session: Any) -> bool:
@@ -549,14 +550,10 @@ def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[...,
 
     async def plan_mode_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
         name = context.function.name
-        asked = context.arguments.get("mode") if hasattr(context.arguments, "get") else None
-        switching = name == "mode_set" and str(asked or "").strip().lower() != _PLAN_MODE
-        if (name in _CHANGES_THINGS or switching) and in_plan_mode(context.session):
+        if name in _CHANGES_THINGS and in_plan_mode(context.session):
             context.result = (
-                f"Refused: you are in plan mode, and {name} "
-                + ("leaves it." if switching else "changes things.")
-                + " Add the work as todos (todos_add) and present the plan for the user's approval;"
-                " the user's Approve switches you to execute mode, and then this tool will run."
+                f"Refused: you are in plan mode, and {name} changes things. Add the work as todos (todos_add)"
+                " and call request_execute with the plan; the user's Allow switches you to execute mode."
             )
             return
         await call_next()
@@ -565,6 +562,75 @@ def plan_mode_reads_only(mode_provider: AgentModeProvider) -> list[Callable[...,
 
 
 # </plan_mode_gate>
+
+
+# <approved_mode_switch>
+# Kyle, 2026-10-31 ("it doesn't need to present a card at every single turn"): plan mode is plain
+# conversation, and the one card is the switch to execute. MAF's mode provider runs without its own
+# mode_set (expose_mode_set=False: "Replacement tools can be supplied"), and request_execute is that
+# replacement: it carries the plan and always asks approval, so it is the Agent tab's Allow/Deny card.
+# Allow switches him to execute; Deny keeps him in plan mode. When no todo is left open after an
+# execute run, he is put back in plan mode, so the next request is planned again.
+_EXECUTE_MODE = "execute"
+_MAF_PLAN_APPROVAL = (
+    "6. Present the plan to the user and ask for approval to switch to execute mode and process the plan.\n"
+    "7. When approval is granted, always switch to execute mode (using the `mode_set` tool), "
+    "and follow the steps for *Execute mode*."
+)
+_STEWARD_PLAN_APPROVAL = (
+    "6. Present the plan by calling request_execute with a short summary of it. That call is the user's "
+    "approval card: on Allow you are switched to execute mode; on Deny you stay in plan mode, so ask what to change.\n"
+    "7. Never act on the plan before the user's Allow."
+)
+_MAF_MODE_INSTRUCTIONS = AgentModeProvider().mode_instructions
+if _MAF_PLAN_APPROVAL not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
+    # MAF changed its plan-mode text: refuse to start rather than keep a mode_set he no longer has.
+    raise RuntimeError("MAF's plan-mode instructions changed; update _MAF_PLAN_APPROVAL in agent.py.")
+STEWARD_MODE_INSTRUCTIONS = {
+    **_MAF_MODE_INSTRUCTIONS,
+    _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE].replace(_MAF_PLAN_APPROVAL, _STEWARD_PLAN_APPROVAL),
+}
+
+
+class ApprovedModeSwitch(ContextProvider):
+    """request_execute in plan mode (approval always required), and back to plan mode when the todos are done."""
+
+    def __init__(self, mode_provider: AgentModeProvider, todo_provider: TodoProvider) -> None:
+        super().__init__("approved-mode-switch")
+        self._modes = mode_provider
+        self._todos = todo_provider
+
+    def _mode(self, session: Any) -> str:
+        return get_agent_mode(
+            session,
+            source_id=self._modes.source_id,
+            default_mode=self._modes.default_mode,
+            available_modes=self._modes.available_modes,
+        )
+
+    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        if self._mode(session) != _PLAN_MODE:
+            return
+
+        @tool(name="request_execute", approval_mode="always_require")
+        def request_execute(
+            plan: Annotated[str, Field(min_length=1, description="A short summary of the plan: the todos, in order.")],
+        ) -> str:
+            """Ask the user to approve your plan; on their Allow you are switched to execute mode."""
+            set_agent_mode(session, _EXECUTE_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes, notify=False)
+            return "Approved by the user: you are in execute mode now. Work through your todos and mark each one done."
+
+        context.extend_tools(self.source_id, [request_execute])
+
+    async def after_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        if session is None or self._mode(session) != _EXECUTE_MODE:
+            return
+        items = await self._todos.store.load_items(session, source_id=self._todos.source_id)
+        if not any(not item.is_complete for item in items):
+            set_agent_mode(session, _PLAN_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes)
+
+
+# </approved_mode_switch>
 
 
 # <shell>
@@ -1105,7 +1171,11 @@ async def build_steward_agent(
         # the tools he has, writes the plan to memory and asks approval before mode_set("execute"). Started
         # in execute, he acted at once and reached for files and the shell over the tools in his list
         # (asked to read a note, he searched files and never called secondbrain_read_note).
-        mode_provider = AgentModeProvider(default_mode="plan")
+        # Kyle, 2026-10-31: the one card is the switch to execute (ApprovedModeSwitch), so MAF's free mode_set is off.
+        mode_provider = AgentModeProvider(default_mode="plan", expose_mode_set=False, mode_instructions=STEWARD_MODE_INSTRUCTIONS)
+        # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
+        todo_provider = TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS)
+        part3_providers.append(ApprovedModeSwitch(mode_provider, todo_provider))
         return create_harness_agent(
             client=part3_client,
             name="Steward",
@@ -1121,8 +1191,7 @@ async def build_steward_agent(
             context_providers=part3_providers,
             middleware=[steward_world_only, *plan_mode_reads_only(mode_provider)],
             mode_provider=mode_provider,
-            # Kyle, 2026-10-31: the todo list at all times; no "simple task" outside a skill (STEWARD_TODO_INSTRUCTIONS).
-            todo_provider=TodoProvider(instructions=STEWARD_TODO_INSTRUCTIONS),
+            todo_provider=todo_provider,
             max_context_window_tokens=65_536,
             max_output_tokens=8_192,
             disable_web_search=True,

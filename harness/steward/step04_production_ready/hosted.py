@@ -30,30 +30,21 @@ from pathlib import Path
 
 from agent_framework import (
     AgentContext,
-    AgentModeProvider,
     AgentResponseUpdate,
     BackgroundAgentsProvider,
     InMemoryHistoryProvider,
     ResponseStream,
     agent_middleware,
-    get_agent_mode,
-    set_agent_mode,
 )
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.ai.agentserver.responses import FileResponseStore
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent  # noqa: E402
-from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 logger = logging.getLogger(__name__)
-# A turn's request metadata key naming the mode to switch to before it runs: the Agent tab's Approve
-# sends {"agent_mode": "execute"}, as the console's Approve calls set_agent_mode.
-AGENT_MODE_KEY = "agent_mode"
-PLAN_MODE = "plan"
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
 
@@ -133,35 +124,6 @@ def _release_background_per_request(background_providers: list[BackgroundAgentsP
     return request_background_lifetime
 
 
-def plan_mode_turns(mode_provider: AgentModeProvider) -> Callable[..., Awaitable[None]]:
-    """The guide's planning observer, on the server, where the session's mode lives.
-
-    Part 1, "How plan mode works": in plan mode the console asks for PlanningResponse as
-    response_format, so the reply is a clarification or a plan to approve, and its Approve
-    switches the session to execute mode (harness/console/observers/planning_output.py,
-    configure_run_options and _build_approval_action). The Agent tab cannot reach the session,
-    so an approval comes as request metadata {"agent_mode": "execute"}, and both are done here.
-    """
-    modes = {"source_id": mode_provider.source_id, "available_modes": mode_provider.available_modes}
-
-    @agent_middleware
-    async def plan_mode_turn(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
-        options = dict(context.options or {})
-        metadata = dict(options.pop("metadata", None) or {})
-        switch_to = metadata.pop(AGENT_MODE_KEY, None)
-        if metadata:
-            options["metadata"] = metadata
-        if context.session is not None:
-            if switch_to:
-                set_agent_mode(context.session, str(switch_to), **modes)
-            if get_agent_mode(context.session, default_mode=mode_provider.default_mode, **modes) == PLAN_MODE:
-                options["response_format"] = PlanningResponse
-        context.options = options
-        await call_next()
-
-    return plan_mode_turn
-
-
 async def main() -> None:
     """Serve Steward on 127.0.0.1:STEWARD_PORT until stopped."""
     load_dotenv()
@@ -178,12 +140,7 @@ async def main() -> None:
         background_providers = [
             provider for provider in agent.context_providers if isinstance(provider, BackgroundAgentsProvider)
         ]
-        mode_provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
-        agent.middleware = [
-            _release_background_per_request(background_providers),
-            plan_mode_turns(mode_provider),
-            *(agent.middleware or []),
-        ]
+        agent.middleware = [_release_background_per_request(background_providers), *(agent.middleware or [])]
         async with agent:
             logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol).", port)
             server = ResponsesHostServer(agent=agent, history_source="agent", response_store=FileResponseStore(_STORAGE_DIR))
