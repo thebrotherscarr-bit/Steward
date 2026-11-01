@@ -17,7 +17,9 @@
 #            offered; git_commit and file writes wait for approval; reads don't;
 #            the harness loop stops at its bound; DevUI serves him and streams each
 #            run's trace (devui_app.py); MCP hosting serves him as one tool whose
-#            session_id continues a conversation (mcp_app.py); the improvement loop's
+#            session_id continues a conversation (mcp_app.py); in plan mode his Responses
+#            service asks for the console's PlanningResponse and an Approve switches him
+#            to execute (hosted.py); the improvement loop's
 #            workflow passes approvals to Kyle, sends failing checks back to Steward and
 #            resumes a review from its checkpoint (improvement_loop_workflow.py). A scripted chat client, composed
 #            like MAF's own test client, stands in for Ollama (test_harness.py).
@@ -60,5 +62,5 @@ jobs:
           python -m pytest -q harness/steward/working/sample-project
       - name: harness
         run: |
-          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 agent-framework-devui==1.0.0b261022 agent-framework-hosting-mcp==1.0.0a261030 mcp==2.3.0 tenacity==9.1.4 httpx2==2.16.0 python-dotenv==1.2.4
+          python -m pip install --quiet agent-framework-core==1.23.0 agent-framework-ollama==1.0.0b261022 agent-framework-tools==1.0.0b261022 agent-framework-monty==1.0.0b261015 agent-framework-devui==1.0.0b261022 agent-framework-hosting-mcp==1.0.0a261030 agent-framework-foundry-hosting==1.0.0b261022 azure-ai-agentserver-core==2.3.0b2 azure-ai-agentserver-invocations==1.2.0 azure-ai-agentserver-responses==2.4.0b2 rich==15.0.0 textual==8.2.8 mcp==2.3.0 tenacity==9.1.4 httpx2==2.16.0 python-dotenv==1.2.4
           python -m pytest -q -p no:cacheprovider harness/steward/step04_production_ready/test_harness.py

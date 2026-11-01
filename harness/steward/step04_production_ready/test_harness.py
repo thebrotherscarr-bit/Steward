@@ -242,6 +242,36 @@ def test_a_new_session_starts_in_plan_mode() -> None:
     assert "You are currently operating in the plan mode." in instructions
 
 
+def test_the_agent_tab_plans_then_executes_on_approve() -> None:
+    """Part 1's plan mode on the hosted path (hosted.py): a plan-mode turn asks for PlanningResponse; Approve switches to execute."""
+    from agent_framework import AgentModeProvider
+
+    import hosted
+    from console.observers.planning_models import PlanningResponse
+
+    plan = '{"type": "approval", "questions": [{"message": "1. Read the note. 2. Report."}]}'
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient([plan, "Done."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            mode_provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+            agent.middleware = [hosted.plan_mode_turns(mode_provider), *(agent.middleware or [])]
+            async with agent:
+                session = agent.create_session()
+                await agent.run("Read the ADR note and report.", session=session)
+                approve = {"metadata": {hosted.AGENT_MODE_KEY: "execute"}}
+                await agent.run("Approve and switch to execute mode", session=session, options=approve)
+        return client
+
+    client = asyncio.run(_go())
+    planned, approved = client.calls[0]["options"], client.calls[1]["options"]
+    assert planned.get("response_format") is PlanningResponse, "plan mode asks for the console's PlanningResponse"
+    assert "operating in the plan mode" in str(planned.get("instructions") or "")
+    assert "operating in the execute mode" in str(approved.get("instructions") or ""), "Approve switched the session"
+    assert approved.get("response_format") is None and "metadata" not in approved, "and the switch never reaches the model"
+
+
 def test_loop_stops_at_its_bound() -> None:
     # Sessions start in plan mode, which stays interactive; the loop runs in execute mode, entered as he
     # enters it once a plan is approved: mode_set("execute").
