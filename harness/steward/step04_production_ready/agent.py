@@ -558,6 +558,10 @@ STEWARD_MODE_INSTRUCTIONS = {
 }
 
 
+# Session state set when the harness returns him to plan mode because every todo is done; read once by plan_reply_loop.
+RETURNED_TO_PLAN_KEY = "steward_returned_to_plan"
+
+
 class ReturnToPlanWhenDone(ContextProvider):
     """Back to plan mode once no todo is open after an execute run (Kyle, 2026-10-31), so each request is planned.
 
@@ -591,6 +595,8 @@ class ReturnToPlanWhenDone(ContextProvider):
         # Only when there was a plan and all of it is done.
         if items and all(item.is_complete for item in items):
             set_agent_mode(session, _PLAN_MODE, source_id=self._modes.source_id, available_modes=self._modes.available_modes)
+            # The work is done: the harness loop does not ask this run for a plan (plan_reply_loop).
+            session.state[RETURNED_TO_PLAN_KEY] = True
 
 
 # Gate run 4 (2026-11-01): with the rule stated in plan step 3 he still edited files in plan mode, 3 runs of 5.
@@ -679,6 +685,11 @@ def plan_reply_loop(
     async def plan_missing(session: Any, last_result: Any, iteration: int) -> str | None:
         """'todos' or 'plan' when a plan-mode reply lacks them, else None."""
         if plan_reply_check is None or session is None or iteration > _PLAN_REPLY_RETRIES:
+            return None
+        # Live test 2026-11-01: when an execute run finished every todo, ReturnToPlanWhenDone put him back in
+        # plan mode, and this loop then asked the finished run for a plan ("All pending todos have been
+        # completed", a card with nothing to approve). That run was work done, not a plan to ask for.
+        if session.state.pop(RETURNED_TO_PLAN_KEY, False):
             return None
         mode = get_agent_mode(
             session,
