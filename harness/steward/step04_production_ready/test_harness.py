@@ -242,6 +242,15 @@ def test_a_new_session_starts_in_plan_mode() -> None:
     assert "You are currently operating in the plan mode." in instructions
 
 
+def test_every_task_gets_todos_and_no_simple_task_skips_the_plan() -> None:
+    """The todo list at all times: MAF's "if simple, just complete the task directly" is replaced, the rest of its text kept."""
+    client, _, _ = run_steward(["Hello."], "Hello")
+    instructions = str(client.calls[0]["options"].get("instructions") or "")
+    assert "There is no simple task" in instructions and "load_skill and add the skill's steps" in instructions
+    assert "just complete the task directly" not in instructions
+    assert "Use todos_complete to mark items as done" in instructions, "MAF's own todo guidance stays"
+
+
 def test_the_agent_tab_plans_then_executes_on_approve() -> None:
     """Part 1's plan mode on the hosted path (hosted.py): a plan-mode turn asks for PlanningResponse; Approve switches to execute."""
     from agent_framework import AgentModeProvider
