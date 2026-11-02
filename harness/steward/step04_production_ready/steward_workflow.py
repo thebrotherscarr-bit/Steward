@@ -40,6 +40,7 @@ Run one request through it on Ollama (PLAN only reads; it stops at the approval)
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import uuid
@@ -241,11 +242,34 @@ def written_python_files(messages: Sequence[Message]) -> list[str]:
     return files
 
 
-def python_tests_for_writes(messages: Sequence[Message]) -> tuple[bool, str] | None:
-    """The tests in each written file's folder (pytest; "no tests collected" passes). None when no code was written."""
-    from agent import _WORKING_DIR  # noqa: PLC0415 - the folder his file tools write in
+# Set on the check's own pytest, so a workflow run inside those tests does not start the check again.
+_CHECK_RUNNING = "STEWARD_CHECK_RUNNING"
 
-    files = written_python_files(messages)
+
+def changed_python_files(workspace: Path) -> list[str]:
+    """The .py files in the workspace that differ from the committed state (changed or new), as git lists them."""
+    done = subprocess.run(
+        ["git", "ls-files", "--modified", "--others", "--exclude-standard", "--", "*.py"],
+        cwd=workspace, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    return sorted(set(done.stdout.split())) if done.returncode == 0 else []
+
+
+def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None = None) -> tuple[bool, str] | None:
+    """The tests in the folder of each changed .py file (pytest; "no tests collected" passes). None when no code changed.
+
+    The check reads the files on disk, not EXECUTE's messages: the cookbook's repair loops validate the artifact itself
+    ("The repaired notebook has to satisfy the checks that matter"), and MAF's AgentExecutor hands the next step only
+    the messages since the last card (_agent_executor.py, _run_agent_and_emit), so a write approved before a later
+    card was missed (live 2026-11-02: an edit card, then two commit cards). The workspace starts each run at the
+    committed state, so what differs is his run's work, whichever tool or card wrote it.
+    """
+    if os.environ.get(_CHECK_RUNNING):
+        return None  # inside a check's own pytest: a workflow under test must not start the check again
+    if workspace is None:
+        from agent import _WORKING_DIR as workspace  # noqa: PLC0415 - the folder his file tools write in
+
+    files = changed_python_files(workspace)
     if not files:
         return None
     targets = sorted({str(Path(f).parent) if str(Path(f).parent) != "." else f for f in files})
@@ -254,7 +278,8 @@ def python_tests_for_writes(messages: Sequence[Message]) -> tuple[bool, str] | N
     for target in targets:
         command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target]
         done = subprocess.run(
-            command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
+            command, cwd=workspace, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            env={**os.environ, _CHECK_RUNNING: "1"},
         )
         outputs.append(f"$ pytest -q {target}\n(exit {done.returncode})\n{(done.stdout + done.stderr)[-_OUTPUT_TAIL:]}")
         passed = passed and done.returncode in (0, 5)  # 5: no tests collected
@@ -378,7 +403,7 @@ class Report(Executor):
         await ctx.yield_output(f"{report.answer}\n\nChecks {result}:\n{report.output[-_OUTPUT_TAIL:]}")
 
 
-def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_writes) -> Workflow:
+def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_changes) -> Workflow:
     """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, report."""
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))

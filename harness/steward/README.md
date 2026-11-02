@@ -101,8 +101,10 @@ request -> plan -> approve_plan card -> execute -> check -> report
 2. **Approve:** the plan comes to you as an `approve_plan` card. Deny it and nothing runs.
 3. **Execute:** the plan's steps become his todos, in execute mode. Every write still asks on its
    own card, and your No on a card ends the run.
-4. **Check:** model-free. The tests in the folder of each Python file he wrote are run (pytest).
-   Failing, the output goes back to him; passing, the report says "Checks passed".
+4. **Check:** model-free, on the files themselves. The tests in the folder of each Python file that
+   differs from the committed state are run (pytest), whichever tool or card wrote it, so the
+   workspace starts each run at the committed state. Failing, the output goes back to him;
+   passing, the report says "Checks passed".
 
 The host keeps its state in `worlds/steward/.as` (gitignored).
 

@@ -41,6 +41,9 @@ import agent as steward  # noqa: E402
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
 for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
     os.environ.pop(_name, None)
+# Hermetic: a workflow run here never runs the default check on the real repo, whose changed .py files include these
+# tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
+os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
 SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map")
 
@@ -722,7 +725,41 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
         return Message(role="user", contents=[card.to_function_approval_response(approved)])
 
     assert wf.written_python_files([answered("p/c.py", True), answered("p/d.py", False)]) == ["p/c.py"], "approved writes only"
-    assert wf.python_tests_for_writes([call("file_access_read", "a.py")]) is None, "nothing written, nothing run"
+
+    # The check reads the files on disk (live 2026-11-02: an edit approved before two commit cards was missed, because
+    # MAF hands the next step only the messages since the last card). A changed file is tested whatever wrote it.
+    import subprocess
+    import tempfile
+
+    assert wf.python_tests_for_changes([]) is None, "inside a check's own pytest, the check does not start again"
+    marker = os.environ.pop(wf._CHECK_RUNNING)  # noqa: SLF001 - this test runs the check, in its own repo
+    try:
+        _the_check_reads_the_files_on_disk(wf)
+    finally:
+        os.environ[wf._CHECK_RUNNING] = marker  # noqa: SLF001
+
+
+def _the_check_reads_the_files_on_disk(wf: Any) -> None:
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="ck") as folder:
+        workspace = Path(folder)
+
+        def git(*args: str) -> None:
+            subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True, check=True)
+
+        git("init", "-q")
+        (workspace / "p").mkdir()
+        (workspace / "p" / "test_t.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+        assert wf.python_tests_for_changes([], workspace=workspace) is None, "nothing changed, nothing run"
+        # Today's broken edit: a docstring run into the next line, the assert line gone.
+        (workspace / "p" / "test_t.py").write_text('def test_ok():\n    """Doc."""    x = 1\n', encoding="utf-8")
+        result = wf.python_tests_for_changes([], workspace=workspace)
+        assert result is not None and not result[0], "a broken change fails the check, with no write in the messages"
+        assert "pytest -q p" in result[1], result
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
