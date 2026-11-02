@@ -17,8 +17,12 @@ cookbook's keys:
 Message and tool content is captured (``enable_sensitive_data``), as the cookbook's traces carry
 inputs and outputs. The file stays on this PC: ``halo_traces/`` is gitignored.
 
+The file is capped (Kyle, 2026-11-01: "cut the traces file down to a 100MB max"; it had reached 988 MB): when a
+write takes it past HALO_TRACE_MAX_BYTES, the oldest spans are dropped and the newest half is kept, from a whole line.
+
 Environment variables:
     HALO_TRACE_PATH — where to write (defaults to <repo>/halo_traces/traces.jsonl)
+    HALO_TRACE_MAX_BYTES — the cap (defaults to 100 MB)
 """
 
 from __future__ import annotations
@@ -39,6 +43,23 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 _REPO_DIR = Path(__file__).resolve().parents[3]
 HALO_TRACE_PATH = Path(os.environ.get("HALO_TRACE_PATH") or _REPO_DIR / "halo_traces" / "traces.jsonl")
+HALO_TRACE_MAX_BYTES = int(os.environ.get("HALO_TRACE_MAX_BYTES") or 100 * 1024 * 1024)
+
+
+def keep_newest(path: Path, keep_bytes: int) -> None:
+    """Cut the file to its newest ``keep_bytes`` or less, from the first whole line; in place, so a process that
+    holds it open for appending keeps appending at the new end."""
+    with path.open("r+b") as f:
+        size = f.seek(0, os.SEEK_END)
+        if size <= keep_bytes:
+            return
+        f.seek(size - keep_bytes)
+        tail = f.read()
+        start = tail.find(b"\n")
+        tail = tail[start + 1 :] if start >= 0 else b""
+        f.seek(0)
+        f.write(tail)
+        f.truncate()
 
 _SCHEMA_VERSION = 1
 _PROJECT_ID = "steward"
@@ -169,9 +190,10 @@ def _framework_version() -> str:
 class HaloJsonlSpanExporter(SpanExporter):
     """The cookbook's ``HaloJsonlTraceProcessor``: each finished span is one line, appended."""
 
-    def __init__(self, path: Path = HALO_TRACE_PATH) -> None:
+    def __init__(self, path: Path = HALO_TRACE_PATH, max_bytes: int = HALO_TRACE_MAX_BYTES) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.max_bytes = max_bytes
         self._file = path.open("a", encoding="utf-8")
         self._lock = threading.Lock()
 
@@ -184,6 +206,8 @@ class HaloJsonlSpanExporter(SpanExporter):
             for line in lines:
                 self._file.write(line + "\n")
             self._file.flush()
+            if os.fstat(self._file.fileno()).st_size > self.max_bytes:
+                keep_newest(self.path, self.max_bytes // 2)
         return SpanExportResult.SUCCESS
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:

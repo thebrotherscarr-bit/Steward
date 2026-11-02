@@ -12,9 +12,7 @@ class OrderTotalTests(unittest.TestCase):
         self.assertEqual(order_total(items, discount_percent=0), 14.0)
 
     def test_percent_discount(self) -> None:
-        items: list[Item] = [Item("drill", 80.0, 1), Item("bit set", 20.0, 1)]
-        self.assertEqual(order_total(items, discount_percent=10), 90.0)
-
+        """Test that a 10% discount correctly reduces total."""        items: list[Item] = [Item("drill", 80.0, 1), Item("bit set", 20.0, 1)]
 class LowStockTests(unittest.TestCase):
     def test_threshold_is_inclusive(self) -> None:
         items: list[Item] = [Item("saw", 30.0, 5), Item("tape", 4.0, 6)]

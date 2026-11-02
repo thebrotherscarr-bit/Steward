@@ -582,8 +582,135 @@ async def walkthrough_main() -> None:
             print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
 
 
+# Piece 5 (Kyle's build order, 2026-11-01): the workflow's steps scored one by one on a single run. The bug is
+# planted, Steward plans its fix, the plan and his writes are approved as the user would (shell commands too; any
+# other card, a commit, is denied), and each step is scored on what it did: PLAN's plan, each EXECUTE turn's write,
+# and overall the report's check line and the fix on disk. MAF's evaluate_workflow runs every evaluator on every
+# step and takes a resumed step's query from the user's card answer (_evaluation.py), so the steps are grouped by
+# their executor ids here and each group is scored by its own LocalEvaluator. Run alone: python evals.py steps.
+STEPS_QUERY = PLAN_BEFORE_ACT_QUERIES[1]
+STEPS_FIXED: list[bool] = [False]
+
+
+def step_conversations(events: list[Any]) -> dict[str, list[list[Any]]]:
+    """Each AgentExecutor step's conversations, keyed by its executor id, from a run's events (one per completion)."""
+    from agent_framework import AgentExecutorResponse  # noqa: PLC0415
+
+    steps: dict[str, list[list[Any]]] = {}
+    for event in events:
+        if event.type != "executor_completed" or not event.executor_id:
+            continue
+        for sent in event.data if isinstance(event.data, list) else [event.data]:
+            if isinstance(sent, AgentExecutorResponse):
+                steps.setdefault(event.executor_id, []).append(list(sent.full_conversation or sent.agent_response.messages))
+    return steps
+
+
+def _last_said(conversation: list[Any]) -> str:
+    return next(
+        (m.text for m in reversed(conversation or []) if getattr(m, "role", None) == "assistant" and (m.text or "").strip()), ""
+    )
+
+
+@evaluator(name="plan_step")
+def plan_step(query: str, response: str, conversation: list[Any]) -> dict[str, object]:
+    """PLAN: an approval with steps that name the work, and nothing changed while planning."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent import _CHANGES_THINGS  # noqa: PLC0415
+
+    acted = [name for name, _, outcome in _calls_in_order(conversation) if name in _CHANGES_THINGS and outcome == "ran"]
+    if acted:
+        return {"passed": False, "reason": f"Changed things while planning: {acted}"}
+    last = _last_said(conversation)
+    plan = wf.steward_plan_in(last)
+    if plan is None or plan.type.value != "approval":
+        return {"passed": False, "reason": f"No approval plan with steps: {last[:200]!r}"}
+    said = " ".join([plan.questions[0].message, *plan.steps]).lower()
+    missing = [term for term in PLAN_MUST_NAME[STEPS_QUERY] if term not in said]
+    if missing:
+        return {"passed": False, "reason": f"The plan does not name {missing}: {plan.steps}"}
+    return {"passed": True, "reason": f"Planned {len(plan.steps)} steps: {plan.steps}"}
+
+
+@evaluator(name="execute_step")
+def execute_step(query: str, response: str, conversation: list[Any]) -> dict[str, object]:
+    """EXECUTE (each turn, a repair too): an approved write to the module the plan is about."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    written = wf.written_python_files(conversation)
+    ok = any(name.endswith("inventory.py") for name in written)
+    calls = [name for name, _, _ in _calls_in_order(conversation)]
+    return {"passed": ok, "reason": f"Wrote {written}." if ok else f"No write to inventory.py. Calls: {calls[:14]}"}
+
+
+@evaluator(name="steps_overall")
+def steps_overall(query: str, response: str) -> dict[str, object]:
+    """Overall: the report carries the check's pass, and the discount line is fixed on disk."""
+    if "Checks passed" not in (response or ""):
+        return {"passed": False, "reason": f"The report has no passed checks: {(response or '')[-240:]!r}"}
+    if not STEPS_FIXED[0]:
+        return {"passed": False, "reason": "The discount line was not fixed on disk."}
+    return {"passed": True, "reason": "Checks passed, and the discount line is fixed."}
+
+
+async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+    """Every event of one run, its cards answered: approved for the names in ``approve``, denied otherwise."""
+    events = [e async for e in workflow.run(query, stream=True)]
+    answered: set[str] = set()
+    for _ in range(12):
+        pending = [e for e in events if e.type == "request_info" and e.request_id not in answered]
+        if not pending:
+            break
+        responses = {}
+        for card in pending:
+            answered.add(card.request_id)
+            name = card.data.function_call.name if card.data.function_call is not None else ""
+            responses[card.request_id] = card.data.to_function_approval_response(name in approve)
+        events += [e async for e in workflow.run(stream=True, responses=responses)]
+    return events
+
+
+async def steps_main() -> None:
+    """One run of the workflow on the planted bug, each step scored by its own evaluator."""
+    load_dotenv()
+    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent import _WORKING_DIR  # noqa: PLC0415
+    from agent_framework import ConversationSplit, EvalItem, FileAccessProvider, Message  # noqa: PLC0415
+
+    module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
+    approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES, "run_shell"}  # noqa: SLF001
+    async with AsyncExitStack() as stack:
+        agent = await build_steward_agent(stack, auto_approve_skill_scripts=True)
+        async with agent:
+            workflow = wf.build_steward_workflow(agent)
+            with discount_bug_planted():
+                events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
+                STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
+    steps = step_conversations(events)
+    outputs = [str(e.data) for e in events if e.type == "output"]
+    user = Message(role="user", contents=[STEPS_QUERY])
+
+    def items(conversations: list[list[Any]]) -> list[Any]:
+        return [EvalItem([user, *c], split_strategy=ConversationSplit.FULL) for c in conversations]
+
+    report = [EvalItem([user, Message(role="assistant", contents=[outputs[-1] if outputs else ""])], split_strategy=ConversationSplit.FULL)]
+    scored = {
+        wf.PLAN_STEP: await LocalEvaluator(plan_step).evaluate(items(steps.get(wf.PLAN_STEP, [])), eval_name="plan"),
+        wf.EXECUTE_STEP: await LocalEvaluator(execute_step).evaluate(items(steps.get(wf.EXECUTE_STEP, [])), eval_name="execute"),
+        "overall": await LocalEvaluator(steps_overall).evaluate(report, eval_name="overall"),
+    }
+    passed = all(r.total and r.passed == r.total for r in scored.values())
+    print(f"Workflow steps: {'PASS' if passed else 'FAIL'}")
+    for step, result in scored.items():
+        print(f"  {step}: {result.passed}/{result.total}")
+        for item in result.items:
+            for score in item.scores:
+                print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
+
+
 if __name__ == "__main__":
     # a reason can carry characters Windows' console code page cannot print (2026-10-30: U+2011)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    runs = {"plan": plan_main, "roundtrip": round_trip_main, "walkthrough": walkthrough_main}
+    runs = {"plan": plan_main, "roundtrip": round_trip_main, "walkthrough": walkthrough_main, "steps": steps_main}
     asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main())

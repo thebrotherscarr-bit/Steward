@@ -80,9 +80,31 @@ failing test.
 .venv\Scripts\python harness\steward\step04_production_ready\evals.py
 ```
 
-`evals.py` runs three fixed queries (repo status, codebase map, bug diagnosis) with the shell off
-and skill scripts auto-approved, then scores them with local evaluators. Like the console, it writes
-every span to `halo_traces/traces.jsonl`, and a failed check prints its reason.
+`evals.py` runs fixed queries with the shell off and skill scripts auto-approved, then scores them
+with local evaluators. Like the console, it writes every span to `halo_traces/traces.jsonl` (capped
+at 100 MB, newest kept), and a failed check prints its reason. The console and the evals still run
+the single agent; only the hosted service below runs the workflow (open: "define once").
+
+### The Agent tab: a MAF workflow (`steward_workflow.py`, served by `hosted.py`)
+
+SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF workflow on MAF's own
+`ResponsesHostServer(workflow=...)`, a fresh Steward per request:
+
+```
+request -> plan -> approve_plan card -> execute -> check -> report
+                                           ^          |
+                                           +- repair -+   (tests failed; at most 3 attempts)
+```
+
+1. **Plan:** structured output (`StewardPlan`: the guide's PlanningResponse plus its steps), read
+   in code. A question ends the run as text; your answer is the next request.
+2. **Approve:** the plan comes to you as an `approve_plan` card. Deny it and nothing runs.
+3. **Execute:** the plan's steps become his todos, in execute mode. Every write still asks on its
+   own card, and your No on a card ends the run.
+4. **Check:** model-free. The tests in the folder of each Python file he wrote are run (pytest).
+   Failing, the output goes back to him; passing, the report says "Checks passed".
+
+The host keeps its state in `worlds/steward/.as` (gitignored).
 
 With the factory (SecondBrain's Agent tab or `console_app.py`), Step 3's list adds:
 

@@ -657,6 +657,17 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
     empty = run(["", ""], approve=None)
     assert len(empty["calls"]) == 2 and empty["cards"] == [], "asked again once, not in a loop"
 
+    # A plan labelled a clarification with no choices (live 2026-11-02, three times) gets the guide's definitions once.
+    mislabelled = '{"type": "clarification", "questions": [{"message": "Should I proceed?"}], "steps": ["Fix the discount line"]}'
+    relabelled = run([mislabelled, plan], approve=None)
+    assert relabelled["cards"] == [wf.APPROVE_PLAN] and relabelled["calls_before_answer"] == 2, "the mislabelled plan was asked again"
+    assert wf.PLAN_IS_APPROVAL in " ".join(m.text or "" for m in relabelled["calls"][1]["messages"])
+    still = run([mislabelled, mislabelled], approve=None)
+    assert still["outputs"] == ["Should I proceed?"] and len(still["calls"]) == 2, "asked again once, then shown as it is"
+    choices = '{"type": "clarification", "questions": [{"message": "Which file?", "choices": ["a.py", "b.py"]}], "steps": ["s"]}'
+    question = run([choices], approve=None)
+    assert question["outputs"] == ["Which file? (a.py / b.py)"] and len(question["calls"]) == 1, "a real clarification ends the run"
+
 
 def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
     """Piece 4: CHECK runs after EXECUTE, model-free. Failing with attempts left, REPAIR hands EXECUTE the output in
@@ -818,6 +829,64 @@ def test_an_approved_shell_command_runs_through_the_hosted_workflow(monkeypatch:
     texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
     assert texts == ["Echoed."], texts
     assert "hi" in " ".join(str(m.text or "") + str([c.result for c in m.contents if c.type == "function_result"]) for m in calls[2]["messages"])
+
+
+def test_the_steps_eval_scores_each_workflow_step_by_its_own_evaluator() -> None:
+    """Piece 5: evals.py steps groups a run's conversations by executor id and scores PLAN and EXECUTE apart."""
+    import evals
+    import steward_workflow as wf
+    from agent_framework import Message
+
+    def plan_run(reply: str) -> dict[str, Any]:
+        client = ScriptedChatClient([reply])
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent).run(evals.STEPS_QUERY, stream=True)]
+
+        return evals.step_conversations(asyncio.run(_go()))
+
+    good = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix the discount line"]}'
+    steps = plan_run(good)
+    assert list(steps) == [wf.PLAN_STEP], "the run's AgentExecutor steps, by executor id"
+    assert scored(evals.plan_step, evals.STEPS_QUERY, steps[wf.PLAN_STEP][0]).passed, "a plan naming the work passes"
+    asked = '{"type": "clarification", "questions": [{"message": "Which test?"}], "steps": ["Read the tests"]}'
+    assert not scored(evals.plan_step, evals.STEPS_QUERY, plan_run(asked)[wf.PLAN_STEP][0]).passed, "a question is no plan"
+
+    def answered(approved: bool) -> list[Any]:
+        write = Content.from_function_call(call_id="w", name="file_access_replace", arguments={"file_name": "harness/steward/working/sample-project/inventory.py"})
+        card = Content.from_function_approval_request(id="w", function_call=write)
+        return [Message(role="user", contents=[card.to_function_approval_response(approved)])]
+
+    assert scored(evals.execute_step, "go", answered(True)).passed, "an approved write to the module passes"
+    assert not scored(evals.execute_step, "go", answered(False)).passed, "a denied write is no work done"
+
+
+def test_the_trace_file_is_capped_and_keeps_the_newest_whole_spans() -> None:
+    """Kyle, 2026-11-01: "cut the traces file down to a 100MB max". Past the cap, the oldest spans go."""
+    import json
+    import tempfile
+
+    from halo_traces import HaloJsonlSpanExporter
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    with tempfile.TemporaryDirectory(prefix="tr") as folder:
+        path = Path(folder) / "traces.jsonl"
+        exporter = HaloJsonlSpanExporter(path, max_bytes=4000)
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("cap")
+        for n in range(60):
+            with tracer.start_as_current_span(f"span-{n}"):
+                pass
+        provider.shutdown()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert path.stat().st_size <= 4000, path.stat().st_size
+        assert all(json.loads(line) for line in lines), "every line kept is a whole span"
+        assert lines and lines[-1].find("span-59") >= 0, "the newest span is kept"
 
 
 def test_door_calls_stay_on_stewards_world() -> None:
