@@ -82,13 +82,20 @@ failing test.
 
 `evals.py` runs fixed queries with the shell off and skill scripts auto-approved, then scores them
 with local evaluators. Like the console, it writes every span to `halo_traces/traces.jsonl` (capped
-at 100 MB, newest kept), and a failed check prints its reason. The console and the evals still run
-the single agent; only the hosted service below runs the workflow (open: "define once").
+at 100 MB, newest kept), and a failed check prints its reason.
+
+Defined once (the guide's Part 4): `build_steward_agent` is the guide's harness agent, and
+`steward_workflow.build_steward` builds it with the workflow below. The Agent tab's service and
+`evals.py` run the workflow from that one builder. `console_app.py` runs the same harness agent on
+its own, as the guide's console ships: a workflow's cards resume from checkpoints, which MAF's
+Responses host keeps, and not from a console's session (MAF issue #5818). In SecondBrain, the Agent
+tab is Steward's console.
 
 ### The Agent tab: a MAF workflow (`steward_workflow.py`, served by `hosted.py`)
 
 SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF workflow on MAF's own
-`ResponsesHostServer(workflow=...)`, a fresh Steward per request:
+`ResponsesHostServer(workflow=...)`, a fresh Steward per request. His work in execute and commit
+streams to the tab as it happens (MAF's `intermediate_output_from`):
 
 ```
 request -> plan -> approve_plan card -> execute -> check -> commit (git_commit card) -> report
