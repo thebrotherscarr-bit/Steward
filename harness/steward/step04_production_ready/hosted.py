@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -33,13 +34,15 @@ from agent_framework import (
     AgentModeProvider,
     AgentResponseUpdate,
     BackgroundAgentsProvider,
+    ChatContext,
     InMemoryHistoryProvider,
     ResponseStream,
     agent_middleware,
+    chat_middleware,
     get_agent_mode,
     set_agent_mode,
 )
-from agent_framework_foundry_hosting import ResponsesHostServer
+from agent_framework_foundry_hosting import CheckpointStoreProvider, HostedResponseRequest, ResponsesHostServer, WorkflowTurn
 from azure.ai.agentserver.responses import FileResponseStore
 from dotenv import load_dotenv
 
@@ -56,6 +59,15 @@ AGENT_MODE_KEY = "agent_mode"
 PLAN_MODE = "plan"
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
+# The host's own state (the workflow's checkpoints, sessions, approvals) defaults to ~/.agentserver
+# (azure.ai.agentserver.core._config.resolve_state_subdir), outside the workspace. Its file names run to 191
+# characters (function_approvals' base64 store name plus a temp suffix), so the root must stay within 68 to keep
+# under Windows' 260 (2026-11-01: storagegentserver came to 262 and every checkpoint save failed). Kyle's ruling:
+# a short folder in the repo, .as (gitignored).
+_AGENTSERVER_STATE_DIR = Path(__file__).resolve().parents[3] / ".as"
+_LOCAL_SESSION_ID = "steward-local"
+# A turn that answers the workflow's pending request (the plan's approval card, a tool's card) carries these items.
+_REPLY_ITEM_TYPES = ("mcp_approval_response", "function_call_output")
 
 
 def _release_background_per_request(background_providers: list[BackgroundAgentsProvider]) -> Callable[..., Awaitable[None]]:
@@ -133,7 +145,7 @@ def _release_background_per_request(background_providers: list[BackgroundAgentsP
     return request_background_lifetime
 
 
-def planning_response_in(text: str) -> PlanningResponse | None:
+def planning_response_in(text: str, model: type[PlanningResponse] = PlanningResponse) -> PlanningResponse | None:
     """The PlanningResponse in a plan-mode reply, or None.
 
     With tools offered, gpt-oss writes a short preamble before the constrained JSON in the same reply
@@ -144,7 +156,7 @@ def planning_response_in(text: str) -> PlanningResponse | None:
     start = 0
     while (start := text.find("{", start)) != -1:
         try:
-            plan = PlanningResponse.model_validate_json(text[start:])
+            plan = model.model_validate_json(text[start:])
         except ValueError:
             start += 1
             continue
@@ -154,7 +166,9 @@ def planning_response_in(text: str) -> PlanningResponse | None:
     return None
 
 
-def plan_mode_turns(mode_provider: AgentModeProvider) -> Callable[..., Awaitable[None]]:
+def plan_mode_turns(
+    mode_provider: AgentModeProvider, response_format: type[PlanningResponse] = PlanningResponse
+) -> Callable[..., Awaitable[None]]:
     """The guide's planning observer, on the server, where the session's mode lives.
 
     Part 1, "How plan mode works": in plan mode the console asks for PlanningResponse as
@@ -176,11 +190,97 @@ def plan_mode_turns(mode_provider: AgentModeProvider) -> Callable[..., Awaitable
             if switch_to:
                 set_agent_mode(context.session, str(switch_to), **modes)
             if get_agent_mode(context.session, default_mode=mode_provider.default_mode, **modes) == PLAN_MODE:
-                options["response_format"] = PlanningResponse
+                options["response_format"] = response_format
         context.options = options
         await call_next()
 
     return plan_mode_turn
+
+
+async def steward_graph(request: HostedResponseRequest, client_factory: Callable[[], Any] | None = None, **build: Any) -> Any:
+    """MAF's request-aware workflow factory: a fresh Steward and a fresh graph for every request.
+
+    MAF's native workflow host refuses to share agents, clients or providers between requests (_workflow_source.py,
+    WorkflowResolver) and closes each agent when its request ends, so Steward is built here per request; what lasts
+    between requests (each step's session, the pending approval) is in the workflow's checkpoint. The connections
+    build_steward_agent opens (SecondBrain, the shell) are closed with the agent.
+    """
+    from steward_workflow import build_steward_workflow  # noqa: PLC0415
+
+    stack = AsyncExitStack()
+    if client_factory is not None:  # a fresh chat client per request too (tests pass a scripted one)
+        build["client"] = client_factory()
+    try:
+        agent = await build_steward_agent(stack, history_provider=InMemoryHistoryProvider(), **build)
+    except BaseException:
+        await stack.aclose()
+        raise
+    agent._async_exit_stack.push_async_callback(stack.aclose)  # noqa: SLF001 - the agent's close owns the stack
+    workflow = build_steward_workflow(agent)
+    background_providers = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
+    agent.middleware = [
+        _release_background_per_request(background_providers),
+        _host_identity_stays_with_tools,
+        *(agent.middleware or []),
+    ]
+    return workflow
+
+
+@chat_middleware
+async def _host_identity_stays_with_tools(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """The workflow host hands every agent call additional_function_arguments (the caller's session, user and call ids,
+    _workflow_source.py) as a client kwarg. MAF's function layer treats it as "for tool invocation only and not
+    recognized by chat service APIs" (_tools.py) and drops it from the options, but the Ollama client passes every
+    client kwarg on to ollama's chat(), which refuses it. It is dropped here, before the model call."""
+    context.kwargs.pop("additional_function_arguments", None)
+    await call_next()
+
+
+async def steward_turn(request: HostedResponseRequest) -> WorkflowTurn[Any]:
+    """MAF's parse_response: an answer to the pending card resumes the run; anything else is a new request."""
+    items = await request.get_input_items()
+    if any((item.get("type") if hasattr(item, "get") else None) in _REPLY_ITEM_TYPES for item in items):
+        return WorkflowTurn(responses=await request.get_workflow_responses())
+    return WorkflowTurn(input=(await request.get_input_text()) or "")
+
+
+def steward_options(request: HostedResponseRequest, options: dict[str, Any]) -> dict[str, Any]:
+    """MAF's prepare_options hook: each step sets its own output format (PLAN asks for StewardPlan, EXECUTE for none).
+
+    The Agent tab sends the console's PlanningResponse as response_format, and its agent_mode metadata, on its plan
+    turns; MAF's host would apply them to every agent in the graph (2026-11-01: EXECUTE was asked for a plan).
+    """
+    options = dict(options)
+    options.pop("response_format", None)
+    metadata = dict(options.pop("metadata", None) or {})
+    metadata.pop(AGENT_MODE_KEY, None)
+    if metadata:
+        options["metadata"] = metadata
+    return options
+
+
+def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any) -> ResponsesHostServer:
+    """Steward's workflow on MAF's Responses host (Kyle, 2026-11-01: MAF native hosting)."""
+    os.environ.setdefault("AGENTSERVER_STATE_ROOT", str(_AGENTSERVER_STATE_DIR))
+    # One user on one PC: one platform session, so a reply (previous_response_id) finds the run it answers. Without
+    # it the first request gets a random session and its reply a derived one, two scopes, and the reply is refused
+    # ("The previous response has no completed workflow checkpoint in this trusted scope"); the order is
+    # azure.ai.agentserver.responses.hosting._request_parsing._resolve_session_id (B39).
+    os.environ.setdefault("FOUNDRY_AGENT_SESSION_ID", _LOCAL_SESSION_ID)
+    return ResponsesHostServer(
+        workflow=lambda request: steward_graph(request, client_factory, **dict(build)),
+        parse_response=steward_turn,
+        prepare_options=steward_options,
+        response_store=FileResponseStore(_STORAGE_DIR),
+        # The plan's structured output (PLAN's response) and a check's report (CHECK -> REPAIR | REPORT) are in the
+        # checkpoint; MAF's decoder admits named types only.
+        checkpoint_store_provider=CheckpointStoreProvider(allowed_checkpoint_types=[
+            "steward_workflow:StewardPlan",
+            "steward_workflow:CheckReport",
+            "console.observers.planning_models:PlanningResponseType",
+            "console.observers.planning_models:PlanningQuestion",
+        ]),
+    )
 
 
 async def main() -> None:
@@ -190,27 +290,8 @@ async def main() -> None:
     port = int(os.environ.get("STEWARD_PORT", "43120"))
     # Every span goes to halo_traces/traces.jsonl (cookbook improvement loop, step 2).
     setup_halo_tracing()
-
-    async with AsyncExitStack() as stack:
-        # Steward keeps each conversation's history in its session (history_source="agent"), so an
-        # approval answer comes back through the harness's approval layer instead of being replayed
-        # to Ollama as history, which the Ollama client cannot read.
-        agent = await build_steward_agent(
-            stack, history_provider=InMemoryHistoryProvider(), plan_reply_check=planning_response_in
-        )
-        background_providers = [
-            provider for provider in agent.context_providers if isinstance(provider, BackgroundAgentsProvider)
-        ]
-        mode_provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
-        agent.middleware = [
-            _release_background_per_request(background_providers),
-            plan_mode_turns(mode_provider),
-            *(agent.middleware or []),
-        ]
-        async with agent:
-            logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol).", port)
-            server = ResponsesHostServer(agent=agent, history_source="agent", response_store=FileResponseStore(_STORAGE_DIR))
-            await server.run_async(host="127.0.0.1", port=port)
+    logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol, MAF workflow).", port)
+    await steward_server().run_async(host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

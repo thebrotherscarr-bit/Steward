@@ -12,3 +12,4 @@ steward-mcp.log
 state/
 agent-memory.old-*/
 storage/
+.as/

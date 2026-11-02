@@ -34,6 +34,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import logging
@@ -1427,7 +1428,9 @@ async def build_steward_agent(
         # for a host, skill scripts auto-approved for unattended evals, and load_skill asks no approval
         # ("it only reads a skill's own body"); everything else is Part 3's agent.
         part4 = part == 4
-        part3_tools: list[Any] = [*tools, git_commit]
+        # A copy per build: MAF's native workflow host builds Steward for every request and refuses a tool object
+        # shared between requests (agent_framework_foundry_hosting WorkflowResolver), and git_commit is module-level.
+        part3_tools: list[Any] = [*tools, copy.copy(git_commit)]
         # ADR-0001 items 5 and 6: Atlas's door. SecondBrain serves the door's tools on the same MCP
         # client Steward already holds (its share key, as a client: reads run, writes park as holds for
         # the operator), and the door carries his repository as the world `steward`. So the door is one

@@ -56,7 +56,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
     def _inner_get_response(
         self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
-        self.calls.append({"messages": list(messages), "options": dict(options)})
+        self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
         reply = self.replies.pop(0) if self.replies else "done"
         content = reply if isinstance(reply, Content) else Content.from_text(reply)
         if stream:
@@ -499,7 +499,8 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     write = Content.from_function_call(call_id="x2", name="execute_code", arguments={"code": (
         "open('harness/test_harness_codeact_probe.txt', 'w').write('x')")})
     client, _, _ = run_steward([count, write, "ok"], "Count the lines.", mode="execute")
-    assert function_results(client.calls[1])[0].strip() == "20", "an exact count, read from the file"
+    lines = len((steward._WORKING_DIR / "harness/steward/working/sample-project/inventory.py").read_text(encoding="utf-8").splitlines())
+    assert function_results(client.calls[1])[0].strip() == str(lines), "an exact count, read from the file"
     assert not (steward._WORKING_DIR / "harness" / "test_harness_codeact_probe.txt").exists(), "and nothing written"
     asked = [hint for pattern, hint, _ in steward.REQUEST_HINTS if pattern.search("Report the pass count and every failing line.")]
     assert asked == []
@@ -528,6 +529,208 @@ def test_a_run_that_added_todos_is_never_told_its_list_is_empty(monkeypatch: Any
 
     client = asyncio.run(_go())
     assert len(client.calls) == 2, "the plan stood; no false 'empty' nudge"
+
+
+def scored(check: Any, query: str, conversation: list[Any]) -> Any:
+    """One evals.py check on one conversation, as MAF's LocalEvaluator runs it (EvalItem, the full split)."""
+    from agent_framework import ConversationSplit, EvalItem
+
+    item = EvalItem([Message(role="user", contents=[Content.from_text(query)]), *conversation], split_strategy=ConversationSplit.FULL)
+    return asyncio.run(check(item))
+
+
+def test_a_plan_that_does_not_name_the_work_fails_the_plan_eval() -> None:
+    """Run 15: a bug-fix plan that planned a new inventory.py passed; the plan must name the discount line's file and fix."""
+    import evals
+
+    query = evals.PLAN_BEFORE_ACT_QUERIES[1]
+
+    def run(todo: str, plan: str) -> bool:
+        add = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": todo}]})
+        reply = '{"type": "approval", "questions": [{"message": "%s"}]}' % plan
+        conversation = [Message(role="assistant", contents=[add]), Message(role="assistant", contents=[Content.from_text(reply)])]
+        return scored(evals.plan_before_act, query, conversation).passed
+
+    assert run("Add inventory.py re-exporting the functions", "Add a new file.") is False
+    assert run("Fix the discount in inventory.py", "Divide discount_percent by 100.") is True
+
+
+def test_the_walkthrough_denies_a_commit_card_and_nothing_is_committed() -> None:
+    """The walkthrough's commit step: the card is answered Deny, so git_commit never runs and HEAD stays."""
+    import evals
+
+    commit = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": "checkpoint"})
+    client = ScriptedChatClient([commit, "The commit was not approved."])
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                from agent_framework import AgentModeProvider, set_agent_mode
+
+                modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                session = agent.create_session()
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                return await evals._run_answering_cards(agent, session, evals.WALKTHROUGH_COMMIT, set())
+
+    head = evals._head()
+    evals.WALKTHROUGH_HEAD[0] = head
+    response = asyncio.run(_go())
+    conversation = list(response.messages)
+    assert evals._cards(conversation) == ["git_commit"], "the commit asked for approval"
+    assert evals._head() == head, "the denied commit did not run"
+    assert len(client.calls) == 2, "the run continued after the Deny"
+    result = scored(evals.walkthrough, evals.WALKTHROUGH_COMMIT, conversation)
+    assert result.passed, result.reason
+
+
+def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_steps_as_todos() -> None:
+    """Pieces 1 and 2 of the workflow: PLAN asks for StewardPlan and the run pauses on an approve_plan card before
+    anything runs. Approved, EXECUTE's own session goes to execute mode with the plan's steps as its todos (no
+    todos_add from him) and runs until they are done; denied, nothing runs. A reply that is no plan ends the run."""
+    import steward_workflow as wf
+    from agent_framework import AgentModeProvider, TodoProvider, get_agent_mode
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix the discount line"]}'
+
+    def run(replies: list[Any], approve: bool | None) -> dict[str, Any]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> dict[str, Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent)
+                    todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
+                    modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                    # Streamed, as the host runs it: MAF's loop parses a non-streamed structured reply strictly
+                    # (_harness/_loop.py, _aggregate_response -> value), so a reply that is not pure JSON raises.
+                    events = [e async for e in workflow.run("Fix the discount bug.", stream=True)]
+                    cards = [e for e in events if e.type == "request_info"]
+                    seen: dict[str, Any] = {
+                        "cards": [e.data.function_call.name for e in cards],
+                        "calls_before_answer": len(client.calls),
+                        "outputs": [e.data for e in events if e.type == "output"],
+                    }
+                    if cards and approve is not None:
+                        answer = {cards[0].request_id: cards[0].data.to_function_approval_response(approve)}
+                        events = [e async for e in workflow.run(stream=True, responses=answer)]
+                        seen["outputs"] = [e.data for e in events if e.type == "output"]
+                    execute = next(e for e in workflow.get_executors_list() if e.id == wf.EXECUTE_STEP)
+                    session = execute._session  # noqa: SLF001 - the executor's own session, as MAF checkpoints it
+                    seen["todos"] = [(i.title, i.is_complete) for i in await todos.store.load_items(session, source_id=todos.source_id)]
+                    seen["calls"] = client.calls
+                    return seen
+
+        return asyncio.run(_go())
+
+    done = Content.from_function_call(
+        call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "read"}, {"id": 2, "reason": "fixed"}]}
+    )
+    approved = run([plan, done, "Done: the discount is fixed."], approve=True)
+    assert approved["calls"][0]["options"].get("response_format") is wf.StewardPlan, "PLAN asks for the structured plan"
+    assert approved["cards"] == [wf.APPROVE_PLAN] and approved["calls_before_answer"] == 1, "paused before anything ran"
+    assert approved["outputs"] == ["Done: the discount is fixed."], "approved: EXECUTE ran and REPORT gave its answer"
+    assert approved["calls"][1]["options"].get("response_format") is None, "EXECUTE is not asked for a plan"
+    assert "Fix the discount line" in " ".join(m.text or "" for m in approved["calls"][1]["messages"]), "EXECUTE is given the plan"
+    assert approved["todos"] == [("Read inventory.py", True), ("Fix the discount line", True)], "the plan's steps were his todos"
+    assert len(approved["calls"]) == 3, "EXECUTE ran until its todos were complete, then stopped"
+
+    denied = run([plan, "This must not run."], approve=False)
+    assert denied["outputs"] == [wf.NOT_APPROVED] and len(denied["calls"]) == 1 and denied["todos"] == [], "denied: nothing ran"
+
+    words = run(["Just words."], approve=None)
+    assert words["outputs"] == ["Just words."] and words["cards"] == [], "no plan, no card"
+
+
+def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
+    """Piece 4: CHECK runs after EXECUTE, model-free. Failing with attempts left, REPAIR hands EXECUTE the output in
+    its own session; passing, REPORT gives his answer with the result; after MAX_ATTEMPTS, REPORT says they still
+    fail. The default check finds the .py files his calls to MAF's write tools named."""
+    import steward_workflow as wf
+    from agent_framework import Message
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+
+    def run(replies: list[Any], results: list[tuple[bool, str]]) -> tuple[list[Any], list[Any], list[int]]:
+        client = ScriptedChatClient(replies)
+        seen: list[int] = []
+
+        def checks(messages: Any) -> tuple[bool, str]:
+            seen.append(len(messages))
+            return results.pop(0)
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent, checks=checks)
+                    events = [e async for e in workflow.run("Fix the discount bug.", stream=True)]
+                    card = next(e for e in events if e.type == "request_info")
+                    answer = {card.request_id: card.data.to_function_approval_response(True)}
+                    return [e.data for e in [e async for e in workflow.run(stream=True, responses=answer)] if e.type == "output"]
+
+        return asyncio.run(_go()), client.calls, seen
+
+    outputs, calls, seen = run([plan, done, "First try.", "Fixed it."], [(False, "1 failed: test_discount"), (True, "1 passed")])
+    assert len(seen) == 2 and len(calls) == 4, "checked after each attempt; repaired once"
+    assert "1 failed: test_discount" in " ".join(m.text or "" for m in calls[3]["messages"]), "EXECUTE was given the failure"
+    assert outputs == ["Fixed it.\n\nChecks passed:\n1 passed"], outputs
+
+    failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
+    outputs, calls, seen = run([plan, done, "a", "b", "c", "never"], failing)
+    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit"
+    assert outputs == [f"c\n\nChecks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
+
+    def call(name: str, file_name: str) -> Message:
+        return Message(role="assistant", contents=[Content.from_function_call(call_id=file_name, name=name, arguments={"file_name": file_name})])
+
+    written = [call("file_access_read", "a.py"), call("file_access_replace", "p/b.py"), call("file_access_write", "p/b.py"), call("file_access_write", "notes.md")]
+    assert wf.written_python_files(written) == ["p/b.py"], "only code his write tools touched"
+    assert wf.python_tests_for_writes([call("file_access_read", "a.py")]) is None, "nothing written, nothing run"
+
+
+def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(monkeypatch: Any) -> None:
+    """Piece 3: MAF's Responses host serves the workflow (hosted.steward_server). A request comes back as the
+    approve_plan card (mcp_approval_request) with the plan's steps; the Approve, sent as mcp_approval_response on
+    previous_response_id, resumes the run from its checkpoint in a freshly built Steward, which runs the plan."""
+    import json
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    # A short folder: the host's state file names run to 191 characters, and Windows stops at 260 (hosted.py).
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix the discount line"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "r"}, {"id": 2, "reason": "f"}]})
+    replies: list[Any] = [plan, done, "Done: the discount is fixed."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:  # the host refuses a client shared between requests
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        # The Agent tab sends the console's PlanningResponse as response_format on its plan turns (steward.cjs).
+        tab = {"store": True, "response_format": {"type": "object"}, "metadata": {"agent_mode": "execute"}}
+        first = http.post("/responses", json={"input": "Fix the discount bug.", **tab}).json()
+        [card] = [o for o in first["output"] if o["type"] == "mcp_approval_request"]
+        assert card["name"] == "approve_plan" and json.loads(card["arguments"])["steps"][1] == "Fix the discount line"
+        assert len(calls) == 1, "nothing ran before the Approve"
+        answer = {"type": "mcp_approval_response", "approval_request_id": card["id"], "approve": True}
+        second = http.post("/responses", json={"previous_response_id": first["id"], "input": [answer], **tab}).json()
+    texts = [c["text"] for o in second["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["Done: the discount is fixed."], second
+    assert len(calls) == 3, "EXECUTE ran the plan until its todos were done"
+    formats = [c["options"].get("response_format") for c in calls]
+    assert formats[0].__name__ == "StewardPlan" and formats[1:] == [None, None], "each step's own format, not the tab's"
+    # The host's tool-only identity never reaches the model call: Ollama's chat() refuses an unknown keyword.
+    assert not any("additional_function_arguments" in c["kwargs"] for c in calls), "the host's identity reached the model"
+    state.cleanup()
 
 
 def test_door_calls_stay_on_stewards_world() -> None:
