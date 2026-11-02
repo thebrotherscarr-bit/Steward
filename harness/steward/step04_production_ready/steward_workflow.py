@@ -99,6 +99,17 @@ NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to c
 # Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
 PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
 _PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
+# Sent to PLAN once when its reply was a clarification offering no choices (live 2026-11-02, three times in one
+# conversation: "Should I proceed?" with the whole plan in its steps). The cookbook's repair loops: "failures become
+# structured feedback instead of a dead end"; the definitions are the guide's own (PlanningResponseType).
+PLAN_IS_APPROVAL = (
+    "Your reply was a clarification that offers no choices, with your plan in its steps. A clarification is for when "
+    "you need clarification and want to present the user with options to choose from. An approval is for when you "
+    "are ready to start execution but need approval to start executing; the user's Approve on it switches you to "
+    "execute mode. If you are asking to go ahead, reply with type approval, a summary of the plan as its one "
+    "question, and your steps. If you need an answer first, reply with a clarification whose question lists the "
+    "choices."
+)
 
 
 class StewardPlan(PlanningResponse):
@@ -136,6 +147,11 @@ def steward_plan_in(text: str) -> StewardPlan | None:
     if plan is None or (plan.type == PlanningResponseType.APPROVAL and not plan.steps):
         return None
     return plan
+
+
+def offers_no_choices(plan: StewardPlan) -> bool:
+    """A clarification none of whose questions offers a choice: by the guide's definition it presents options."""
+    return plan.type == PlanningResponseType.CLARIFICATION and not any(q.choices for q in plan.questions)
 
 
 def _last_text(response: AgentExecutorResponse) -> str:
@@ -249,7 +265,9 @@ class ReadPlan(Executor):
     """Reads PLAN's reply in code: an approval goes on for the user's approval; anything else ends the run as it is.
 
     An empty reply (live 2026-11-01: the model's whole answer stayed in its reasoning) is sent back to PLAN once for
-    the plan, as the cookbook's "Validate JSON ... in code" has a bad reply asked again; a reply in words is not.
+    the plan, as the cookbook's "Validate JSON ... in code" has a bad reply asked again; a reply in words is not. So is
+    a clarification that offers no choices (live 2026-11-02: his plan, labelled a question), with the guide's
+    definitions as the feedback (the cookbook's repair loops). Once per run; the second reply is read as it is.
     """
 
     def __init__(self, id: str = READ_PLAN_STEP) -> None:
@@ -260,12 +278,13 @@ class ReadPlan(Executor):
         self, response: AgentExecutorResponse, ctx: WorkflowContext[dict[str, Any] | AgentExecutorRequest, Any]
     ) -> None:
         last = _last_text(response)
-        if not last.strip() and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
+        plan = steward_plan_in(last)
+        again = PLAN_AGAIN if not last.strip() else PLAN_IS_APPROVAL if plan is not None and offers_no_choices(plan) else None
+        if again and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
             ctx.set_state(_PLAN_ASKED_AGAIN_KEY, True)
-            await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(PLAN_AGAIN)])]), target_id=PLAN_STEP)
+            await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(again)])]), target_id=PLAN_STEP)
             return
         ctx.set_state(_PLAN_ASKED_AGAIN_KEY, False)
-        plan = steward_plan_in(last)
         if plan is None:
             await ctx.yield_output(last)
         elif plan.type != PlanningResponseType.APPROVAL:
