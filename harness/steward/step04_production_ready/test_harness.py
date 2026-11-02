@@ -715,20 +715,28 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
         return asyncio.run(_go()), client.calls, seen
 
     committed = Content.from_function_call(call_id="k1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "asked"}]})
+    # A repair's todo (REPAIR_TODO) is his one open item until he marks it done, as any approved step.
+    fixed = Content.from_function_call(call_id="f1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
     outputs, calls, seen = run(
-        [plan, done, "First try.", "Fixed it.", committed, "Committed."], [(False, "1 failed: test_discount"), (True, "1 passed")]
+        [plan, done, "First try.", fixed, "Fixed it.", committed, "Committed."],
+        [(False, "1 failed: test_discount"), (True, "1 passed")],
     )
     assert len(seen) == 2, "checked after each attempt; repaired once"
     assert "1 failed: test_discount" in " ".join(m.text or "" for m in calls[3]["messages"]), "EXECUTE was given the failure"
+    # Live 2026-11-02: his finished todos put him back in plan mode (ReturnToPlanWhenDone), so each repair was
+    # answered with a new plan. The repair runs in execute mode, with the fix as its todo.
+    assert calls[3]["options"].get("response_format") is None, "the repair was asked for a plan, not a fix"
+    assert wf.REPAIR_TODO in " ".join(m.text or "" for m in calls[3]["messages"]), "the repair's todo is not in front of him"
     assert "Do not commit" in " ".join(m.text or "" for m in calls[1]["messages"]), "EXECUTE is told the commit comes later"
     # Passing on changed code: the commit step asks him to commit (his git_commit raises the card), then REPORT.
-    assert "Commit your work now" in " ".join(m.text or "" for m in calls[4]["messages"]), "the commit came after the pass"
-    assert len(calls) == 6, len(calls)
+    assert "Commit your work now" in " ".join(m.text or "" for m in calls[5]["messages"]), "the commit came after the pass"
+    assert len(calls) == 7, len(calls)
     assert outputs == ["First try.", "Fixed it.", "Checks passed:\n1 passed", "Committed."], outputs
 
     failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
-    outputs, calls, seen = run([plan, done, "a", "b", "c", "never"], failing)
-    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit; no commit asked"
+    outputs, calls, seen = run([plan, done, "a", fixed, "b", fixed, "c", "never"], failing)
+    # plan, then EXECUTE's two calls, then each repair's two (its todo marked done, then his answer)
+    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 3 + 2 * (wf.MAX_ATTEMPTS - 1), "stopped at the attempt limit; no commit asked"
     assert not any("Commit your work now" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
     assert outputs == ["a", "b", "c", f"Checks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
 
