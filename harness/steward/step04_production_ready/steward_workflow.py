@@ -9,7 +9,8 @@ Pieces 1 to 4 of the build order:
     request -> plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
             -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
             -> (failed, attempts left) repair -> execute -> check ...
-            -> (passed, or attempts spent) report
+            -> (passed on changed code) ask_commit -> commit (his git_commit, on the user's card) -> report
+            -> (nothing changed, or attempts spent) report
 
 * PLAN and EXECUTE are MAF AgentExecutors, so evaluate_workflow can score each step ("Ensure the workflow uses
   AgentExecutor-based agents", agent_framework/_evaluation.py). Each keeps its own session, which MAF saves in
@@ -88,6 +89,7 @@ EXECUTE_STEP = "execute"
 CHECK_STEP = "check"
 REPAIR_STEP = "repair"
 REPORT_STEP = "report"
+COMMIT_STEP = "commit"
 # EXECUTE's attempts at a plan before REPORT says the checks still fail (the improvement loop's MAX_ATTEMPTS).
 MAX_ATTEMPTS = 3
 _ATTEMPT_KEY = "steward_check_attempt"
@@ -97,6 +99,15 @@ APPROVE_PLAN = "approve_plan"
 # The approved plan's steps, on the message that asks EXECUTE to carry it out (read by approved_plan_turn).
 APPROVED_PLAN_KEY = "steward_approved_plan"
 NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to change and I will plan again."
+# The commit comes after the checks pass (the cookbook's improvement loop: "the system proposes the change set and a
+# developer approves the diff before merge"); he commits his own work, on the user's card (the guide's Part 2).
+COMMIT_TODO = "Commit the checked work with git_commit"
+COMMIT_NOW = (
+    "The checks passed:\n{output}\n\nCommit your work now: call git_commit once, with a clear, imperative message "
+    "that says what you changed. The user approves it before it runs. Then mark the todo complete and say whether it "
+    "was committed."
+)
+_REPORT_KEY = "steward_checked_report"
 # Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
 PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
 _PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
@@ -169,7 +180,8 @@ def execute_message(request: str, plan: str, steps: list[str]) -> Message:
     numbered = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, start=1))
     text = (
         f"The user approved your plan. Carry it out now.\n\nRequest: {request}\n\nPlan: {plan}\n\nSteps (your todos):\n"
-        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done."
+        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. Do not commit: "
+        "the checks run when you finish, and once they pass you will be asked to commit."
     )
     return Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: list(steps)})
 
@@ -368,9 +380,34 @@ def needs_repair(report: Any) -> bool:
     return isinstance(report, CheckReport) and not report.passed and report.attempt < MAX_ATTEMPTS
 
 
+def ready_to_commit(report: Any) -> bool:
+    """Edge condition: the checks ran on changed code and passed, so the work can be committed."""
+    return isinstance(report, CheckReport) and report.passed and bool(report.output)
+
+
 def ready_for_report(report: Any) -> bool:
-    """Edge condition: the checks passed, or the attempts are spent."""
-    return isinstance(report, CheckReport) and (report.passed or report.attempt >= MAX_ATTEMPTS)
+    """Edge condition: nothing was checked, or the attempts are spent; no commit is offered."""
+    if not isinstance(report, CheckReport):
+        return False
+    return (report.passed and not report.output) or (not report.passed and report.attempt >= MAX_ATTEMPTS)
+
+
+class AskCommit(Executor):
+    """After passing checks, asks Steward to commit his work: his git_commit raises the user's card (MAF approvals).
+
+    The message carries one step as his approved plan, so approved_plan_turn puts the commit's own session in execute
+    mode with that step as its todo (a todo list at all times). The checked report waits in workflow state for REPORT.
+    """
+
+    def __init__(self, id: str = "ask_commit") -> None:
+        super().__init__(id=id)
+
+    @handler
+    async def ask(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
+        ctx.set_state(_REPORT_KEY, {"attempt": report.attempt, "passed": report.passed, "output": report.output, "answer": report.answer})
+        text = COMMIT_NOW.format(output=report.output[-_OUTPUT_TAIL:])
+        message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [COMMIT_TODO]})
+        await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
 
 class Repair(Executor):
@@ -396,15 +433,25 @@ class Report(Executor):
 
     @handler
     async def report(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
-        if not report.output:
-            await ctx.yield_output(report.answer)
-            return
-        result = "passed" if report.passed else f"still fail after {report.attempt} attempts"
-        await ctx.yield_output(f"{report.answer}\n\nChecks {result}:\n{report.output[-_OUTPUT_TAIL:]}")
+        await ctx.yield_output(_report_text(report))
+
+    @handler
+    async def committed(self, response: AgentExecutorResponse, ctx: WorkflowContext[Any, Any]) -> None:
+        """After the commit step: the checked work, then his word on the commit."""
+        report = CheckReport(**ctx.get_state(_REPORT_KEY, {}))
+        await ctx.yield_output(f"{_report_text(report)}\n\n{_last_text(response)}")
+
+
+def _report_text(report: CheckReport) -> str:
+    if not report.output:
+        return report.answer
+    result = "passed" if report.passed else f"still fail after {report.attempt} attempts"
+    return f"{report.answer}\n\nChecks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
 
 
 def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_changes) -> Workflow:
-    """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, report."""
+    """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, then
+    ask_commit and commit when the checks passed on changed code, and report."""
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
     agent.middleware = [
@@ -418,6 +465,8 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
     execute = AgentExecutor(agent, id=EXECUTE_STEP)
     check = Check(checks)
     repair = Repair()
+    ask_commit = AskCommit()
+    commit = AgentExecutor(agent, id=COMMIT_STEP)
     report = Report()
     # The run's output is the steps' own (a reply, a clarification, a refusal, the report); the agents' raw
     # responses stay intermediate.
@@ -430,6 +479,9 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
         .add_edge(execute, check)
         .add_edge(check, repair, condition=needs_repair)
         .add_edge(check, report, condition=ready_for_report)
+        .add_edge(check, ask_commit, condition=ready_to_commit)
+        .add_edge(ask_commit, commit)
+        .add_edge(commit, report)
         .add_edge(repair, execute)
         .build()
     )

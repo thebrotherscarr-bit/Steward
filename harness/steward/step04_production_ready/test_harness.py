@@ -702,14 +702,22 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
 
         return asyncio.run(_go()), client.calls, seen
 
-    outputs, calls, seen = run([plan, done, "First try.", "Fixed it."], [(False, "1 failed: test_discount"), (True, "1 passed")])
-    assert len(seen) == 2 and len(calls) == 4, "checked after each attempt; repaired once"
+    committed = Content.from_function_call(call_id="k1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "asked"}]})
+    outputs, calls, seen = run(
+        [plan, done, "First try.", "Fixed it.", committed, "Committed."], [(False, "1 failed: test_discount"), (True, "1 passed")]
+    )
+    assert len(seen) == 2, "checked after each attempt; repaired once"
     assert "1 failed: test_discount" in " ".join(m.text or "" for m in calls[3]["messages"]), "EXECUTE was given the failure"
-    assert outputs == ["Fixed it.\n\nChecks passed:\n1 passed"], outputs
+    assert "Do not commit" in " ".join(m.text or "" for m in calls[1]["messages"]), "EXECUTE is told the commit comes later"
+    # Passing on changed code: the commit step asks him to commit (his git_commit raises the card), then REPORT.
+    assert "Commit your work now" in " ".join(m.text or "" for m in calls[4]["messages"]), "the commit came after the pass"
+    assert len(calls) == 6, len(calls)
+    assert outputs == ["Fixed it.\n\nChecks passed:\n1 passed\n\nCommitted."], outputs
 
     failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
     outputs, calls, seen = run([plan, done, "a", "b", "c", "never"], failing)
-    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit"
+    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit; no commit asked"
+    assert not any("Commit your work now" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
     assert outputs == [f"c\n\nChecks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
 
     def call(name: str, file_name: str) -> Message:
@@ -760,6 +768,37 @@ def _the_check_reads_the_files_on_disk(wf: Any) -> None:
         result = wf.python_tests_for_changes([], workspace=workspace)
         assert result is not None and not result[0], "a broken change fails the check, with no write in the messages"
         assert "pytest -q p" in result[1], result
+
+
+def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> None:
+    """Step 2 (2026-11-02): live, he asked to commit twice inside EXECUTE, before anything had checked his edit. Now
+    EXECUTE is told not to commit; after passing checks the commit step asks him, his git_commit raises the user's
+    card (the guide's Part 2: "Approve and the trade runs; deny and the agent adapts"), and the No commits nothing."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    commit = Content.from_function_call(call_id="g1", name="git_commit", arguments={"message": "Fix x"})
+    client = ScriptedChatClient([plan, done, "Fixed x.", commit, "The commit was not approved, so nothing was committed."])
+    head = steward._git("rev-parse", "HEAD").stdout
+
+    async def _go() -> tuple[list[str], list[Any]]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda messages: (True, "1 passed"))
+                events = [e async for e in workflow.run("Fix x.", stream=True)]
+                answers, cards = [True, False], []  # Approve the plan, deny the commit
+                while pending := [e for e in events if e.type == "request_info"]:
+                    cards += [c.data.function_call.name for c in pending]
+                    reply = {c.request_id: c.data.to_function_approval_response(answers.pop(0)) for c in pending}
+                    events = [e async for e in workflow.run(stream=True, responses=reply)]
+                return cards, [e.data for e in events if e.type == "output"]
+
+    cards, outputs = asyncio.run(_go())
+    assert cards == [wf.APPROVE_PLAN, "git_commit"], "the commit asked on its own card, after the checks"
+    assert steward._git("rev-parse", "HEAD").stdout == head, "the denied commit did not run"
+    assert outputs == ["Fixed x.\n\nChecks passed:\n1 passed\n\nThe commit was not approved, so nothing was committed."], outputs
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
