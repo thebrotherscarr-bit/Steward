@@ -9,7 +9,7 @@ Pieces 1 to 4 of the build order:
     request -> plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
             -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
             -> (failed, attempts left) repair -> execute -> check ...
-            -> (passed on changed code) ask_commit -> commit (his git_commit, on the user's card) -> report
+            -> (passed on changed code) ask_commit ("Checks passed") -> commit (his git_commit, on the user's card)
             -> (nothing changed, or attempts spent) report
 
 * PLAN and EXECUTE are MAF AgentExecutors, so evaluate_workflow can score each step ("Ensure the workflow uses
@@ -107,7 +107,6 @@ COMMIT_NOW = (
     "that says what you changed. The user approves it before it runs. Then mark the todo complete and say whether it "
     "was committed."
 )
-_REPORT_KEY = "steward_checked_report"
 # Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
 PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
 _PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
@@ -342,8 +341,12 @@ class AskApproval(Executor):
     async def ask(self, plan: dict[str, Any], ctx: WorkflowContext[Any, Any]) -> None:
         call_id = f"{APPROVE_PLAN}-{uuid.uuid4().hex[:12]}"
         call = Content.from_function_call(call_id=call_id, name=APPROVE_PLAN, arguments=plan)
+        # The card's id is the request's id, as MAF's AgentExecutor raises its approvals (_agent_executor.py), so an
+        # answer through workflow.as_agent() (WorkflowAgent keys answers by the approval's id) finds this request.
         await ctx.request_info(
-            request_data=Content.from_function_approval_request(id=call_id, function_call=call), response_type=Content
+            request_data=Content.from_function_approval_request(id=call_id, function_call=call),
+            response_type=Content,
+            request_id=call_id,
         )
 
     @response_handler
@@ -393,18 +396,18 @@ def ready_for_report(report: Any) -> bool:
 
 
 class AskCommit(Executor):
-    """After passing checks, asks Steward to commit his work: his git_commit raises the user's card (MAF approvals).
+    """After passing checks, says so, then asks Steward to commit his work: his git_commit raises the user's card.
 
     The message carries one step as his approved plan, so approved_plan_turn puts the commit's own session in execute
-    mode with that step as its todo (a todo list at all times). The checked report waits in workflow state for REPORT.
+    mode with that step as its todo (a todo list at all times). His commit answer streams from COMMIT.
     """
 
     def __init__(self, id: str = "ask_commit") -> None:
         super().__init__(id=id)
 
     @handler
-    async def ask(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
-        ctx.set_state(_REPORT_KEY, {"attempt": report.attempt, "passed": report.passed, "output": report.output, "answer": report.answer})
+    async def ask(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest, Any]) -> None:
+        await ctx.yield_output(checks_text(report))
         text = COMMIT_NOW.format(output=report.output[-_OUTPUT_TAIL:])
         message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [COMMIT_TODO]})
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
@@ -426,32 +429,27 @@ class Repair(Executor):
 
 
 class Report(Executor):
-    """EXECUTE's answer is the run's output, with the checks' result when any ran."""
+    """The checks' result, when any ran and no commit follows. His answer itself has already streamed (EXECUTE is
+    intermediate output), so it is not said again."""
 
     def __init__(self, id: str = REPORT_STEP) -> None:
         super().__init__(id=id)
 
     @handler
     async def report(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
-        await ctx.yield_output(_report_text(report))
-
-    @handler
-    async def committed(self, response: AgentExecutorResponse, ctx: WorkflowContext[Any, Any]) -> None:
-        """After the commit step: the checked work, then his word on the commit."""
-        report = CheckReport(**ctx.get_state(_REPORT_KEY, {}))
-        await ctx.yield_output(f"{_report_text(report)}\n\n{_last_text(response)}")
+        if report.output:
+            await ctx.yield_output(checks_text(report))
 
 
-def _report_text(report: CheckReport) -> str:
-    if not report.output:
-        return report.answer
+def checks_text(report: CheckReport) -> str:
+    """The checks' result as the user reads it."""
     result = "passed" if report.passed else f"still fail after {report.attempt} attempts"
-    return f"{report.answer}\n\nChecks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
+    return f"Checks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
 
 
 def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_changes) -> Workflow:
     """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, then
-    ask_commit and commit when the checks passed on changed code, and report."""
+    ask_commit and commit when the checks passed on changed code, else report."""
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
     agent.middleware = [
@@ -468,10 +466,17 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
     ask_commit = AskCommit()
     commit = AgentExecutor(agent, id=COMMIT_STEP)
     report = Report()
-    # The run's output is the steps' own (a reply, a clarification, a refusal, the report); the agents' raw
-    # responses stay intermediate.
+    # The run's output is the steps' own (a reply, a clarification, a refusal, the report). EXECUTE's and COMMIT's work
+    # streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and the Responses
+    # host both forward it), so every host shows his work as it happens; PLAN's streamed text is the plan's raw JSON,
+    # which the card shows, so it stays hidden.
     return (
-        WorkflowBuilder(name=WORKFLOW_NAME, start_executor=plan, output_from=[read_plan, ask_approval, report])
+        WorkflowBuilder(
+            name=WORKFLOW_NAME,
+            start_executor=plan,
+            output_from=[read_plan, ask_approval, ask_commit, report],
+            intermediate_output_from=[execute, commit],
+        )
         .add_edge(plan, read_plan)
         .add_edge(read_plan, plan)  # an empty plan reply, asked again once
         .add_edge(read_plan, ask_approval)
@@ -481,21 +486,29 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
         .add_edge(check, report, condition=ready_for_report)
         .add_edge(check, ask_commit, condition=ready_to_commit)
         .add_edge(ask_commit, commit)
-        .add_edge(commit, report)
         .add_edge(repair, execute)
         .build()
     )
 
 
+async def build_steward(stack: AsyncExitStack, **build: Any) -> tuple[Agent[Any], Workflow]:
+    """Define once (the guide's Part 4: "The agent is defined once; only the host around it changes"): every host,
+    the Agent tab's service, the console and the evals, builds Steward and his workflow here."""
+    from agent import build_steward_agent  # noqa: PLC0415
+    from agent_framework import InMemoryHistoryProvider  # noqa: PLC0415
+
+    build.setdefault("history_provider", InMemoryHistoryProvider())
+    agent = await build_steward_agent(stack, **build)
+    return agent, build_steward_workflow(agent)
+
+
 async def main(request: str) -> None:
     """One request through the graph, streamed as the host runs it; prints the output or the approval card."""
     load_dotenv()
-    from agent import build_steward_agent  # noqa: PLC0415
-
     async with AsyncExitStack() as stack:
-        agent = await build_steward_agent(stack, enable_shell=False)
+        agent, workflow = await build_steward(stack, enable_shell=False)
         async with agent:
-            events = [e async for e in build_steward_workflow(agent).run(request, stream=True)]
+            events = [e async for e in workflow.run(request, stream=True)]
     for event in events:
         if event.type == "output":
             print(f"Output: {event.data}")

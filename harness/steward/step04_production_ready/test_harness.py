@@ -587,6 +587,18 @@ def test_the_walkthrough_denies_a_commit_card_and_nothing_is_committed() -> None
     assert result.passed, result.reason
 
 
+def said(events: list[Any]) -> list[str]:
+    """What the caller is shown, in order: each output, and each step's streamed text (intermediate output), as MAF's
+    WorkflowAgent and Responses host forward them."""
+    shown: list[str] = []
+    for event in events:
+        if event.type == "output":
+            shown.append(str(event.data))
+        elif event.type == "intermediate" and (getattr(event.data, "text", "") or "").strip():
+            shown.append(event.data.text)
+    return shown
+
+
 def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_steps_as_todos() -> None:
     """Pieces 1 and 2 of the workflow: PLAN asks for StewardPlan and the run pauses on an approve_plan card before
     anything runs. Approved, EXECUTE's own session goes to execute mode with the plan's steps as its todos (no
@@ -613,12 +625,12 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
                     seen: dict[str, Any] = {
                         "cards": [e.data.function_call.name for e in cards],
                         "calls_before_answer": len(client.calls),
-                        "outputs": [e.data for e in events if e.type == "output"],
+                        "outputs": said(events),
                     }
                     if cards and approve is not None:
                         answer = {cards[0].request_id: cards[0].data.to_function_approval_response(approve)}
                         events = [e async for e in workflow.run(stream=True, responses=answer)]
-                        seen["outputs"] = [e.data for e in events if e.type == "output"]
+                        seen["outputs"] = said(events)
                     execute = next(e for e in workflow.get_executors_list() if e.id == wf.EXECUTE_STEP)
                     session = execute._session  # noqa: SLF001 - the executor's own session, as MAF checkpoints it
                     seen["todos"] = [(i.title, i.is_complete) for i in await todos.store.load_items(session, source_id=todos.source_id)]
@@ -698,7 +710,7 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
                     events = [e async for e in workflow.run("Fix the discount bug.", stream=True)]
                     card = next(e for e in events if e.type == "request_info")
                     answer = {card.request_id: card.data.to_function_approval_response(True)}
-                    return [e.data for e in [e async for e in workflow.run(stream=True, responses=answer)] if e.type == "output"]
+                    return said([e async for e in workflow.run(stream=True, responses=answer)])
 
         return asyncio.run(_go()), client.calls, seen
 
@@ -712,13 +724,13 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
     # Passing on changed code: the commit step asks him to commit (his git_commit raises the card), then REPORT.
     assert "Commit your work now" in " ".join(m.text or "" for m in calls[4]["messages"]), "the commit came after the pass"
     assert len(calls) == 6, len(calls)
-    assert outputs == ["Fixed it.\n\nChecks passed:\n1 passed\n\nCommitted."], outputs
+    assert outputs == ["First try.", "Fixed it.", "Checks passed:\n1 passed", "Committed."], outputs
 
     failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
     outputs, calls, seen = run([plan, done, "a", "b", "c", "never"], failing)
     assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit; no commit asked"
     assert not any("Commit your work now" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
-    assert outputs == [f"c\n\nChecks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
+    assert outputs == ["a", "b", "c", f"Checks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
 
     def call(name: str, file_name: str) -> Message:
         return Message(role="assistant", contents=[Content.from_function_call(call_id=file_name, name=name, arguments={"file_name": file_name})])
@@ -788,17 +800,19 @@ def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> N
             async with agent:
                 workflow = wf.build_steward_workflow(agent, checks=lambda messages: (True, "1 passed"))
                 events = [e async for e in workflow.run("Fix x.", stream=True)]
+                shown = said(events)
                 answers, cards = [True, False], []  # Approve the plan, deny the commit
                 while pending := [e for e in events if e.type == "request_info"]:
                     cards += [c.data.function_call.name for c in pending]
                     reply = {c.request_id: c.data.to_function_approval_response(answers.pop(0)) for c in pending}
                     events = [e async for e in workflow.run(stream=True, responses=reply)]
-                return cards, [e.data for e in events if e.type == "output"]
+                    shown += said(events)
+                return cards, shown
 
     cards, outputs = asyncio.run(_go())
     assert cards == [wf.APPROVE_PLAN, "git_commit"], "the commit asked on its own card, after the checks"
     assert steward._git("rev-parse", "HEAD").stdout == head, "the denied commit did not run"
-    assert outputs == ["Fixed x.\n\nChecks passed:\n1 passed\n\nThe commit was not approved, so nothing was committed."], outputs
+    assert outputs == ["Fixed x.", "Checks passed:\n1 passed", "The commit was not approved, so nothing was committed."], outputs
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
@@ -821,7 +835,7 @@ def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo
                 while cards := [e for e in events if e.type == "request_info"]:
                     reply = {c.request_id: c.data.to_function_approval_response(answers.pop(0)) for c in cards}
                     events = [e async for e in workflow.run(stream=True, responses=reply)]
-                return [e.data for e in events if e.type == "output"]
+                return said(events)
 
     outputs = asyncio.run(_go())
     assert len(client.calls) == 3, "after the No he answered once and was not sent back to the open todo"
@@ -963,6 +977,38 @@ def test_the_trace_file_is_capped_and_keeps_the_newest_whole_spans() -> None:
         assert path.stat().st_size <= 4000, path.stat().st_size
         assert all(json.loads(line) for line in lines), "every line kept is a whole span"
         assert lines and lines[-1].find("span-59") >= 0, "the newest span is kept"
+
+
+def test_every_host_builds_the_same_steward_workflow() -> None:
+    """Define once (the guide's Part 4): the Agent tab's service and the evals build Steward and his workflow in one
+    place (steward_workflow.build_steward). The service's graph is the builder's graph (MAF's graph_signature_hash);
+    the evals drive that workflow as an agent (Learn, "Using Workflows as Agents"): the plan card is answered and
+    EXECUTE's work reaches them live (intermediate output). The guide's console runs the same harness agent the
+    workflow wraps (build_steward_agent), as the guide ships it: a workflow's cards resume from checkpoints, not a
+    console's session (MAF issue #5818)."""
+    import console_app
+    import evals
+    import hosted
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+
+    async def _go() -> tuple[str, str, Any]:
+        async with AsyncExitStack() as stack:
+            agent, workflow = await wf.build_steward(stack, client=ScriptedChatClient(), enable_shell=False)
+            async with agent:
+                built = workflow.graph_signature_hash
+        served = await hosted.steward_graph(None, lambda: ScriptedChatClient(), enable_shell=False)
+        _, response = await evals.run_steward("Fix x.", set(), client=ScriptedChatClient([plan, done, "Fixed x."]), enable_shell=False)
+        return built, served.graph_signature_hash, response
+
+    built, served, response = asyncio.run(_go())
+    assert served == built, "the Agent tab's service builds a different graph from the shared builder"
+    cards = [c.function_call.name for m in response.messages for c in m.contents if c.type == "function_approval_request"]
+    assert cards == [wf.APPROVE_PLAN], f"the evals did not meet the plan card: {cards}"
+    assert "Fixed x." in response.text, f"EXECUTE's work did not reach the evals: {response.text!r}"
+    assert console_app.build_steward_agent is steward.build_steward_agent, "the console builds Steward somewhere else"
 
 
 def test_door_calls_stay_on_stewards_world() -> None:

@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for th
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
+from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
 
 STEWARD_EVAL_QUERIES = [
     "Use get_repo_status and tell me which git branch the workspace is on.",
@@ -285,6 +286,20 @@ async def _run_queries(agent: Agent[Any], queries: list[str], *, mode: str | Non
     return responses
 
 
+async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any], AgentResponse[Any]]:
+    """One query through Steward's workflow, as the Agent tab's service runs it (define once: build_steward), driven
+    as an agent (Learn, "Using Workflows as Agents"), in a fresh build. The plan card and the tools in ``approve`` are
+    approved, every other card denied; EXECUTE's work is in the response (intermediate output)."""
+    async with AsyncExitStack() as stack:
+        agent, workflow = await build_steward(stack, **build)
+        async with agent:
+            steward = workflow.as_agent(name="Steward")
+            # No session, as MAF's own sample runs a workflow agent with cards (workflow_as_agent_human_in_the_loop.py):
+            # the workflow keeps its state, and a session would feed the run's history back in with each card answer.
+            response = await _run_answering_cards(steward, None, query, {APPROVE_PLAN, *approve})
+    return steward, response
+
+
 @contextmanager
 def discount_bug_planted() -> Any:
     """The discount bug, planted in the working copy for the run and put back after it, whatever happens.
@@ -311,37 +326,37 @@ async def main() -> None:
     """Run the local Steward evals."""
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
-    async with AsyncExitStack() as stack:
-        agent = await build_steward_agent(stack, enable_shell=False, auto_approve_skill_scripts=True)
-        async with agent:
-            local = LocalEvaluator(
-                repo_status_grounded,
-                codebase_map_names_files,
-                bug_diagnosis,
-                map_names_files,
-                test_share_counted,
-                research_covers_topics,
-                explorer_names_files,
-                tool_call_args_match,
-            )
-            with discount_bug_planted():
-                responses = await _run_queries(agent, STEWARD_EVAL_QUERIES, mode="execute")
-            results = await evaluate_agent(
-                agent=agent,
-                queries=STEWARD_EVAL_QUERIES,
-                responses=responses,
-                expected_tool_calls=STEWARD_EXPECTED_TOOL_CALLS,
-                evaluators=local,
-                # The question is the first user message and the answer every iteration after it: the loop's
-                # nudges are user messages, and the default (the last turn) scored a nudge and the last iteration.
-                conversation_split=ConversationSplit.FULL,
-            )
-            print(f"Local evals: {results[0].passed}/{results[0].total} passed")
-            for item in results[0].items:
-                print(f"  [{item.status}] {(item.input_text or '')[:70]}")
-                for score in item.scores:
-                    if score.passed is False:
-                        print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
+    local = LocalEvaluator(
+        repo_status_grounded,
+        codebase_map_names_files,
+        bug_diagnosis,
+        map_names_files,
+        test_share_counted,
+        research_covers_topics,
+        explorer_names_files,
+        tool_call_args_match,
+    )
+    responses: list[AgentResponse[Any]] = []
+    with discount_bug_planted():
+        for query in STEWARD_EVAL_QUERIES:
+            steward, response = await run_steward(query, set(), enable_shell=False, auto_approve_skill_scripts=True)
+            responses.append(response)
+    results = await evaluate_agent(
+        agent=steward,
+        queries=STEWARD_EVAL_QUERIES,
+        responses=responses,
+        expected_tool_calls=STEWARD_EXPECTED_TOOL_CALLS,
+        evaluators=local,
+        # The question is the first user message and the answer every step after it (the plan card's answer and
+        # EXECUTE's nudges are user messages; the default, the last turn, would score only the end).
+        conversation_split=ConversationSplit.FULL,
+    )
+    print(f"Local evals: {results[0].passed}/{results[0].total} passed")
+    for item in results[0].items:
+        print(f"  [{item.status}] {(item.input_text or '')[:70]}")
+        for score in item.scores:
+            if score.passed is False:
+                print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
 
 
 async def plan_main() -> None:
@@ -681,9 +696,8 @@ async def steps_main() -> None:
     module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
     approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES, "run_shell"}  # noqa: SLF001
     async with AsyncExitStack() as stack:
-        agent = await build_steward_agent(stack, auto_approve_skill_scripts=True)
+        agent, workflow = await wf.build_steward(stack, auto_approve_skill_scripts=True)
         async with agent:
-            workflow = wf.build_steward_workflow(agent)
             with discount_bug_planted():
                 events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
                 STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()

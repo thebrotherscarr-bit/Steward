@@ -205,18 +205,17 @@ async def steward_graph(request: HostedResponseRequest, client_factory: Callable
     between requests (each step's session, the pending approval) is in the workflow's checkpoint. The connections
     build_steward_agent opens (SecondBrain, the shell) are closed with the agent.
     """
-    from steward_workflow import build_steward_workflow  # noqa: PLC0415
+    from steward_workflow import build_steward  # noqa: PLC0415
 
     stack = AsyncExitStack()
     if client_factory is not None:  # a fresh chat client per request too (tests pass a scripted one)
         build["client"] = client_factory()
     try:
-        agent = await build_steward_agent(stack, history_provider=InMemoryHistoryProvider(), **build)
+        agent, workflow = await build_steward(stack, history_provider=InMemoryHistoryProvider(), **build)
     except BaseException:
         await stack.aclose()
         raise
     agent._async_exit_stack.push_async_callback(stack.aclose)  # noqa: SLF001 - the agent's close owns the stack
-    workflow = build_steward_workflow(agent)
     background_providers = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
     agent.middleware = [
         _release_background_per_request(background_providers),
