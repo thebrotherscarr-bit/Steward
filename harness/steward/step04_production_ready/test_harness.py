@@ -629,6 +629,14 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
     )
     approved = run([plan, done, "Done: the discount is fixed."], approve=True)
     assert approved["calls"][0]["options"].get("response_format") is wf.StewardPlan, "PLAN asks for the structured plan"
+    # Ollama's format enforces only the schema: a plan must carry a step (live 2026-11-01 sent "steps": [ ]).
+    assert wf.StewardPlan.model_json_schema()["properties"]["steps"].get("minItems") == 1, "a plan's steps can be empty"
+    assert wf.steward_plan_in('{"type": "approval", "questions": [{"message": "m"}], "steps": [ ]}') is None
+    # A clarification needs a question (live 2026-11-01 sent "questions": []), and reaches the user as text.
+    assert wf.StewardPlan.model_json_schema()["properties"]["questions"].get("minItems") == 1, "questions can be empty"
+    assert wf.steward_plan_in('{"type": "clarification", "questions": [], "steps": ["s"]}') is None
+    asked = wf.steward_plan_in('{"type": "clarification", "questions": [{"message": "Which file?", "choices": ["a.py", "b.py"]}], "steps": ["s"]}')
+    assert asked is not None and wf.clarification_text(asked) == "Which file? (a.py / b.py)"
     assert approved["cards"] == [wf.APPROVE_PLAN] and approved["calls_before_answer"] == 1, "paused before anything ran"
     assert approved["outputs"] == ["Done: the discount is fixed."], "approved: EXECUTE ran and REPORT gave its answer"
     assert approved["calls"][1]["options"].get("response_format") is None, "EXECUTE is not asked for a plan"
@@ -641,6 +649,13 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
 
     words = run(["Just words."], approve=None)
     assert words["outputs"] == ["Just words."] and words["cards"] == [], "no plan, no card"
+
+    # An empty plan reply (the model's answer left in its reasoning) is asked again once, then the plan goes on.
+    again = run(["", plan], approve=None)
+    assert again["cards"] == [wf.APPROVE_PLAN] and again["calls_before_answer"] == 2, "an empty reply was asked again"
+    assert wf.PLAN_AGAIN in " ".join(m.text or "" for m in again["calls"][1]["messages"])
+    empty = run(["", ""], approve=None)
+    assert len(empty["calls"]) == 2 and empty["cards"] == [], "asked again once, not in a loop"
 
 
 def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
@@ -688,7 +703,43 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
 
     written = [call("file_access_read", "a.py"), call("file_access_replace", "p/b.py"), call("file_access_write", "p/b.py"), call("file_access_write", "notes.md")]
     assert wf.written_python_files(written) == ["p/b.py"], "only code his write tools touched"
+
+    # A write that waited on a card comes back as the user's answer, the call riding on it (live 2026-11-01).
+    def answered(file_name: str, approved: bool) -> Message:
+        write = Content.from_function_call(call_id=file_name, name="file_access_replace", arguments={"file_name": file_name})
+        card = Content.from_function_approval_request(id=file_name, function_call=write)
+        return Message(role="user", contents=[card.to_function_approval_response(approved)])
+
+    assert wf.written_python_files([answered("p/c.py", True), answered("p/d.py", False)]) == ["p/c.py"], "approved writes only"
     assert wf.python_tests_for_writes([call("file_access_read", "a.py")]) is None, "nothing written, nothing run"
+
+
+def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
+    """Live run 2026-11-01: an unasked commit step was denied twelve times, because its open todo made MAF's
+    todos_remaining send him back each time. The user's No ends EXECUTE; the check and the report follow."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Edit and commit."}], "steps": ["Edit x.py", "Commit"]}'
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "x.py", "content": "x = 1"})
+    client = ScriptedChatClient([plan, write, "The write was denied, so I stopped.", "This must not run."])
+    checked: list[Any] = []
+
+    async def _go() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda messages: checked.append(messages))
+                events = [e async for e in workflow.run("Edit x.py and commit it.", stream=True)]
+                answers: list[bool] = [True, False]  # Approve the plan, deny the write
+                while cards := [e for e in events if e.type == "request_info"]:
+                    reply = {c.request_id: c.data.to_function_approval_response(answers.pop(0)) for c in cards}
+                    events = [e async for e in workflow.run(stream=True, responses=reply)]
+                return [e.data for e in events if e.type == "output"]
+
+    outputs = asyncio.run(_go())
+    assert len(client.calls) == 3, "after the No he answered once and was not sent back to the open todo"
+    assert outputs == ["The write was denied, so I stopped."], outputs
+    assert len(checked) == 1 and not (steward._WORKING_DIR / "x.py").exists(), "checked once; nothing written"
 
 
 def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(monkeypatch: Any) -> None:
@@ -731,6 +782,42 @@ def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(mo
     # The host's tool-only identity never reaches the model call: Ollama's chat() refuses an unknown keyword.
     assert not any("additional_function_arguments" in c["kwargs"] for c in calls), "the host's identity reached the model"
     state.cleanup()
+
+
+def test_an_approved_shell_command_runs_through_the_hosted_workflow(monkeypatch: Any) -> None:
+    """Live run 2026-11-01: an approved run_shell failed the whole hosted run, because the workflow deep-copies each
+    streamed update and MAF's shell text could not be copied (agent._shell_text_copies)."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    plan = '{"type": "approval", "questions": [{"message": "Echo."}], "steps": ["Echo hi"]}'
+    shell = Content.from_function_call(call_id="s1", name="run_shell", arguments={"command": "echo hi"})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "echoed"}]})
+    replies: list[Any] = [plan, shell, done, "Echoed."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    names: list[str] = []
+    with TestClient(hosted.steward_server(client_factory=fresh_client)) as http:
+        turn = http.post("/responses", json={"input": "Echo hi.", "store": True}).json()
+        while cards := [o for o in turn["output"] if o["type"] == "mcp_approval_request"]:
+            names += [c["name"] for c in cards]
+            answers = [{"type": "mcp_approval_response", "approval_request_id": c["id"], "approve": True} for c in cards]
+            turn = http.post("/responses", json={"previous_response_id": turn["id"], "store": True, "input": answers}).json()
+    state.cleanup()
+    assert names == ["approve_plan", "run_shell"], names
+    assert turn["status"] == "completed", turn.get("error")
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["Echoed."], texts
+    assert "hi" in " ".join(str(m.text or "") + str([c.result for c in m.contents if c.type == "function_result"]) for m in calls[2]["messages"])
 
 
 def test_door_calls_stay_on_stewards_world() -> None:

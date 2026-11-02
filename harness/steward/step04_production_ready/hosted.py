@@ -277,6 +277,9 @@ def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any
         checkpoint_store_provider=CheckpointStoreProvider(allowed_checkpoint_types=[
             "steward_workflow:StewardPlan",
             "steward_workflow:CheckReport",
+            # An approved run_shell's result (agent._shell_text_copies: the text is rebuilt from its ShellResult).
+            "agent_framework_tools.shell._types:_ShellResultText",
+            "agent_framework_tools.shell._types:ShellResult",
             "console.observers.planning_models:PlanningResponseType",
             "console.observers.planning_models:PlanningQuestion",
         ]),
