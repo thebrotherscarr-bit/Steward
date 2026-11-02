@@ -102,6 +102,9 @@ NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to c
 # The commit comes after the checks pass (the cookbook's improvement loop: "the system proposes the change set and a
 # developer approves the diff before merge"); he commits his own work, on the user's card (the guide's Part 2).
 COMMIT_TODO = "Commit the checked work with git_commit"
+# A repair's one step: the message carries it as his plan, so approved_plan_turn puts EXECUTE back in execute mode with
+# it as the todo (live 2026-11-02: his finished todos had returned him to plan mode, and each repair came back a plan).
+REPAIR_TODO = "Fix the failing checks"
 COMMIT_NOW = (
     "The checks passed:\n{output}\n\nCommit your work now: call git_commit once, with a clear, imperative message "
     "that says what you changed. The user approves it before it runs. Then mark the todo complete and say whether it "
@@ -414,7 +417,11 @@ class AskCommit(Executor):
 
 
 class Repair(Executor):
-    """Sends the failing checks back to EXECUTE, in its own session (still execute mode)."""
+    """Sends the failing checks back to EXECUTE, in its own session, in execute mode with the fix as its todo.
+
+    When EXECUTE's todos were all done, ReturnToPlanWhenDone put his session back in plan mode, so the repair message
+    carries its one step as an approved plan, as the plan's Approve and the commit do (approved_plan_turn: the
+    application changes the mode, Learn "Planning and todos")."""
 
     def __init__(self, id: str = REPAIR_STEP) -> None:
         super().__init__(id=id)
@@ -425,7 +432,8 @@ class Repair(Executor):
             f"The checks failed after attempt {report.attempt} of {MAX_ATTEMPTS}. Fix the cause, then stop and say "
             f"what you changed.\n\nCheck output:\n{report.output}"
         )
-        await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(text)])]))
+        message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [REPAIR_TODO]})
+        await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
 
 class Report(Executor):
