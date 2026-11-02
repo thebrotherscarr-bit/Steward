@@ -4,10 +4,12 @@ MAF's builder skill (references/harness-agent-builder.md): "Use a workflow inste
 routing, checkpointed stages, or intermediate outputs define correctness." Plan, approve, execute, check and report
 are such stages, so their order is the graph's, not the model's choice.
 
-Pieces 1 to 3 of the build order:
+Pieces 1 to 4 of the build order:
 
     request -> plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
-            -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> report
+            -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
+            -> (failed, attempts left) repair -> execute -> check ...
+            -> (passed, or attempts spent) report
 
 * PLAN and EXECUTE are MAF AgentExecutors, so evaluate_workflow can score each step ("Ensure the workflow uses
   AgentExecutor-based agents", agent_framework/_evaluation.py). Each keeps its own session, which MAF saves in
@@ -22,6 +24,11 @@ Pieces 1 to 3 of the build order:
   (agent middleware) puts EXECUTE's own session in execute mode and writes the plan's steps as its todos, so he
   never has to remember todos_add and the todos live where MAF checkpoints them. MAF's todo loop keeps him going
   until they are done; every write still asks on its own card.
+* CHECK is model-free, as the improvement loop's (improvement_loop_workflow.py, after MAF's edge_condition.py):
+  the Python files EXECUTE wrote (MAF's own write tools, FileAccessProvider._WRITE_TOOL_NAMES) have the tests in
+  their folders run. Failing with attempts left, REPAIR hands EXECUTE the output; passing, or after MAX_ATTEMPTS,
+  REPORT gives his answer with the checks' result. Nothing written, nothing run. The attempt count is workflow
+  state, so it is in the checkpoint across a write card's pause.
 * Hosting (MAF native, Kyle's choice 2026-11-01): ResponsesHostServer(workflow=factory) builds a fresh graph and a
   fresh Steward for every request ("Native workflow requests cannot share workflows, executors, agents, clients,
   or providers", _workflow_source.py), so the factory is in hosted.py.
@@ -33,10 +40,12 @@ Run one request through it on Ollama (PLAN only reads; it stops at the approval)
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +58,7 @@ from agent_framework import (
     AgentModeProvider,
     Content,
     Executor,
+    FileAccessProvider,
     Message,
     TodoItem,
     TodoProvider,
@@ -74,7 +84,13 @@ PLAN_STEP = "plan"
 READ_PLAN_STEP = "read_plan"
 ASK_APPROVAL_STEP = "ask_approval"
 EXECUTE_STEP = "execute"
+CHECK_STEP = "check"
+REPAIR_STEP = "repair"
 REPORT_STEP = "report"
+# EXECUTE's attempts at a plan before REPORT says the checks still fail (the improvement loop's MAX_ATTEMPTS).
+MAX_ATTEMPTS = 3
+_ATTEMPT_KEY = "steward_check_attempt"
+_OUTPUT_TAIL = 1500
 # The approval card's name: what the user is approving is the plan, carried in its arguments.
 APPROVE_PLAN = "approve_plan"
 # The approved plan's steps, on the message that asks EXECUTE to carry it out (read by approved_plan_turn).
@@ -152,6 +168,52 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
     return approved_plan_turn_
 
 
+@dataclass
+class CheckReport:
+    """One attempt's checks: output is empty when nothing was there to check."""
+
+    attempt: int
+    passed: bool
+    output: str
+    answer: str
+
+
+# A check: given EXECUTE's messages, (passed, output), or None when there is nothing to check.
+Checks = Callable[[Sequence[Message]], "tuple[bool, str] | None"]
+
+
+def written_python_files(messages: Sequence[Message]) -> list[str]:
+    """The .py files EXECUTE's calls to MAF's file-writing tools named, in order, once each."""
+    files: list[str] = []
+    for message in messages:
+        for content in message.contents or []:
+            if content.type == "function_call" and content.name in FileAccessProvider._WRITE_TOOL_NAMES:  # noqa: SLF001
+                name = str((content.parse_arguments() or {}).get("file_name") or "")
+                if name.endswith(".py") and name not in files:
+                    files.append(name)
+    return files
+
+
+def python_tests_for_writes(messages: Sequence[Message]) -> tuple[bool, str] | None:
+    """The tests in each written file's folder (pytest; "no tests collected" passes). None when no code was written."""
+    from agent import _WORKING_DIR  # noqa: PLC0415 - the folder his file tools write in
+
+    files = written_python_files(messages)
+    if not files:
+        return None
+    targets = sorted({str(Path(f).parent) if str(Path(f).parent) != "." else f for f in files})
+    outputs: list[str] = []
+    passed = True
+    for target in targets:
+        command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target]
+        done = subprocess.run(
+            command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
+        )
+        outputs.append(f"$ pytest -q {target}\n(exit {done.returncode})\n{(done.stdout + done.stderr)[-_OUTPUT_TAIL:]}")
+        passed = passed and done.returncode in (0, 5)  # 5: no tests collected
+    return passed, "\n\n".join(outputs)
+
+
 class ReadPlan(Executor):
     """Reads PLAN's reply in code: an approval goes on for the user's approval; anything else ends the run as it is."""
 
@@ -193,23 +255,69 @@ class AskApproval(Executor):
             await ctx.yield_output(NOT_APPROVED)
             return
         plan = original_request.function_call.parse_arguments() or {}
+        ctx.set_state(_ATTEMPT_KEY, 0)
         message = execute_message(str(plan.get("request", "")), str(plan.get("plan", "")), list(plan.get("steps") or []))
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
 
+class Check(Executor):
+    """Runs the checks on what EXECUTE did (model-free) and reports the attempt."""
+
+    def __init__(self, checks: Checks, id: str = CHECK_STEP) -> None:
+        super().__init__(id=id)
+        self._checks = checks
+
+    @handler
+    async def check(self, response: AgentExecutorResponse, ctx: WorkflowContext[CheckReport]) -> None:
+        attempt = int(ctx.get_state(_ATTEMPT_KEY, 0) or 0) + 1
+        ctx.set_state(_ATTEMPT_KEY, attempt)
+        result = await asyncio.to_thread(self._checks, list(response.full_conversation or response.agent_response.messages))
+        passed, output = result if result is not None else (True, "")
+        await ctx.send_message(CheckReport(attempt, passed, output, _last_text(response)))
+
+
+def needs_repair(report: Any) -> bool:
+    """Edge condition: the checks failed and attempts are left."""
+    return isinstance(report, CheckReport) and not report.passed and report.attempt < MAX_ATTEMPTS
+
+
+def ready_for_report(report: Any) -> bool:
+    """Edge condition: the checks passed, or the attempts are spent."""
+    return isinstance(report, CheckReport) and (report.passed or report.attempt >= MAX_ATTEMPTS)
+
+
+class Repair(Executor):
+    """Sends the failing checks back to EXECUTE, in its own session (still execute mode)."""
+
+    def __init__(self, id: str = REPAIR_STEP) -> None:
+        super().__init__(id=id)
+
+    @handler
+    async def repair(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
+        text = (
+            f"The checks failed after attempt {report.attempt} of {MAX_ATTEMPTS}. Fix the cause, then stop and say "
+            f"what you changed.\n\nCheck output:\n{report.output}"
+        )
+        await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(text)])]))
+
+
 class Report(Executor):
-    """EXECUTE's answer is the run's output."""
+    """EXECUTE's answer is the run's output, with the checks' result when any ran."""
 
     def __init__(self, id: str = REPORT_STEP) -> None:
         super().__init__(id=id)
 
     @handler
-    async def report(self, response: AgentExecutorResponse, ctx: WorkflowContext[Any, Any]) -> None:
-        await ctx.yield_output(_last_text(response))
+    async def report(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
+        if not report.output:
+            await ctx.yield_output(report.answer)
+            return
+        result = "passed" if report.passed else f"still fail after {report.attempt} attempts"
+        await ctx.yield_output(f"{report.answer}\n\nChecks {result}:\n{report.output[-_OUTPUT_TAIL:]}")
 
 
-def build_steward_workflow(agent: Agent[Any]) -> Workflow:
-    """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, report."""
+def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_writes) -> Workflow:
+    """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, report."""
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
     agent.middleware = [
@@ -221,6 +329,8 @@ def build_steward_workflow(agent: Agent[Any]) -> Workflow:
     read_plan = ReadPlan()
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, id=EXECUTE_STEP)
+    check = Check(checks)
+    repair = Repair()
     report = Report()
     # The run's output is the steps' own (a reply, a clarification, a refusal, the report); the agents' raw
     # responses stay intermediate.
@@ -229,7 +339,10 @@ def build_steward_workflow(agent: Agent[Any]) -> Workflow:
         .add_edge(plan, read_plan)
         .add_edge(read_plan, ask_approval)
         .add_edge(ask_approval, execute)
-        .add_edge(execute, report)
+        .add_edge(execute, check)
+        .add_edge(check, repair, condition=needs_repair)
+        .add_edge(check, report, condition=ready_for_report)
+        .add_edge(repair, execute)
         .build()
     )
 

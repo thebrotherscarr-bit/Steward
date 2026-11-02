@@ -272,9 +272,11 @@ def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any
         parse_response=steward_turn,
         prepare_options=steward_options,
         response_store=FileResponseStore(_STORAGE_DIR),
-        # The plan's structured output is in the checkpoint (PLAN's response); MAF's decoder admits named types only.
+        # The plan's structured output (PLAN's response) and a check's report (CHECK -> REPAIR | REPORT) are in the
+        # checkpoint; MAF's decoder admits named types only.
         checkpoint_store_provider=CheckpointStoreProvider(allowed_checkpoint_types=[
             "steward_workflow:StewardPlan",
+            "steward_workflow:CheckReport",
             "console.observers.planning_models:PlanningResponseType",
             "console.observers.planning_models:PlanningQuestion",
         ]),

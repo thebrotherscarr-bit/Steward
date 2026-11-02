@@ -499,7 +499,8 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     write = Content.from_function_call(call_id="x2", name="execute_code", arguments={"code": (
         "open('harness/test_harness_codeact_probe.txt', 'w').write('x')")})
     client, _, _ = run_steward([count, write, "ok"], "Count the lines.", mode="execute")
-    assert function_results(client.calls[1])[0].strip() == "20", "an exact count, read from the file"
+    lines = len((steward._WORKING_DIR / "harness/steward/working/sample-project/inventory.py").read_text(encoding="utf-8").splitlines())
+    assert function_results(client.calls[1])[0].strip() == str(lines), "an exact count, read from the file"
     assert not (steward._WORKING_DIR / "harness" / "test_harness_codeact_probe.txt").exists(), "and nothing written"
     asked = [hint for pattern, hint, _ in steward.REQUEST_HINTS if pattern.search("Report the pass count and every failing line.")]
     assert asked == []
@@ -640,6 +641,54 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
 
     words = run(["Just words."], approve=None)
     assert words["outputs"] == ["Just words."] and words["cards"] == [], "no plan, no card"
+
+
+def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
+    """Piece 4: CHECK runs after EXECUTE, model-free. Failing with attempts left, REPAIR hands EXECUTE the output in
+    its own session; passing, REPORT gives his answer with the result; after MAX_ATTEMPTS, REPORT says they still
+    fail. The default check finds the .py files his calls to MAF's write tools named."""
+    import steward_workflow as wf
+    from agent_framework import Message
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+
+    def run(replies: list[Any], results: list[tuple[bool, str]]) -> tuple[list[Any], list[Any], list[int]]:
+        client = ScriptedChatClient(replies)
+        seen: list[int] = []
+
+        def checks(messages: Any) -> tuple[bool, str]:
+            seen.append(len(messages))
+            return results.pop(0)
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent, checks=checks)
+                    events = [e async for e in workflow.run("Fix the discount bug.", stream=True)]
+                    card = next(e for e in events if e.type == "request_info")
+                    answer = {card.request_id: card.data.to_function_approval_response(True)}
+                    return [e.data for e in [e async for e in workflow.run(stream=True, responses=answer)] if e.type == "output"]
+
+        return asyncio.run(_go()), client.calls, seen
+
+    outputs, calls, seen = run([plan, done, "First try.", "Fixed it."], [(False, "1 failed: test_discount"), (True, "1 passed")])
+    assert len(seen) == 2 and len(calls) == 4, "checked after each attempt; repaired once"
+    assert "1 failed: test_discount" in " ".join(m.text or "" for m in calls[3]["messages"]), "EXECUTE was given the failure"
+    assert outputs == ["Fixed it.\n\nChecks passed:\n1 passed"], outputs
+
+    failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
+    outputs, calls, seen = run([plan, done, "a", "b", "c", "never"], failing)
+    assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 2 + wf.MAX_ATTEMPTS, "stopped at the attempt limit"
+    assert outputs == [f"c\n\nChecks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
+
+    def call(name: str, file_name: str) -> Message:
+        return Message(role="assistant", contents=[Content.from_function_call(call_id=file_name, name=name, arguments={"file_name": file_name})])
+
+    written = [call("file_access_read", "a.py"), call("file_access_replace", "p/b.py"), call("file_access_write", "p/b.py"), call("file_access_write", "notes.md")]
+    assert wf.written_python_files(written) == ["p/b.py"], "only code his write tools touched"
+    assert wf.python_tests_for_writes([call("file_access_read", "a.py")]) is None, "nothing written, nothing run"
 
 
 def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(monkeypatch: Any) -> None:
