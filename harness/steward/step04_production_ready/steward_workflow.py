@@ -75,7 +75,7 @@ from pydantic import Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from console.observers.planning_models import PlanningResponse, PlanningResponseType  # noqa: E402
+from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import planning_response_in, plan_mode_turns  # noqa: E402
 
 # A fixed name: the host checks a reply's rebuilt graph against the stored one by name and signature.
@@ -96,19 +96,38 @@ APPROVE_PLAN = "approve_plan"
 # The approved plan's steps, on the message that asks EXECUTE to carry it out (read by approved_plan_turn).
 APPROVED_PLAN_KEY = "steward_approved_plan"
 NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to change and I will plan again."
+# Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
+PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
+_PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
 
 
 class StewardPlan(PlanningResponse):
     """The guide's PlanningResponse with the plan's steps, which become his todo list."""
 
-    # Required, so it is in the schema's "required" list: Ollama's structured output (format = this schema) lets the
-    # model leave out a field that is not, and a plan without steps has nothing to approve or run.
+    # Required and at least one ("required", "minItems": 1 in the schema): Ollama's structured output (format = this
+    # schema) enforces only what the schema says, and a model left free sent no steps, or "[ ]" (live, 2026-11-01);
+    # a plan without steps has nothing to approve or run.
     steps: list[str] = Field(
+        min_length=1,
         description=(
-            "For approvals: the plan's steps in order, one short imperative line each (e.g. 'Read inventory.py', "
-            "'Fix the discount line'). They become your todo list. Empty for clarifications."
+            "The plan's steps in order, one short imperative line each (e.g. 'Read inventory.py', 'Fix the discount "
+            "line'). They become your todo list. For a clarification, the first step you will take once answered."
         ),
     )
+    # The guide's own description says one or more (exactly one for an approval), but its schema left the list free,
+    # and live 2026-11-01 a "clarification" came with no questions and its answer stuffed into steps.
+    questions: list[PlanningQuestion] = Field(
+        min_length=1, description=PlanningResponse.model_fields["questions"].description
+    )
+
+
+def clarification_text(plan: StewardPlan) -> str:
+    """His questions as the user reads them (the run ends on them; the answer is the next request)."""
+    lines = []
+    for question in plan.questions:
+        choices = f" ({' / '.join(question.choices)})" if question.choices else ""
+        lines.append(f"{question.message}{choices}")
+    return "\n\n".join(lines)
 
 
 def steward_plan_in(text: str) -> StewardPlan | None:
@@ -183,14 +202,26 @@ Checks = Callable[[Sequence[Message]], "tuple[bool, str] | None"]
 
 
 def written_python_files(messages: Sequence[Message]) -> list[str]:
-    """The .py files EXECUTE's calls to MAF's file-writing tools named, in order, once each."""
+    """The .py files EXECUTE's calls to MAF's file-writing tools named, in order, once each.
+
+    A write that waited on the user's card is not in the response as a call: after the pause, the AgentExecutor's
+    response starts from the user's answer (_agent_executor.py), and the call it approves rides on that answer
+    (function_approval_response.function_call). So approved answers count, and denied ones do not.
+    """
     files: list[str] = []
     for message in messages:
         for content in message.contents or []:
-            if content.type == "function_call" and content.name in FileAccessProvider._WRITE_TOOL_NAMES:  # noqa: SLF001
-                name = str((content.parse_arguments() or {}).get("file_name") or "")
-                if name.endswith(".py") and name not in files:
-                    files.append(name)
+            if content.type == "function_call":
+                call = content
+            elif content.type == "function_approval_response" and content.approved:
+                call = content.function_call
+            else:
+                continue
+            if call is None or call.name not in FileAccessProvider._WRITE_TOOL_NAMES:  # noqa: SLF001
+                continue
+            name = str((call.parse_arguments() or {}).get("file_name") or "")
+            if name.endswith(".py") and name not in files:
+                files.append(name)
     return files
 
 
@@ -215,21 +246,33 @@ def python_tests_for_writes(messages: Sequence[Message]) -> tuple[bool, str] | N
 
 
 class ReadPlan(Executor):
-    """Reads PLAN's reply in code: an approval goes on for the user's approval; anything else ends the run as it is."""
+    """Reads PLAN's reply in code: an approval goes on for the user's approval; anything else ends the run as it is.
+
+    An empty reply (live 2026-11-01: the model's whole answer stayed in its reasoning) is sent back to PLAN once for
+    the plan, as the cookbook's "Validate JSON ... in code" has a bad reply asked again; a reply in words is not.
+    """
 
     def __init__(self, id: str = READ_PLAN_STEP) -> None:
         super().__init__(id=id)
 
     @handler
-    async def read(self, response: AgentExecutorResponse, ctx: WorkflowContext[dict[str, Any], Any]) -> None:
+    async def read(
+        self, response: AgentExecutorResponse, ctx: WorkflowContext[dict[str, Any] | AgentExecutorRequest, Any]
+    ) -> None:
         last = _last_text(response)
+        if not last.strip() and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
+            ctx.set_state(_PLAN_ASKED_AGAIN_KEY, True)
+            await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(PLAN_AGAIN)])]), target_id=PLAN_STEP)
+            return
+        ctx.set_state(_PLAN_ASKED_AGAIN_KEY, False)
         plan = steward_plan_in(last)
         if plan is None:
             await ctx.yield_output(last)
         elif plan.type != PlanningResponseType.APPROVAL:
-            await ctx.yield_output(plan.model_dump_json())
+            await ctx.yield_output(clarification_text(plan))
         else:
-            await ctx.send_message({"request": _first_user_text(response), "plan": plan.questions[0].message, "steps": plan.steps})
+            plan_data = {"request": _first_user_text(response), "plan": plan.questions[0].message, "steps": plan.steps}
+            await ctx.send_message(plan_data, target_id=ASK_APPROVAL_STEP)
 
 
 class AskApproval(Executor):
@@ -337,6 +380,7 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
     return (
         WorkflowBuilder(name=WORKFLOW_NAME, start_executor=plan, output_from=[read_plan, ask_approval, report])
         .add_edge(plan, read_plan)
+        .add_edge(read_plan, plan)  # an empty plan reply, asked again once
         .add_edge(read_plan, ask_approval)
         .add_edge(ask_approval, execute)
         .add_edge(execute, check)

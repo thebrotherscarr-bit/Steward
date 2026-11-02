@@ -866,6 +866,20 @@ PLAN_TODOS_NUDGE = (
 REQUIRED_TOOLS_NUDGE = "Before you finish: this request needs a tool you have not used yet. Do this now, then finish:"
 
 
+def denied_by_user(messages: Any) -> bool:
+    """Whether a run's input carried the user's No on a card (MAF's loop passes that input as messages=).
+
+    Live run 2026-11-01: a plan step he was denied (an unasked commit) stayed an open todo, so MAF's todos_remaining
+    sent him back to it, card after card, until the run was stopped. The user's No ends the run; what is left is
+    reported, not retried.
+    """
+    return any(
+        c.type == "function_approval_response" and not c.approved
+        for m in messages or []
+        for c in getattr(m, "contents", None) or []
+    )
+
+
 def plan_reply_loop(
     mode_provider: AgentModeProvider, plan_reply_check: Callable[[str], Any] | None, todo_provider: TodoProvider | None = None
 ) -> tuple[Callable[..., Awaitable[Any]], Callable[..., Awaitable[str | None]]]:
@@ -929,6 +943,8 @@ def plan_reply_loop(
         return True
 
     async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
+        if denied_by_user(kwargs.get("messages")):
+            return False
         if missing := await plan_missing(session, last_result, iteration):
             return (True, missing)
         if await todo_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
@@ -954,11 +970,26 @@ def plan_reply_loop(
 
 
 # <shell>
+def _shell_text_copies() -> None:
+    """MAF's shell text (_ShellResultText, agent-framework-tools 1.0.0b261022) is a str built from its ShellResult,
+    with no __reduce__, so copy and pickle rebuild it from the plain text and fail ("'str' object has no attribute
+    'format_for_model'"). A workflow deep-copies every streamed update (WorkflowContext.yield_output), so an approved
+    run_shell inside Steward's workflow failed the whole run (live, 2026-11-01). Rebuilt from its ShellResult, as its
+    own __new__ takes it; nothing else about the tool changes."""
+    from agent_framework_tools.shell._types import _ShellResultText  # noqa: PLC0415
+
+    _ShellResultText.__reduce__ = lambda self: (_ShellResultText, (self.shell_result,))  # type: ignore[method-assign]
+
+
+_shell_text_copies()
+
+
 def _build_shell() -> LocalShellTool:
     """Build a shell confined to the workspace; every command is surfaced for approval."""
     return LocalShellTool(
-        # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override
-        shell=[r"C:\Program Files\Git\bin\bash.exe"],
+        # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override. Elsewhere (the gate's
+        # Linux runner) MAF's own default, which resolves to /bin/bash (agent_framework_tools/shell/_resolve.py).
+        shell=[r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else None,
         mode="persistent",
         workdir=str(_WORKING_DIR),
         confine_workdir=True,
