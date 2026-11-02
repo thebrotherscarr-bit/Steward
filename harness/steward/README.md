@@ -91,7 +91,7 @@ SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF work
 `ResponsesHostServer(workflow=...)`, a fresh Steward per request:
 
 ```
-request -> plan -> approve_plan card -> execute -> check -> report
+request -> plan -> approve_plan card -> execute -> check -> commit (git_commit card) -> report
                                            ^          |
                                            +- repair -+   (tests failed; at most 3 attempts)
 ```
@@ -105,6 +105,9 @@ request -> plan -> approve_plan card -> execute -> check -> report
    differs from the committed state are run (pytest), whichever tool or card wrote it, so the
    workspace starts each run at the committed state. Failing, the output goes back to him;
    passing, the report says "Checks passed".
+5. **Commit:** only after passing checks on changed code. He is asked to commit his work, and his
+   `git_commit` comes to you on its own card. Execute is told not to commit; failing work never
+   reaches this step.
 
 The host keeps its state in `worlds/steward/.as` (gitignored).
 
