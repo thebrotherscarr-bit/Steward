@@ -17,8 +17,8 @@ Environment variables:
 Run:
     python harness/steward/step04_production_ready/mcp_app.py
 
-Then point an MCP client at http://127.0.0.1:8000/mcp, for example Manjuel's mcp_call with
-MANJUEL_MCP_STEWARD=http://127.0.0.1:8000/mcp in its .env.
+Then point an MCP client at http://127.0.0.1:43121/mcp, for example Manjuel's mcp_call with
+MANJUEL_MCP_STEWARD=http://127.0.0.1:43121/mcp in its .env.
 """
 
 from __future__ import annotations
@@ -48,7 +48,9 @@ from agent import build_steward_agent  # noqa: E402
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 HOST = "127.0.0.1"
-PORT = 8000  # MAF's MCP hosting samples' port
+# Beside his service (43120) and SecondBrain's MCP (43110), Kyle's word 2026-11-02; it was MAF's samples' 8000,
+# which ComfyUI also takes
+PORT = 43121
 
 
 def build_mcp_app(agent: Any) -> Starlette:
