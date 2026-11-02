@@ -987,8 +987,9 @@ _shell_text_copies()
 def _build_shell() -> LocalShellTool:
     """Build a shell confined to the workspace; every command is surfaced for approval."""
     return LocalShellTool(
-        # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override
-        shell=[r"C:\Program Files\Git\bin\bash.exe"],
+        # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override. Elsewhere (the gate's
+        # Linux runner) MAF's own default, which resolves to /bin/bash (agent_framework_tools/shell/_resolve.py).
+        shell=[r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else None,
         mode="persistent",
         workdir=str(_WORKING_DIR),
         confine_workdir=True,
