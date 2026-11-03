@@ -30,8 +30,10 @@ was never merged and has no entry.
 ### Changed
 
 - The Ollama server's settings on this PC (Windows user environment, not the repo), recorded in
-  `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 1,
-  `OLLAMA_NUM_PARALLEL` 3 to 1. The build plan from the 2026-11-02 deep dive is in the README's "Where it stands".
+  `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 2 (the
+  chat model and the embedder), `OLLAMA_NUM_PARALLEL` 3 to 1. Ollama updated from 0.35.0 to 0.40.13; the embedding
+  model is now `embeddinggemma-2:270m`, run on the CPU, and `nomic-embed-text-v2-moe` was removed. The build plan from
+  the 2026-11-02 deep dive is in the README's "Where it stands".
 
 ### Findings
 
