@@ -1066,6 +1066,20 @@ def _build_shell() -> LocalShellTool:
 # </shell>
 
 
+# <tool_call_limits>
+# Step 4, 4.3: MAF's FunctionInvocationConfiguration (agent_framework._tools), per pass of his loop. Calls run one
+# at a time in the model's order (his writes and cards stay in order); a failing tool's error text goes back to
+# the model, a local channel; and a pass stops calling tools after 40 calls or 30 minutes and answers in text.
+# Earned 2026-11-03: round 1's fixer called todos_complete for a finished todo every 18 seconds for 13 minutes.
+TOOL_CALLS: dict[str, Any] = {
+    "allow_concurrent_invocation": False,
+    "include_detailed_errors": True,
+    "max_function_calls": 40,
+    "max_duration_seconds": 1800.0,
+}
+# </tool_call_limits>
+
+
 # <tool_call_retry>
 _TOOL_CALL_RETRIES = 2
 
@@ -1491,6 +1505,8 @@ async def build_steward_agent(
             # Gate run 3 (2026-11-01): a todos_add call Ollama could not parse ("error parsing tool call") ended
             # the whole run. The retry written for that gpt-oss fault was only on the old path; Parts 3 and 4 get it.
             part3_client = _retry_malformed_tool_calls(part3_client)
+        # Step 4, 4.3: MAF's own tool-call settings on the one client he, his team and the fixer use.
+        part3_client.function_invocation_configuration.update(TOOL_CALLS)
         explorer_agent = Agent(
             client=part3_client,
             name="CodeExplorer",
