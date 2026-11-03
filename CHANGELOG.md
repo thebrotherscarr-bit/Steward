@@ -34,6 +34,10 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6, piece 6.1: the improvement loop's fixer. `improvement_loop_workflow.py`'s writer is now Steward's own
+  harness on the coder model (`build_fixer`: `STEWARD_CODER_MODEL`, default `devstral-small-2:24b`, the
+  operator's choice), with the same file tools and write cards and a 32K window (`FIXER_CONTEXT`).
+  `build_steward_agent` takes `default_options` for it. `test_the_improvement_loops_fixer_is_stewards_harness_on_the_coder_model`.
 - Step 4, evals as small single asks: `python evals.py small` runs three asks (a new function, the discount fix with the
   bug planted, a README line) once each through the workflow as the Agent tab runs it, the plan and the writes
   approved and the commit denied, and scores them with seven MAF `@evaluator` checks, one per failure seen live on

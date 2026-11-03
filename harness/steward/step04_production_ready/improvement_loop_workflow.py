@@ -16,6 +16,9 @@ task) and runs it to a decision. It is MAF's checkpoint_with_human_in_the_loop.p
   file the attempt changed or created, leaving files that were already changed before it as they were.
 * Every superstep is checkpointed to improvement_loop/checkpoints, so a run paused on a review can be
   resumed later from its checkpoint, as in the sample.
+* The writer is the fixer (step 6, 6.1): Steward's own harness on the coder model (STEWARD_CODER_MODEL,
+  devstral-small-2:24b), the cookbook's coding agent in the loop's repair role, with the same file tools and
+  the same write cards (define once), and a 32K window so a whole harness file fits.
 
 Run from worlds/steward:
     .venv\\Scripts\\python harness\\steward\\step04_production_ready\\improvement_loop_workflow.py "<task>"
@@ -62,6 +65,25 @@ GATE_CHECKS: tuple[tuple[str, ...], ...] = (
     (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "harness/steward/step04_production_ready/test_harness.py"),
 )
 MAX_ATTEMPTS = 3
+# The fixer's window: agent.py alone is about 20K tokens and the fixer must see a whole file (the operator's 32K,
+# 2026-11-02); Ollama's server default of 65,536 would spill devstral-small-2:24b (15 GB) out of the 16 GB card.
+FIXER_CONTEXT = 32_768
+
+
+def fixer_client() -> Any:
+    """The coder model's chat client, with Steward's own governance and malformed-tool-call retry."""
+    from agent_framework_ollama import OllamaChatClient  # noqa: PLC0415
+
+    return steward._retry_malformed_tool_calls(  # noqa: SLF001
+        OllamaChatClient(model=steward._CODER_MODEL, middleware=steward._build_governance_middleware())  # noqa: SLF001
+    )
+
+
+async def build_fixer(stack: AsyncExitStack, client: Any = None, **build: Any) -> Any:
+    """The loop's fixer: Steward's harness (build_steward_agent) on the coder model, with a 32K window."""
+    return await steward.build_steward_agent(
+        stack, client=client or fixer_client(), default_options={"num_ctx": FIXER_CONTEXT}, **build
+    )
 _OUTPUT_TAIL = 3000
 
 
@@ -320,7 +342,7 @@ async def main() -> None:
         raise SystemExit(__doc__)
     storage = FileCheckpointStorage(storage_path=CHECKPOINT_DIR)
     async with AsyncExitStack() as stack:
-        agent = await stack.enter_async_context(await steward.build_steward_agent(stack))
+        agent = await stack.enter_async_context(await build_fixer(stack))
         workflow = create_workflow(agent, storage)
         if resume:
             result = await run_loop(workflow, checkpoint_id=sys.argv[2])

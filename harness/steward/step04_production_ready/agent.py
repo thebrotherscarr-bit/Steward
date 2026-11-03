@@ -14,14 +14,14 @@ Changes from the guide for local Ollama:
 Steward's team (each a background agent on its own local model):
     * Steward (orchestrator) — OLLAMA_MODEL, e.g. gpt-oss:20b: talks to the user, plans, uses tools.
     * CodeExplorer — the orchestrator's model: explores modules read-only.
-    * Coder        — STEWARD_CODER_MODEL (qwen3-coder:30b): returns exact code edits to apply.
+    * Coder        — STEWARD_CODER_MODEL (devstral-small-2:24b): the improvement loop's fixer (step 6).
     * Reasoner     — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
     * Explainer    — STEWARD_CONVERSATION_MODEL (gemma4:26b): explanations, docs and summaries.
 
 Environment variables:
     OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
     OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
-    STEWARD_CODER_MODEL        — coder model (defaults to qwen3-coder:30b)
+    STEWARD_CODER_MODEL        — coder model (defaults to devstral-small-2:24b, the operator's choice 2026-11-02)
     STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
     STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:26b)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
@@ -105,7 +105,7 @@ _SKILLS_DIR = _STEWARD_DIR / "skills"
 # Kyle, 2026-10-29: gemma4:26b replaces gemma4:12b (better reviewed; measured 60 tok/s vs 52 here).
 # qwen3-coder:30b stays: devstral-small-2:24b, the reviews' 16 GB pick, measured 13 tok/s at an 8k
 # context against qwen3-coder's 41, because its dense weights never fit the card.
-_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "qwen3-coder:30b")
+_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "devstral-small-2:24b")
 _REASONER_MODEL = os.environ.get("STEWARD_REASONER_MODEL", "deepseek-r1:14b")
 _CONVERSATION_MODEL = os.environ.get("STEWARD_CONVERSATION_MODEL", "gemma4:26b")
 # The context Ollama loads each model with (num_ctx, a chat option). Ollama's own default here is
@@ -1396,6 +1396,7 @@ async def build_steward_agent(
     auto_approve_skill_scripts: bool = False,
     part: int = 4,
     plan_reply_check: Callable[[str], Any] | None = None,
+    default_options: dict[str, Any] | None = None,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -1413,6 +1414,8 @@ async def build_steward_agent(
         plan_reply_check: For a host that asks for the guide's PlanningResponse in plan mode (hosted.py's
             plan_mode_turns): reads a reply's plan, or returns None. When a plan-mode reply holds no
             plan, the harness loop asks for it again, at most twice (see plan_reply_loop).
+        default_options: Chat options sent with every model call (MAF's create_harness_agent default_options),
+            such as Ollama's num_ctx for the window the model is loaded with.
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -1617,6 +1620,7 @@ async def build_steward_agent(
             loop_should_continue=loop_should_continue,
             loop_next_message=loop_next_message,
             loop_max_iterations=10,
+            default_options=default_options,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
