@@ -1235,3 +1235,20 @@ def test_an_eval_run_never_touches_stewards_real_memory() -> None:
     finally:
         real.unlink(missing_ok=True)
         real.with_name("eval-leak-check_description.md").unlink(missing_ok=True)
+
+
+def test_his_shell_runs_his_own_python() -> None:
+    """Live 2026-11-02: he ran `python .../evals.py` in his shell, and the system Python had no agent_framework. His
+    shell starts with his own Python first, so `python` is the interpreter he runs on, with MAF installed."""
+
+    async def _go() -> Any:
+        shell = steward._build_shell()
+        await shell.start()
+        try:
+            return await shell.run('python -c "import agent_framework, sys; print(sys.prefix)"')
+        finally:
+            await shell.close()
+
+    result = asyncio.run(_go())
+    assert result.exit_code == 0, f"python in his shell cannot import agent_framework: {result.stderr[-300:]}"
+    assert Path(result.stdout.strip()).resolve() == Path(sys.prefix).resolve(), result.stdout

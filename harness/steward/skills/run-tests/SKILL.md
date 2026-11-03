@@ -5,6 +5,8 @@ description: Run a project's tests in the workspace with pytest and report the a
 
 ## Usage
 
+This skill has no script: run the tests with the run_shell tool, as below.
+
 1. Find the tests: the folder the user named, or the folder of the code in question. Test files are named
    `test_*.py`; list them with the file_access tools first.
 2. Run them once with the run_shell tool, from the workspace root:

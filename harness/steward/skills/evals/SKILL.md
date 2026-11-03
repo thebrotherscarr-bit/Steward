@@ -23,8 +23,10 @@ When the user asks you to run your evals:
    (leave `<set>` out for the regression set). It takes several minutes; wait for it to finish.
 3. Report the pass count line and every line printed under each case, exactly as printed. Do not summarise
    the failures away or explain them before you have reported them.
-4. Run a set once per request. Never run it again to get a better result: a result that changes between runs
-   is a fault in the harness to look into, not a reason to retry.
+4. Run a set once per request. As soon as the run has finished, mark its todo complete, then report. If you are
+   reminded of an open todo whose run has already finished, mark it complete; never run the set again for it.
+   Never run it again to get a better result either: a result that changes between runs is a fault in the
+   harness to look into, not a reason to retry.
 5. Do not change any file during or after the run. The evals plant and remove their own test bug, answer their
    own cards, and put the sample project back when they finish. If a card from SecondBrain's door appears
    during the run (a commit through the door), tell the user to deny it.
