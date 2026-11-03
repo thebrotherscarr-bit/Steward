@@ -45,7 +45,7 @@ import sys
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
 
 from agent_framework import (
@@ -1429,6 +1429,7 @@ async def build_steward_agent(
     part: int = 4,
     plan_reply_check: Callable[[str], Any] | None = None,
     default_options: dict[str, Any] | None = None,
+    extra_tools: Sequence[Any] = (),
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -1448,6 +1449,7 @@ async def build_steward_agent(
             plan, the harness loop asks for it again, at most twice (see plan_reply_loop).
         default_options: Chat options sent with every model call (MAF's create_harness_agent default_options),
             such as Ollama's num_ctx for the window the model is loaded with.
+        extra_tools: Tools a caller adds to his own (the improvement loop's hand_to_coder, step 6).
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -1547,7 +1549,7 @@ async def build_steward_agent(
         part4 = part == 4
         # A copy per build: MAF's native workflow host builds Steward for every request and refuses a tool object
         # shared between requests (agent_framework_foundry_hosting WorkflowResolver), and git_commit is module-level.
-        part3_tools: list[Any] = [*tools, copy.copy(git_commit)]
+        part3_tools: list[Any] = [*tools, copy.copy(git_commit), *extra_tools]
         # ADR-0001 items 5 and 6: Atlas's door. SecondBrain serves the door's tools on the same MCP
         # client Steward already holds (its share key, as a client: reads run, writes park as holds for
         # the operator), and the door carries his repository as the world `steward`. So the door is one

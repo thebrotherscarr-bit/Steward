@@ -34,6 +34,19 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6: the split fixer (the operator, 2026-11-03: "the fixer doesn't need some big huge model"), Aider's architect
+  and editor in MAF's pieces. Steward diagnoses on his own model (gpt-oss reads long prompts fast) and hands each edit
+  to the coder with his new `hand_to_coder` tool: a file, at most 80 lines, and the change in words. A new `HandToCoder`
+  step checks each edit (a file in the workspace, real lines, a short span; a bad one goes back to Steward with the
+  reason) and gives the coder only the change and those lines, numbered. The coder (`build_coder`) is a small MAF
+  `Agent` on `qwen2.5-coder:14b` with only MAF's file tools (reads at once, every write on its card), his tool-call
+  limits and a 16K window. Failing checks and the review's guidance go back to Steward, not the coder. The coder is a
+  workflow step, not `Agent.as_tool()`, because MAF does not carry a child agent's approvals to its caller. Round 1's
+  fixer, his whole harness on the coder model, opened at 13,466 tokens before reading any code. `build_steward_agent`
+  takes `extra_tools`; the improve skill says how to hand edits over.
+  `test_improvement_loop_workflow_diagnoses_hands_edits_repairs_reviews_and_resumes`,
+  `test_a_bad_edit_goes_back_to_steward_with_the_reason`,
+  `test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model`.
 - Step 4, piece 4.2: Ollama options on every agent, defined once as `agent.OLLAMA_OPTIONS`
   (`{"num_ctx": 65536, "keep_alive": "30m"}`, MAF's `OllamaChatOptions`): Steward, CodeExplorer and WebResearchAgent
   send their own window and keep-alive with every call, so the window no longer rests on the Ollama server's default

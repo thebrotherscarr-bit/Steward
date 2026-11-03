@@ -1111,8 +1111,10 @@ def test_mcp_hosting_serves_steward_as_one_tool() -> None:
     assert any("Hello" in m.text for m in client.calls[1]["messages"]), "the second call continues the first's session"
 
 
-def test_improvement_loop_workflow_repairs_reviews_and_resumes(tmp_path: Path) -> None:
-    """ADR-0001 item 12: approvals cross the workflow, failing checks go back to Steward, the review resumes from a checkpoint."""
+def test_improvement_loop_workflow_diagnoses_hands_edits_repairs_reviews_and_resumes(tmp_path: Path) -> None:
+    """ADR-0001 item 12 and the split fixer (2026-11-03): Steward diagnoses and hands each edit to the coder with
+    hand_to_coder; the coder gets only the change and its lines, and its write asks a card; failing checks go back to
+    Steward; the review resumes from a checkpoint."""
     from agent_framework import FileCheckpointStorage
 
     import improvement_loop_workflow as loop
@@ -1124,30 +1126,60 @@ def test_improvement_loop_workflow_repairs_reviews_and_resumes(tmp_path: Path) -
         f"import pathlib, sys; p = pathlib.Path(r'{runs}'); n = int(p.read_text()) if p.exists() else 0; "
         "p.write_text(str(n + 1)); sys.exit(0 if n else 1)",
     )
-    commit = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": "x"})
-    client = ScriptedChatClient([commit, "Attempt one.", "Attempt two."])
+    handed = Content.from_function_call(
+        call_id="h1", name="hand_to_coder",
+        arguments={"file": "README.md", "start_line": 1, "end_line": 2, "change": "Name the harness in the title."},
+    )
+    again = Content.from_function_call(
+        call_id="h2", name="hand_to_coder",
+        arguments={"file": "README.md", "start_line": 1, "end_line": 1, "change": "Shorter title."},
+    )
+    replace = Content.from_function_call(
+        call_id="r1", name="file_access_replace", arguments={"file_name": "README.md", "old_string": "x", "new_string": "y"}
+    )
+    diagnoser = ScriptedChatClient([handed, "Handed one edit.", again, "Handed the fix."])
+    coder_client = ScriptedChatClient([replace, "Edit one.", "Edit two."])
     storage = FileCheckpointStorage(storage_path=tmp_path / "checkpoints")
 
     async def _go() -> Any:
         async with AsyncExitStack() as stack:
-            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
-            workflow = loop.create_workflow(agent, storage, checks=[check])
+            agent = await steward.build_steward_agent(stack, client=diagnoser, enable_shell=False, extra_tools=[loop.hand_to_coder])
+            coder = loop.build_coder(coder_client)
+            workflow = loop.create_workflow(agent, coder, storage, checks=[check])
             events = await workflow.run("Make a change.")
             [approval] = events.get_request_info_events()
-            assert approval.data.function_call.name == "git_commit", "Steward's own approval reaches Kyle"
+            assert approval.data.function_call.name == "file_access_replace", "the coder's write reaches Kyle as a card"
             events = await workflow.run(responses={approval.request_id: approval.data.to_function_approval_response(False)})
             [review] = events.get_request_info_events()
-            assert (review.data.attempt, review.data.passed, review.data.summary) == (2, True, "Attempt two.")
+            assert (review.data.attempt, review.data.passed, review.data.summary) == (2, True, "Edit two.")
             # A new run of the same graph resumes from the last checkpoint and re-asks the pending review.
             latest = max(await storage.list_checkpoints(workflow_name=workflow.name), key=lambda c: c.timestamp)
-            resumed = loop.create_workflow(agent, storage, checks=[check])
-            [again] = (await resumed.run(checkpoint_id=latest.checkpoint_id)).get_request_info_events()
-            return (await resumed.run(responses={again.request_id: "keep"})).get_outputs()
+            resumed = loop.create_workflow(agent, coder, storage, checks=[check])
+            [again_review] = (await resumed.run(checkpoint_id=latest.checkpoint_id)).get_request_info_events()
+            return (await resumed.run(responses={again_review.request_id: "keep"})).get_outputs()
 
     [result] = asyncio.run(_go())
     assert (result.decision, result.passed, result.attempts) == ("keep", True, 2)
-    assert len(client.calls) == 3, "the rejected commit, then one attempt per check run"
-    assert runs.read_text() == "2", "the checks ran after each attempt"
+    assert runs.read_text() == "2", "the checks ran after each edit"
+    first = " ".join(m.text or "" for m in coder_client.calls[0]["messages"])
+    assert "CHANGE: Name the harness in the title." in first and "README.md, lines 1-2" in first
+    assert "    1  " in first, "the coder sees the lines as they are now, numbered"
+    assert len(first) < 4000, f"the coder's prompt is the brief and its lines, not the harness ({len(first)} chars)"
+    assert "Steward" not in str(coder_client.calls[0]["options"].get("instructions") or ""), "not Steward's harness"
+    repair = " ".join(m.text or "" for m in diagnoser.calls[2]["messages"])
+    assert "checks failed" in repair and "hand_to_coder" in repair, "the failing checks go back to Steward, not the coder"
+
+
+def test_a_bad_edit_goes_back_to_steward_with_the_reason() -> None:
+    """The split fixer's gate: an edit outside the workspace, past the file's end or longer than EDIT_SPAN_MAX lines is
+    not handed to the coder; Steward gets the reason."""
+    import improvement_loop_workflow as loop
+
+    assert loop.edit_problem(loop.Edit("README.md", 1, 2, "x")) is None
+    assert "not a file" in loop.edit_problem(loop.Edit("../outside.md", 1, 1, "x"))
+    assert "lines" in loop.edit_problem(loop.Edit("README.md", 1, 100_000, "x"))
+    assert "split it" in loop.edit_problem(loop.Edit("harness/steward/step04_production_ready/agent.py", 1, 200, "x"))
+    assert "no change" in loop.edit_problem(loop.Edit("README.md", 1, 1, " "))
 
 
 def test_the_small_asks_check_each_of_todays_failures() -> None:
@@ -1265,21 +1297,30 @@ def test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done
     assert not any(steward.REQUIRED_TOOLS_NUDGE in str(m.text) for m in client.calls[0]["messages"])
 
 
-def test_the_improvement_loops_fixer_is_stewards_harness_on_the_coder_model() -> None:
-    """Step 6, 6.1: the loop's writer is Steward's own harness (same file tools and write cards) on the coder model,
-    asking Ollama for a 32K window so a whole harness file fits."""
+def test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model() -> None:
+    """Step 6 (2026-11-03): Steward diagnoses on his own harness with hand_to_coder beside his tools; the coder is a
+    small MAF Agent on the coder model with only MAF's file tools (writes ask), his tool-call limits and a 16K window."""
+    from agent_framework import FileAccessProvider
+
     import improvement_loop_workflow as loop
 
     assert loop.fixer_client().model == steward._CODER_MODEL
     assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+    client = ScriptedChatClient([])
+    coder = loop.build_coder(client)
+    assert coder.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 16_384
+    assert coder.default_options.get("keep_alive") == steward.OLLAMA_OPTIONS["keep_alive"]
+    [files] = [p for p in coder.context_providers if isinstance(p, FileAccessProvider)]
+    assert len(coder.context_providers) == 1, "only the file tools: no harness, skills, memory or Charter"
+    assert {k: client.function_invocation_configuration[k] for k in steward.TOOL_CALLS} == steward.TOOL_CALLS
 
     async def _go() -> Any:
         async with AsyncExitStack() as stack:
-            return await loop.build_fixer(stack, client=ScriptedChatClient(["ok"]), enable_shell=False)
+            return await loop.build_diagnoser(stack, client=ScriptedChatClient(["ok"]), enable_shell=False)
 
-    fixer = asyncio.run(_go())
-    assert fixer.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 32_768
-    assert any(type(p).__name__ == "FileAccessProvider" for p in fixer.context_providers), "the same file tools"
+    diagnoser = asyncio.run(_go())
+    names = {getattr(t, "name", "") for t in diagnoser.default_options.get("tools", [])}
+    assert "hand_to_coder" in names and "git_commit" in names, "his own tools, and the hand-off"
 
 
 def test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop(tmp_path: Path) -> None:
@@ -1380,7 +1421,7 @@ def test_a_round_that_names_nothing_takes_the_diagnosis_first_priority(tmp_path:
     async def _go() -> Any:
         async with AsyncExitStack() as stack:
             agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
-            workflow = loop.create_workflow(agent, None, checks=[[sys.executable, "-c", "print('ok')"]])
+            workflow = loop.create_workflow(agent, loop.build_coder(ScriptedChatClient([])), None, checks=[[sys.executable, "-c", "print('ok')"]])
             return (await workflow.run("improve:")).get_request_info_events()
 
     [review] = asyncio.run(_go())
@@ -1433,7 +1474,7 @@ def test_steward_and_his_team_send_their_own_ollama_window_and_keep_alive() -> N
             agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
             [team] = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
             await agent.run("Say hello.", session=agent.create_session())
-            fixer = await loop.build_fixer(stack, client=ScriptedChatClient([]), enable_shell=False)
+            fixer = loop.build_coder(ScriptedChatClient([]))
             return team, fixer
 
     team, fixer = asyncio.run(_go())
