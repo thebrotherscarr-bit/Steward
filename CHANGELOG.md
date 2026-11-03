@@ -15,6 +15,13 @@ was never merged and has no entry.
 
 ### Fixed
 
+- His shell starts with his own virtual environment active (`_own_python_env`: `VIRTUAL_ENV` and his
+  `Scripts` folder first on `PATH`), so `python`, `pip` and `pytest` are the Python he runs on. Live 2026-11-02 he ran
+  `python .../evals.py` and the system Python had no `agent_framework`. `test_his_shell_runs_his_own_python`.
+- He runs an eval set once: the `evals` skill now says to mark its todo complete as soon as the run finishes, and
+  never to run the set again when reminded of that todo. Live 2026-11-02 the todo loop's reminder sent him back and
+  he ran the whole set a second time, reporting only the second run. The `run-tests` skill now says it has no
+  script (he had called `run_skill_script` for a `run_tests.py` that does not exist).
 - Eval runs no longer share Steward's real memory. `run_steward` (the small asks and the regression set) and the
   `steps` set give each run a throwaway `FileSystemAgentFileStore` under `storage/`, removed when the run ends, as
   the walkthrough set already did. Live 2026-11-02: eval runs had saved their plans into

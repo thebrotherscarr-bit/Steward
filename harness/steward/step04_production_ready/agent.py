@@ -1013,9 +1013,22 @@ def _shell_text_copies() -> None:
 _shell_text_copies()
 
 
+def _own_python_env() -> dict[str, str] | None:
+    """His shell's environment with his own virtual environment active, as any developer's terminal for this repo
+    is: `python`, `pip` and `pytest` resolve to the Python Steward runs on (sys.prefix), not the system one (live
+    2026-11-02: he ran `python .../evals.py` and the system Python had no agent_framework). MAF's LocalShellTool
+    merges `env` over the inherited environment and starts the shell with it. None when he runs outside a venv.
+    """
+    if sys.prefix == sys.base_prefix:
+        return None
+    scripts = Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin")
+    return {"VIRTUAL_ENV": sys.prefix, "PATH": str(scripts) + os.pathsep + os.environ.get("PATH", "")}
+
+
 def _build_shell() -> LocalShellTool:
-    """Build a shell confined to the workspace; every command is surfaced for approval."""
+    """Build a shell confined to the workspace, with his own Python first; every command is surfaced for approval."""
     return LocalShellTool(
+        env=_own_python_env(),
         # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override. Elsewhere (the gate's
         # Linux runner) MAF's own default, which resolves to /bin/bash (agent_framework_tools/shell/_resolve.py).
         shell=[r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else None,
