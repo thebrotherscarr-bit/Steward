@@ -12,7 +12,9 @@ kept only if the tests pass and the eval checks do not drop below the baseline, 
 1. **Name the failure.** The task names it (for example "the plan comes back as prose"). Find the check that
    catches it in `harness/steward/step04_production_ready/evals.py` (the small-ask checks: `plan_is_approval`,
    `check_covers_writes`, `edit_keeps_file_whole`, `commit_by_tool`, `commit_message_specific`,
-   `no_nudge_in_reply`, `answer_on_topic`) and read what it requires.
+   `no_nudge_in_reply`, `answer_on_topic`) and read what it requires. When the task is the diagnosis's first top
+   priority (the handoff follows it in full), that priority is the one change; its evidence in the handoff names
+   the failure, and your test in step 4 is what proves it.
 2. **Find the cause in the harness, not the model.** Look where the behaviour is shaped:
    `steward_workflow.py` (the graph: `ReadPlan`, `AskCommit`, `Report`, the messages each step sends),
    `agent.py` (instructions, `REQUEST_HINTS`, the loop's nudges, tools and approvals) and `skills/`. Read the

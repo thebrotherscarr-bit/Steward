@@ -1343,3 +1343,48 @@ def test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_co
     assert "keep" in json.dumps(second["output"]), second["output"]
     assert hosted.steward_options(None, {"metadata": {"steward_workflow": "improve"}}) == {}, "the key never reaches the model"
     state.cleanup()
+
+
+def test_a_round_that_names_nothing_takes_the_diagnosis_first_priority(tmp_path: Path, monkeypatch: Any) -> None:
+    """Step 6, 6.4: the cookbook's handoff feeds the loop. A round with no task ("improve:" alone) hands the fixer the
+    handoff's first top priority, from each shape HALO writes; a named failure is used as named; no handoff stops it."""
+    import json
+
+    import improvement_loop as diagnosis
+    import improvement_loop_workflow as loop
+    import pytest
+
+    def handoff(priorities: Any) -> str:
+        block = json.dumps({"top_priorities": priorities})
+        return f"## Executive summary\nok\n\n## Machine-readable summary\n```json\n{block}\n```\n"
+
+    assert diagnosis.handoff_priorities(handoff(["Fix the plan", "Second"])) == ["Fix the plan", "Second"]
+    assert diagnosis.handoff_priorities(handoff([{"id": "A", "description": "Fix the plan"}])) == ["Fix the plan"]
+    assert diagnosis.handoff_priorities(handoff([{"recommendation": "Fix the plan"}])) == ["Fix the plan"]
+    escaped = tmp_path / "escaped.md"
+    escaped.write_text(json.dumps(handoff(["Fix the plan"]))[1:] + "}", encoding="utf-8")
+    assert diagnosis.handoff_priorities(diagnosis.read_handoff(escaped)) == ["Fix the plan"], "a JSON-escaped handoff"
+    with pytest.raises(ValueError):
+        diagnosis.handoff_priorities(handoff([]))
+
+    path = tmp_path / "handoff.md"
+    monkeypatch.setattr(diagnosis, "HANDOFF_PATH", path)
+    with pytest.raises(FileNotFoundError):
+        loop.round_task("improve:")
+    path.write_text(handoff([{"description": "Make the plan an approval card"}, "Second"]), encoding="utf-8")
+    assert loop.round_task("improve: the plan comes back as prose") == "the plan comes back as prose"
+
+    monkeypatch.setattr(loop, "_changed_paths", lambda: (set(), set()))
+    client = ScriptedChatClient(["Done."])
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            workflow = loop.create_workflow(agent, None, checks=[[sys.executable, "-c", "print('ok')"]])
+            return (await workflow.run("improve:")).get_request_info_events()
+
+    [review] = asyncio.run(_go())
+    sent = " ".join(m.text for m in client.calls[0]["messages"])
+    assert "TASK: Make the plan an approval card" in sent, "the fixer got the handoff's first priority"
+    assert "Second" in sent, "with the whole handoff as its evidence"
+    assert review.data.passed is True
