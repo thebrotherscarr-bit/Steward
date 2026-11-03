@@ -34,6 +34,12 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 4, piece 4.2: Ollama options on every agent, defined once as `agent.OLLAMA_OPTIONS`
+  (`{"num_ctx": 65536, "keep_alive": "30m"}`, MAF's `OllamaChatOptions`): Steward, CodeExplorer and WebResearchAgent
+  send their own window and keep-alive with every call, so the window no longer rests on the Ollama server's default
+  (set to 32K for a while on 2026-11-03, under his 64K compaction budget). His compaction budget is now the same
+  constant (`_STEWARD_CONTEXT`); a caller's options win, so the fixer keeps its 32K window.
+  `test_steward_and_his_team_send_their_own_ollama_window_and_keep_alive`.
 - Step 4, piece 4.3: MAF's tool-call settings (`FunctionInvocationConfiguration`) on the one client Steward, his
   team and the fixer use, defined once as `agent.TOOL_CALLS`: calls run one at a time in the model's order, a failing
   tool's error text goes back to the model, and a pass of his loop stops calling tools after 40 calls or 30 minutes

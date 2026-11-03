@@ -1066,6 +1066,14 @@ def _build_shell() -> LocalShellTool:
 # </shell>
 
 
+# <ollama_options>
+# Step 4, 4.2: the Ollama options sent with every model call by Steward and his team (MAF's OllamaChatOptions):
+# his own window, so it never depends on the server's default (2026-11-03: the app's context setting was set to 32K
+# for a while, under a 64K compaction budget), and the model kept loaded between turns.
+OLLAMA_OPTIONS: dict[str, Any] = {"num_ctx": _STEWARD_CONTEXT, "keep_alive": "30m"}
+# </ollama_options>
+
+
 # <tool_call_limits>
 # Step 4, 4.3: MAF's FunctionInvocationConfiguration (agent_framework._tools), per pass of his loop. Calls run one
 # at a time in the model's order (his writes and cards stay in order); a failing tool's error text goes back to
@@ -1402,6 +1410,7 @@ def _build_web_research_agent(client: OllamaChatClient, web_tools: MCPStreamable
             "relevant news and documentation, then return a short, factual summary (3-4 bullet points) "
             "with no preamble."
         ),
+        default_options=OLLAMA_OPTIONS,
     )
 
 
@@ -1518,6 +1527,7 @@ async def build_steward_agent(
                 "looks wrong. Return a short, factual summary (4-6 bullet points) naming files and functions, "
                 "with no preamble. Only report what you read."
             ),
+            default_options=OLLAMA_OPTIONS,
         )
         background_agents: list[Any] = [explorer_agent]
         skill_sources: list[Any] = [FileSkillsSource(str(_SKILLS_DIR), script_runner=subprocess_script_runner)]
@@ -1634,7 +1644,8 @@ async def build_steward_agent(
             middleware=[steward_world_only, *gate_middleware, repair_tool_names, record_called_tools],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
-            max_context_window_tokens=65_536,
+            # The compaction budget is the window he asks Ollama for (OLLAMA_OPTIONS), so the two cannot drift.
+            max_context_window_tokens=_STEWARD_CONTEXT,
             max_output_tokens=8_192,
             disable_web_search=True,
             # ADR-0001 item 3, as MAF's harness_research.py sample: in execute mode the harness
@@ -1643,7 +1654,8 @@ async def build_steward_agent(
             loop_should_continue=loop_should_continue,
             loop_next_message=loop_next_message,
             loop_max_iterations=10,
-            default_options=default_options,
+            # Step 4, 4.2: his Ollama options; a caller's own (the fixer's 32K window) win.
+            default_options={**OLLAMA_OPTIONS, **(default_options or {})},
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
