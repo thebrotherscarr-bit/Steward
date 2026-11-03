@@ -130,7 +130,8 @@ when asked.
 
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
-- You have skills for code-review and codebase-map. When a request matches a skill, load it and
+- You have skills for code-review, codebase-map and evals (running your own evals). When a request
+  matches a skill, load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - You lead a team of background agents, each on its own model. Delegate to them, then apply and
   verify their output yourself. Start a task once, wait for it, then read its result with
@@ -247,7 +248,8 @@ when asked.
 
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
-- You have skills for code-review and codebase-map. When a request matches a skill, load it and
+- You have skills for code-review, codebase-map and evals (running your own evals). When a request
+  matches a skill, load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - When asked to understand a large codebase or several modules, delegate each module to the
   background CodeExplorer agent so they are explored concurrently, then combine the findings.
@@ -632,6 +634,12 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         "len(open(path).read().splitlines()), and never paste file text into the code. A project's lines are its "
         "code files' lines, not its README or other docs, unless the request says otherwise.",
         ("execute_code",),
+    ),
+    (
+        re.compile(_word("evals?|eval sets?|small asks"), re.I),
+        'This request matches your evals skill: call load_skill("evals") first and follow it, running the set once '
+        "with run_shell and reporting every line as printed.",
+        ("load_skill", "run_shell"),
     ),
 )
 # Regression run 9: in the Agent tab the work runs on the user's Approve turn, which matches no pattern, so a hint

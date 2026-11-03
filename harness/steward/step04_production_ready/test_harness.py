@@ -45,7 +45,7 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map")
+SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals")
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
@@ -429,6 +429,7 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
     assert "WebResearchAgent" in hints_for("Research Ollama and mem0 and summarize the latest news.")
     assert "execute_code" in hints_for("What percentage of the lines are tests?")
     assert "CodeExplorer" in hints_for("Explore it with the CodeExplorer agent.")
+    assert 'load_skill("evals")' in hints_for("Run your small asks evals.")
     assert hints_for("Hello, how are you?") == "", "nothing is added when nothing matches"
     assert hints_for("Fix the import in C:/Users/novad/Desktop/Research/worlds/x.py.") == "", "a word inside a path never counts"
 

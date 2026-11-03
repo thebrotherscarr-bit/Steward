@@ -22,6 +22,10 @@ was never merged and has no entry.
   instead of `git_commit` (or the door's `atlas_git_commit`), a vague commit message, the loop's nudge in a reply, and
   an off-topic answer. The sample project is reset after every ask. `test_the_small_asks_check_each_of_todays_failures`
   proves each check fails on its failure and passes on the right run.
+- The `evals` skill (`harness/steward/skills/evals/SKILL.md`): Steward runs his own eval sets on request ("run
+  your evals", "run the small asks"), once, with `run_shell`, and reports every line as printed. His instructions
+  name it, and a request that names evals gets the one-line hint to load it (`REQUEST_HINTS`). A skill script
+  is not used: MAF's script runner stops a script after 30 seconds, and an eval set runs for minutes.
 
 ### Findings
 
