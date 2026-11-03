@@ -240,12 +240,14 @@ def wants_improvement(request: Any) -> bool:
 
 
 async def _improvement_loop(stack: AsyncExitStack, **build: Any) -> tuple[Any, Any]:
-    """The improvement loop on MAF's host: the coder fixer (build_fixer) in the loop's graph, the host's own
-    checkpoints, and the gate's checks read at call time."""
+    """The improvement loop on MAF's host: Steward diagnosing (build_diagnoser) and the small coder (build_coder) in
+    the loop's graph, the host's own checkpoints, and the gate's checks read at call time."""
     import improvement_loop_workflow as loop  # noqa: PLC0415
 
-    agent = await loop.build_fixer(stack, history_provider=InMemoryHistoryProvider(), **build)
-    return agent, loop.create_workflow(agent, None, checks=loop.GATE_CHECKS)
+    agent = await loop.build_diagnoser(stack, history_provider=InMemoryHistoryProvider(), **build)
+    coder = loop.build_coder(build.get("client"))
+    coder.middleware = [_host_identity_stays_with_tools, *(coder.middleware or [])]  # the coder calls Ollama too
+    return agent, loop.create_workflow(agent, coder, None, checks=loop.GATE_CHECKS)
 
 
 @chat_middleware
