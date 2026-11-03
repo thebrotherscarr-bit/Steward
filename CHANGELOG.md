@@ -34,6 +34,11 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 4, piece 4.3: MAF's tool-call settings (`FunctionInvocationConfiguration`) on the one client Steward, his
+  team and the fixer use, defined once as `agent.TOOL_CALLS`: calls run one at a time in the model's order, a failing
+  tool's error text goes back to the model, and a pass of his loop stops calling tools after 40 calls or 30 minutes
+  and answers in text. Earned by round 1 (2026-11-03), whose fixer completed a finished todo every 18 seconds until
+  it was stopped. `test_maf_tool_call_limits_stop_a_repeating_call`.
 - Step 6, piece 6.4: the diagnosis feeds the loop, the cookbook's handoff to the coding agent. A round that
   names no failure (`improve:` alone in the Agent tab, or no task on the command line) takes the first top
   priority from `improvement_loop.py`'s handoff (`improvement_loop/<run>/handoff.md`, HALO's ranking), with the

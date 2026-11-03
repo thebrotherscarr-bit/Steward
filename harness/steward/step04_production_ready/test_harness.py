@@ -1388,3 +1388,27 @@ def test_a_round_that_names_nothing_takes_the_diagnosis_first_priority(tmp_path:
     assert "TASK: Make the plan an approval card" in sent, "the fixer got the handoff's first priority"
     assert "Second" in sent, "with the whole handoff as its evidence"
     assert review.data.passed is True
+
+
+def test_maf_tool_call_limits_stop_a_repeating_call() -> None:
+    """Step 4, 4.3: MAF's tool-call settings are on his client (one call at a time, detailed errors, a call cap and a
+    time cap per pass). Round 1's fault, the same finished todo completed again and again, now stops at the cap."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    call = Content.from_function_call(call_id="t", name="todos_complete", arguments={"items": [{"id": 2, "reason": "x"}]})
+    client = ScriptedChatClient([call] * 200)
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            config = client.function_invocation_configuration
+            assert {k: config[k] for k in steward.TOOL_CALLS} == steward.TOOL_CALLS, "the settings are on his client"
+            session = agent.create_session()
+            modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+            set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+            return await agent.run("Finish the todo.", session=session)
+
+    asyncio.run(_go())
+    cap = steward.TOOL_CALLS["max_function_calls"]
+    assert len(client.calls) <= cap + 2, f"{len(client.calls)} model calls: the repeat was not stopped at {cap}"
+    assert steward.TOOL_CALLS["allow_concurrent_invocation"] is False
