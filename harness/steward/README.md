@@ -177,9 +177,10 @@ After those, in order: safety (FIDES, Agent Hooks), long runs (summarising compa
 progress log, `think` per step), visibility (the workflow in DevUI, `WorkflowViz`, progress events),
 and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain). Ruled 2026-11-02:
 web search and web fetch go only through SecondBrain's route, the one Steward already uses (no Ollama
-web search); the embedding model is `embeddinggemma-2:270m` (303 MB, 8K context, MTEB code 78.68; it
-replaced `nomic-embed-text-v2-moe`), used for semantic code search and memory, run on the CPU
-(`options: {"num_gpu": 0}`) beside the chat model on the GPU; no Docker sandbox; Foundry Local is ruled out. The full plan is the SecondBrain note
+web search); Steward's embedding model is `embeddinggemma-2:270m` (303 MB, 8K context, MTEB code
+78.68), for semantic code search and memory, on the CPU beside the chat model on the GPU (Ollama's
+`options: {"num_gpu": 0}`; MAF's `OllamaEmbeddingClient` does not forward `options` yet);
+`nomic-embed-text-v2-moe` stays for Manjuel's index; no Docker sandbox; Foundry Local is ruled out. The full plan is the SecondBrain note
 `steward-the-build-plan-after-the-deep-di-f92d04`; the gaps are in `steward-what-maf-and-ollama-offer-that-w-3acc5a`.
 
 ### The Ollama server on this PC

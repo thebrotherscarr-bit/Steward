@@ -32,7 +32,8 @@ was never merged and has no entry.
 - The Ollama server's settings on this PC (Windows user environment, not the repo), recorded in
   `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 2 (the
   chat model and the embedder), `OLLAMA_NUM_PARALLEL` 3 to 1. Ollama updated from 0.35.0 to 0.40.13; the embedding
-  model is now `embeddinggemma-2:270m`, run on the CPU, and `nomic-embed-text-v2-moe` was removed. The build plan from
+  model for Steward is now `embeddinggemma-2:270m`, run on the CPU; `nomic-embed-text-v2-moe` stays, because Manjuel's
+  index (`manjuel/skills.py` `EMBED_MODEL`, `index/vectors.db`) is built on it. The build plan from
   the 2026-11-02 deep dive is in the README's "Where it stands".
 
 ### Findings
