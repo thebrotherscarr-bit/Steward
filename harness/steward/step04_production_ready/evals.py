@@ -730,19 +730,28 @@ async def steps_main() -> None:
 # (run_steward), the plan and the writes approved as the user would, the commit card denied: nothing is committed.
 # A check that is not its ask's passes ("Not this case."), as the guide's evaluators do. Run: python evals.py small.
 
-SMALL_ASK_DOCSTRING = "Add a docstring to order_total in harness/steward/working/sample-project/inventory.py."
+# Live 2026-11-02 (run 1): order_total already had a docstring, so he rightly asked a clarification; and fixing
+# the planted discount bug puts inventory.py back to its committed text, so the check finds nothing changed and no
+# commit follows. The commit and check-coverage cases therefore ride on new code, which the tests still pass.
+SMALL_ASK_NEW_CODE = (
+    "Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total "
+    "quantity of all the items, with a docstring."
+)
 SMALL_ASK_DISCOUNT = "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project."
 SMALL_ASK_README = "Add one line to harness/steward/working/sample-project/README.md that says how to run its tests."
-SMALL_ASKS = [SMALL_ASK_DOCSTRING, SMALL_ASK_DISCOUNT, SMALL_ASK_README]
+SMALL_ASKS = [SMALL_ASK_NEW_CODE, SMALL_ASK_DISCOUNT, SMALL_ASK_README]
 # Which of today's failures each ask checks (the cookbook's axial codes, one check each).
 SMALL_ASK_CHECKS: dict[str, set[str]] = {
-    SMALL_ASK_DOCSTRING: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic"},
-    SMALL_ASK_DISCOUNT: {"check_covers_writes", "commit_by_tool", "commit_message_specific", "no_nudge_in_reply", "answer_on_topic"},
+    SMALL_ASK_NEW_CODE: {
+        "plan_is_approval", "edit_keeps_file_whole", "check_covers_writes", "commit_by_tool", "commit_message_specific",
+        "no_nudge_in_reply", "answer_on_topic",
+    },
+    SMALL_ASK_DISCOUNT: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic"},
     SMALL_ASK_README: {"plan_is_approval", "no_nudge_in_reply", "answer_on_topic"},
 }
 # What an on-topic answer and a specific commit message name, per ask.
 SMALL_ASK_SUBJECT: dict[str, tuple[str, ...]] = {
-    SMALL_ASK_DOCSTRING: ("order_total", "docstring"),
+    SMALL_ASK_NEW_CODE: ("item_count",),
     SMALL_ASK_DISCOUNT: ("discount",),
     SMALL_ASK_README: ("readme", "test"),
 }

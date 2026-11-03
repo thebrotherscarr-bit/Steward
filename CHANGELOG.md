@@ -15,7 +15,7 @@ was never merged and has no entry.
 
 ### Added
 
-- Step 4, evals as small single asks: `python evals.py small` runs three asks (a docstring, the discount fix with the
+- Step 4, evals as small single asks: `python evals.py small` runs three asks (a new function, the discount fix with the
   bug planted, a README line) once each through the workflow as the Agent tab runs it, the plan and the writes
   approved and the commit denied, and scores them with seven MAF `@evaluator` checks, one per failure seen live on
   2026-11-02: the plan labelled as a clarification, a write the check missed, an edit that broke the file, "proceed?"
@@ -26,6 +26,12 @@ was never merged and has no entry.
   your evals", "run the small asks"), once, with `run_shell`, and reports every line as printed. His instructions
   name it, and a request that names evals gets the one-line hint to load it (`REQUEST_HINTS`). A skill script
   is not used: MAF's script runner stops a script after 30 seconds, and an eval set runs for minutes.
+
+### Changed
+
+- The Ollama server's settings on this PC (Windows user environment, not the repo), recorded in
+  `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 1,
+  `OLLAMA_NUM_PARALLEL` 3 to 1. The build plan from the 2026-11-02 deep dive is in the README's "Where it stands".
 
 ### Findings
 

@@ -10,7 +10,7 @@ on the local model and scores them with MAF's `LocalEvaluator` checks. The sets:
 
 | Set | What it checks |
 |---|---|
-| `small` | Step 4: the failures seen live on 2026-11-02, as three small asks (a docstring, the discount fix, a README line) run through your workflow, scored by seven checks |
+| `small` | Step 4: the failures seen live on 2026-11-02, as three small asks (a new function, the discount fix, a README line) run through your workflow, scored by seven checks |
 | (none) | The regression set: repo status, the codebase map, the bug diagnosis, and the improvement loop's four cases |
 | `steps` | One run of your workflow on the planted bug, each step (plan, execute, overall) scored by its own check |
 | `plan`, `roundtrip`, `walkthrough` | The older single-agent sets, from before the workflow |
