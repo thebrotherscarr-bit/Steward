@@ -1,6 +1,6 @@
 [project]
 name = "steward"
-version = "0.1.0"
+version = "0.7.0"
 description = "STEWARD: a Microsoft Agent Framework agent on local Ollama"
 requires-python = ">=3.10"
 dependencies = [
