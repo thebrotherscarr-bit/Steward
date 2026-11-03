@@ -1137,3 +1137,71 @@ def test_improvement_loop_workflow_repairs_reviews_and_resumes(tmp_path: Path) -
     assert (result.decision, result.passed, result.attempts) == ("keep", True, 2)
     assert len(client.calls) == 3, "the rejected commit, then one attempt per check run"
     assert runs.read_text() == "2", "the checks ran after each attempt"
+
+
+def test_the_small_asks_check_each_of_todays_failures() -> None:
+    """Step 4: each small-ask check fails on the failure it is named for, passes on the right run, and passes an ask
+    that is not its own (the guide's evaluators)."""
+    import evals
+    import steward_workflow as wf
+    from agent import PLAN_REPLY_NUDGE
+
+    def card(name: str, args: dict[str, Any]) -> Message:
+        call = Content.from_function_call(call_id=f"{name}-1", name=name, arguments=args)
+        return Message(role="assistant", contents=[Content.from_function_approval_request(id=f"{name}-1", function_call=call)])
+
+    def approved_write(file_name: str) -> Message:
+        from agent_framework import FileAccessProvider
+
+        call = Content.from_function_call(
+            call_id="w1", name=FileAccessProvider.WRITE_TOOL_NAME, arguments={"file_name": file_name, "content": "x"}
+        )
+        request = Content.from_function_approval_request(id="w1", function_call=call)
+        return Message(role="user", contents=[request.to_function_approval_response(approved=True)])
+
+    def said(text: str) -> Message:
+        return Message(role="assistant", contents=[Content.from_text(text)])
+
+    def passed(check: Any, query: str, conversation: list[Any]) -> bool:
+        return scored(check, query, conversation).passed
+
+    docstring, discount, readme = evals.SMALL_ASK_DOCSTRING, evals.SMALL_ASK_DISCOUNT, evals.SMALL_ASK_README
+    module = "harness/steward/working/sample-project/inventory.py"
+    checks_passed = said("Checks passed:\n$ pytest -q harness/steward/working/sample-project\n(exit 0)")
+
+    # 1. The plan labelled as a clarification.
+    assert passed(evals.plan_is_approval, docstring, [card(wf.APPROVE_PLAN, {"steps": ["Add it"]})])
+    assert not passed(evals.plan_is_approval, docstring, [said("Should I proceed? (yes)")])
+    assert passed(evals.plan_is_approval, discount, []), "not the discount ask's check"
+
+    # 2. A write missed behind a later card.
+    assert passed(evals.check_covers_writes, discount, [approved_write(module), checks_passed])
+    assert not passed(evals.check_covers_writes, discount, [approved_write(module), said("Done.")])
+
+    # 3. A broken edit (tabs).
+    evals.SMALL_ASK_ORIGINALS[module] = "def order_total(items):\n    return 0\n"
+    evals.SMALL_ASK_FILES[docstring] = {module: 'def order_total(items):\n    """Total."""\n    return 0\n'}
+    assert passed(evals.edit_keeps_file_whole, docstring, [])
+    evals.SMALL_ASK_FILES[docstring] = {module: 'def order_total(items):\n\t"""Total."""\n    return 0\n'}
+    assert not passed(evals.edit_keeps_file_whole, docstring, [])
+    evals.SMALL_ASK_FILES.clear()
+    evals.SMALL_ASK_ORIGINALS.clear()
+
+    # 4. "Proceed?" instead of git_commit, and the door's commit, which would park a real card.
+    commit_card = card("git_commit", {"message": "Fix the percent discount in inventory.py"})
+    assert passed(evals.commit_by_tool, discount, [checks_passed, commit_card])
+    assert not passed(evals.commit_by_tool, discount, [checks_passed, said("Shall I proceed with the commit?")])
+    door = Message(role="assistant", contents=[Content.from_function_call(call_id="d1", name="atlas_git_commit", arguments={})])
+    assert not passed(evals.commit_by_tool, discount, [checks_passed, door, commit_card])
+
+    # 5. A vague commit message.
+    assert passed(evals.commit_message_specific, discount, [commit_card])
+    assert not passed(evals.commit_message_specific, discount, [card("git_commit", {"message": "Update"})])
+
+    # 6. The loop's nudge in his reply.
+    assert passed(evals.no_nudge_in_reply, readme, [said("Added the line to README.md on running the tests.")])
+    assert not passed(evals.no_nudge_in_reply, readme, [said(PLAN_REPLY_NUDGE)])
+
+    # 7. An off-topic final answer.
+    assert passed(evals.answer_on_topic, discount, [said("Fixed the discount: it divides by 100 now.")])
+    assert not passed(evals.answer_on_topic, discount, [said("Paris is the capital of France.")])

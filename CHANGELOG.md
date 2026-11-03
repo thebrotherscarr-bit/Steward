@@ -13,6 +13,16 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Added
+
+- Step 4, evals as small single asks: `python evals.py small` runs three asks (a docstring, the discount fix with the
+  bug planted, a README line) once each through the workflow as the Agent tab runs it, the plan and the writes
+  approved and the commit denied, and scores them with seven MAF `@evaluator` checks, one per failure seen live on
+  2026-11-02: the plan labelled as a clarification, a write the check missed, an edit that broke the file, "proceed?"
+  instead of `git_commit` (or the door's `atlas_git_commit`), a vague commit message, the loop's nudge in a reply, and
+  an off-topic answer. The sample project is reset after every ask. `test_the_small_asks_check_each_of_todays_failures`
+  proves each check fails on its failure and passes on the right run.
+
 ### Findings
 
 Research recorded 2026-11-02 in the SecondBrain note `maf-solved-patterns-checked-2026-11-02-d8d89a`. No code changed.
