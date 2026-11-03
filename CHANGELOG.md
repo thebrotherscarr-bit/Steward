@@ -13,6 +13,14 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- Eval runs no longer share Steward's real memory. `run_steward` (the small asks and the regression set) and the
+  `steps` set give each run a throwaway `FileSystemAgentFileStore` under `storage/`, removed when the run ends, as
+  the walkthrough set already did. Live 2026-11-02: eval runs had saved their plans into
+  `agent-file-memory/steward`, and a later run's commit message described that work instead of its own.
+  `test_an_eval_run_never_touches_stewards_real_memory` proves a memory written in an eval stays out.
+
 ### Added
 
 - Step 4, evals as small single asks: `python evals.py small` runs three asks (a new function, the discount fix with the

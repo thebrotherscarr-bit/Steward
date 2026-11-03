@@ -287,11 +287,26 @@ async def _run_queries(agent: Agent[Any], queries: list[str], *, mode: str | Non
     return responses
 
 
+def isolated_memory(stack: AsyncExitStack) -> Any:
+    """A throwaway file-memory store for one eval run: MAF's FileSystemAgentFileStore over a temp folder under
+    storage/, removed when the run ends (the walkthrough set's way). Nothing an eval does reaches Steward's real
+    memory, and his real memory does not steer the eval (live 2026-11-02: eval runs saved their plans into
+    agent-file-memory/steward, and a later run's commit message described that work, not its own).
+    """
+    from agent import _WORKING_DIR  # noqa: PLC0415
+    from agent_framework import FileSystemAgentFileStore  # noqa: PLC0415
+
+    parent = _WORKING_DIR / "storage"
+    parent.mkdir(exist_ok=True)
+    return FileSystemAgentFileStore(stack.enter_context(tempfile.TemporaryDirectory(dir=parent)))
+
+
 async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any], AgentResponse[Any]]:
     """One query through Steward's workflow, as the Agent tab's service runs it (define once: build_steward), driven
     as an agent (Learn, "Using Workflows as Agents"), in a fresh build. The plan card and the tools in ``approve`` are
     approved, every other card denied; EXECUTE's work is in the response (intermediate output)."""
     async with AsyncExitStack() as stack:
+        build.setdefault("file_memory_store", isolated_memory(stack))  # his real memory stays out of the eval
         agent, workflow = await build_steward(stack, **build)
         async with agent:
             steward = workflow.as_agent(name="Steward")
@@ -697,7 +712,9 @@ async def steps_main() -> None:
     module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
     approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES, "run_shell"}  # noqa: SLF001
     async with AsyncExitStack() as stack:
-        agent, workflow = await wf.build_steward(stack, auto_approve_skill_scripts=True)
+        agent, workflow = await wf.build_steward(
+            stack, auto_approve_skill_scripts=True, file_memory_store=isolated_memory(stack)
+        )
         async with agent:
             with discount_bug_planted():
                 events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
