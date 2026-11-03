@@ -93,6 +93,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- The fixer's model is now `qwen2.5-coder:14b` (the operator, 2026-11-03), and `devstral-small-2:24b` is dropped.
+  Measured that day with one model loaded at a time: qwen sits wholly on the 16 GB card at the fixer's 32K window
+  (12.1 GB), reads 227 tok/s on a 2.7K prompt and 49 on a 17K one, and writes 28-46 tok/s; devstral kept 5-7 of its
+  41 layers on the CPU at 32K and 24K and wrote 3.5 tok/s. An f16 context cache was tried for qwen's long-prompt
+  reading and made it no faster (45.5 tok/s, writing 6.4), so the server stays on q8_0.
 - The Ollama server's settings on this PC (Windows user environment, not the repo), recorded in
   `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 2 (the
   chat model and the embedder), `OLLAMA_NUM_PARALLEL` 3 to 1. Ollama updated from 0.35.0 to 0.40.13; the embedding

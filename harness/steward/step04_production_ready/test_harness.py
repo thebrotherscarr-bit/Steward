@@ -1271,7 +1271,7 @@ def test_the_improvement_loops_fixer_is_stewards_harness_on_the_coder_model() ->
     import improvement_loop_workflow as loop
 
     assert loop.fixer_client().model == steward._CODER_MODEL
-    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "devstral-small-2:24b")
+    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
 
     async def _go() -> Any:
         async with AsyncExitStack() as stack:

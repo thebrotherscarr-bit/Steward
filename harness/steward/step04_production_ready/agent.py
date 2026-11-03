@@ -14,14 +14,14 @@ Changes from the guide for local Ollama:
 Steward's team (each a background agent on its own local model):
     * Steward (orchestrator) — OLLAMA_MODEL, e.g. gpt-oss:20b: talks to the user, plans, uses tools.
     * CodeExplorer — the orchestrator's model: explores modules read-only.
-    * Coder        — STEWARD_CODER_MODEL (devstral-small-2:24b): the improvement loop's fixer (step 6).
+    * Coder        — STEWARD_CODER_MODEL (qwen2.5-coder:14b): the improvement loop's fixer (step 6).
     * Reasoner     — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
     * Explainer    — STEWARD_CONVERSATION_MODEL (gemma4:26b): explanations, docs and summaries.
 
 Environment variables:
     OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
     OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
-    STEWARD_CODER_MODEL        — coder model (defaults to devstral-small-2:24b, the operator's choice 2026-11-02)
+    STEWARD_CODER_MODEL        — coder model (defaults to qwen2.5-coder:14b, the operator's choice 2026-11-03)
     STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
     STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:26b)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
@@ -103,9 +103,11 @@ load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
 # Kyle, 2026-10-29: gemma4:26b replaces gemma4:12b (better reviewed; measured 60 tok/s vs 52 here).
-# qwen3-coder:30b stays: devstral-small-2:24b, the reviews' 16 GB pick, measured 13 tok/s at an 8k
-# context against qwen3-coder's 41, because its dense weights never fit the card.
-_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "devstral-small-2:24b")
+# The fixer's model (the operator, 2026-11-03): qwen2.5-coder:14b, the one coder that sits wholly on the 16 GB card
+# at the fixer's 32K window (12.1 GB). Measured that day, one model loaded at a time: it read 227 tok/s on a 2.7K
+# prompt and 49 on a 17K one, and wrote 28-46 tok/s. devstral-small-2:24b, the fixer of round 1, was dropped: at 32K
+# and at 24K 5-7 of its 41 layers stayed on the CPU, and it wrote 3.5 tok/s.
+_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
 _REASONER_MODEL = os.environ.get("STEWARD_REASONER_MODEL", "deepseek-r1:14b")
 _CONVERSATION_MODEL = os.environ.get("STEWARD_CONVERSATION_MODEL", "gemma4:26b")
 # The context Ollama loads each model with (num_ctx, a chat option). Ollama's own default here is

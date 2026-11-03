@@ -18,7 +18,7 @@ the command line) takes the handoff's first top priority (round_task, step 6, 6.
 * Every superstep is checkpointed to improvement_loop/checkpoints, so a run paused on a review can be
   resumed later from its checkpoint, as in the sample.
 * The writer is the fixer (step 6, 6.1): Steward's own harness on the coder model (STEWARD_CODER_MODEL,
-  devstral-small-2:24b), the cookbook's coding agent in the loop's repair role, with the same file tools and
+  qwen2.5-coder:14b), the cookbook's coding agent in the loop's repair role, with the same file tools and
   the same write cards (define once), and a 32K window so a whole harness file fits.
 
 Run from worlds/steward:
@@ -71,7 +71,7 @@ GATE_CHECKS: tuple[tuple[str, ...], ...] = (
 )
 MAX_ATTEMPTS = 3
 # The fixer's window: agent.py alone is about 20K tokens and the fixer must see a whole file (the operator's 32K,
-# 2026-11-02); Ollama's server default of 65,536 would spill devstral-small-2:24b (15 GB) out of the 16 GB card.
+# 2026-11-02); at 32K qwen2.5-coder:14b sits wholly on the 16 GB card (12.1 GB, measured 2026-11-03).
 FIXER_CONTEXT = 32_768
 
 
