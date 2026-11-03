@@ -143,6 +143,9 @@ class PrepareTask(Executor):
 
     @handler
     async def prepare(self, task: str, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
+        task = task.strip()
+        if task.lower().startswith("improve:"):  # the Agent tab's improve conversations (step 6, 6.3)
+            task = task[len("improve:"):].strip()
         tracked, untracked = _changed_paths()
         ctx.set_state("task", task.strip())
         ctx.set_state("before_tracked", sorted(tracked))
@@ -273,7 +276,9 @@ class ReviewGateway(Executor):
             (steward._WORKING_DIR / path).unlink(missing_ok=True)
 
 
-def create_workflow(agent: Any, checkpoint_storage: FileCheckpointStorage, checks: Sequence[Sequence[str]] = GATE_CHECKS) -> Workflow:
+def create_workflow(
+    agent: Any, checkpoint_storage: FileCheckpointStorage | None, checks: Sequence[Sequence[str]] = GATE_CHECKS
+) -> Workflow:
     """The loop's graph, the same for a new run and for a resume."""
     register_checkpoint_type(CheckReport)
     register_checkpoint_type(ReviewRequest)
@@ -290,6 +295,8 @@ def create_workflow(agent: Any, checkpoint_storage: FileCheckpointStorage, check
     review = ReviewGateway(id="review", agent_id="steward")
     return (
         WorkflowBuilder(
+            # A fixed name: the host checks a reply's rebuilt graph against the stored one by name and signature.
+            name="steward_improve",
             # Each attempt is about four supersteps; this leaves room for MAX_ATTEMPTS and two reviews.
             max_iterations=40,
             start_executor=prepare,

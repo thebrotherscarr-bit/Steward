@@ -24,7 +24,7 @@ import asyncio
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -56,6 +56,11 @@ logger = logging.getLogger(__name__)
 # A turn's request metadata key naming the mode to switch to before it runs: the Agent tab's Approve
 # sends {"agent_mode": "execute"}, as the console's Approve calls set_agent_mode.
 AGENT_MODE_KEY = "agent_mode"
+# Step 6, 6.3: a turn whose request metadata carries {"steward_workflow": "improve"} runs the improvement loop
+# (improvement_loop_workflow.py: the coder fixer, the gate, the review) instead of his request workflow. The Agent
+# tab sends it on every turn of an improve conversation, so a card's answer resumes the same workflow.
+IMPROVE_KEY = "steward_workflow"
+IMPROVE = "improve"
 PLAN_MODE = "plan"
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
@@ -211,7 +216,10 @@ async def steward_graph(request: HostedResponseRequest, client_factory: Callable
     if client_factory is not None:  # a fresh chat client per request too (tests pass a scripted one)
         build["client"] = client_factory()
     try:
-        agent, workflow = await build_steward(stack, history_provider=InMemoryHistoryProvider(), **build)
+        if wants_improvement(request):
+            agent, workflow = await _improvement_loop(stack, **build)
+        else:
+            agent, workflow = await build_steward(stack, history_provider=InMemoryHistoryProvider(), **build)
     except BaseException:
         await stack.aclose()
         raise
@@ -223,6 +231,21 @@ async def steward_graph(request: HostedResponseRequest, client_factory: Callable
         *(agent.middleware or []),
     ]
     return workflow
+
+
+def wants_improvement(request: Any) -> bool:
+    """Whether this turn belongs to an improve conversation (its request metadata names the loop)."""
+    metadata = getattr(request, "request", {}).get("metadata")
+    return isinstance(metadata, Mapping) and metadata.get(IMPROVE_KEY) == IMPROVE
+
+
+async def _improvement_loop(stack: AsyncExitStack, **build: Any) -> tuple[Any, Any]:
+    """The improvement loop on MAF's host: the coder fixer (build_fixer) in the loop's graph, the host's own
+    checkpoints, and the gate's checks read at call time."""
+    import improvement_loop_workflow as loop  # noqa: PLC0415
+
+    agent = await loop.build_fixer(stack, history_provider=InMemoryHistoryProvider(), **build)
+    return agent, loop.create_workflow(agent, None, checks=loop.GATE_CHECKS)
 
 
 @chat_middleware
@@ -253,6 +276,7 @@ def steward_options(request: HostedResponseRequest, options: dict[str, Any]) -> 
     options.pop("response_format", None)
     metadata = dict(options.pop("metadata", None) or {})
     metadata.pop(AGENT_MODE_KEY, None)
+    metadata.pop(IMPROVE_KEY, None)
     if metadata:
         options["metadata"] = metadata
     return options
@@ -281,6 +305,10 @@ def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any
             "agent_framework_tools.shell._types:ShellResult",
             "console.observers.planning_models:PlanningResponseType",
             "console.observers.planning_models:PlanningQuestion",
+            # The improvement loop's own records (step 6, 6.3).
+            "improvement_loop_workflow:CheckReport",
+            "improvement_loop_workflow:ReviewRequest",
+            "improvement_loop_workflow:LoopResult",
         ]),
     )
 
