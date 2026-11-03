@@ -1215,3 +1215,23 @@ def test_the_small_asks_check_each_of_todays_failures() -> None:
     # 7. An off-topic final answer.
     assert passed(evals.answer_on_topic, discount, [said("Fixed the discount: it divides by 100 now.")])
     assert not passed(evals.answer_on_topic, discount, [said("Paris is the capital of France.")])
+
+
+def test_an_eval_run_never_touches_stewards_real_memory() -> None:
+    """Live 2026-11-02: eval runs saved plans into his real memory (agent-file-memory/steward) and a later run's commit
+    message described them. run_steward gives each run a throwaway memory store, so a memory written in an eval stays
+    out of the folder every real session reads."""
+    import evals
+
+    real = Path.cwd() / "agent-file-memory" / "steward" / "eval-leak-check.md"
+    write = Content.from_function_call(
+        call_id="m1", name="file_memory_write", arguments={"file_name": "eval-leak-check.md", "content": "leak"}
+    )
+    client = ScriptedChatClient([write, "Saved."])
+    try:
+        asyncio.run(evals.run_steward("Remember the word leak.", set(), client=client, enable_shell=False))
+        assert len(client.calls) == 2, "the memory write ran"
+        assert not real.exists(), "an eval's memory write must not reach his real memory"
+    finally:
+        real.unlink(missing_ok=True)
+        real.with_name("eval-leak-check_description.md").unlink(missing_ok=True)
