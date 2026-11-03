@@ -34,6 +34,10 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6, piece 6.2: the eval gate. `evals.py small` prints `Small-ask checks: N/M` over the checks that apply to
+  their ask, and with `--gate` exits 1 when they drop below the baseline in `eval_baselines.json` (10 of 14, the
+  first clean run, 2026-11-02; the operator raises it after a real improvement). The improvement loop's gate now
+  runs it after the harness tests. `test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop`.
 - Step 6, piece 6.1: the improvement loop's fixer. `improvement_loop_workflow.py`'s writer is now Steward's own
   harness on the coder model (`build_fixer`: `STEWARD_CODER_MODEL`, default `devstral-small-2:24b`, the
   operator's choice), with the same file tools and write cards and a 32K window (`FIXER_CONTEXT`).

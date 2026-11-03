@@ -19,6 +19,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 import tempfile
@@ -895,8 +896,33 @@ def answer_on_topic(query: str, conversation: list[Any]) -> dict[str, object]:
     return {"passed": ok, "reason": "On topic." if ok else f"Last reply misses {SMALL_ASK_SUBJECT[query]}: {last[:160]!r}"}
 
 
-async def small_main() -> None:
-    """Step 4's small asks, one run each, scored with their checks."""
+# The eval gate (step 6, 6.2): the improvement loop keeps a change only if the small-ask checks do not drop below
+# the recorded baseline. The baseline is raised by the operator after a real improvement (a one-line edit).
+EVAL_BASELINES = Path(__file__).resolve().with_name("eval_baselines.json")
+
+
+def applicable_checks(items: Any) -> tuple[int, int]:
+    """(passed, total) over the checks that apply to their ask (a "Not this case." pass does not count)."""
+    passed = total = 0
+    for item in items:
+        for score in item.scores:
+            if (score.sample or {}).get("reason") == "Not this case.":
+                continue
+            total += 1
+            passed += bool(score.passed)
+    return passed, total
+
+
+def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BASELINES) -> int:
+    """The gate's exit code: 0 when the checks are at or above the set's baseline, 1 when they dropped."""
+    baseline = int(json.loads(baselines.read_text(encoding="utf-8"))[name]["checks"])
+    ok = passed >= baseline
+    print(f"Gate: {passed}/{total} checks against the baseline of {baseline}: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+async def small_main(use_gate: bool = False) -> int:
+    """Step 4's small asks, one run each, scored with their checks; with use_gate, the exit code is the gate's."""
     import steward_workflow as wf  # noqa: PLC0415
     from agent import _WORKING_DIR  # noqa: PLC0415
     from agent_framework import FileAccessProvider  # noqa: PLC0415
@@ -947,10 +973,15 @@ async def small_main() -> None:
         for score in item.scores:
             if (score.sample or {}).get("reason") != "Not this case.":
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+    passed, total = applicable_checks(results[0].items)
+    print(f"Small-ask checks: {passed}/{total}")
+    return gate(passed, total) if use_gate else 0
 
 
 if __name__ == "__main__":
     # a reason can carry characters Windows' console code page cannot print (2026-10-30: U+2011)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     runs = {"plan": plan_main, "roundtrip": round_trip_main, "walkthrough": walkthrough_main, "steps": steps_main, "small": small_main}
+    if sys.argv[1:2] == ["small"]:
+        sys.exit(asyncio.run(small_main(use_gate="--gate" in sys.argv)))
     asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main())

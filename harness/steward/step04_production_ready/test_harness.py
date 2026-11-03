@@ -1279,3 +1279,27 @@ def test_the_improvement_loops_fixer_is_stewards_harness_on_the_coder_model() ->
     fixer = asyncio.run(_go())
     assert fixer.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 32_768
     assert any(type(p).__name__ == "FileAccessProvider" for p in fixer.context_providers), "the same file tools"
+
+
+def test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop(tmp_path: Path) -> None:
+    """Step 6, 6.2: the gate counts the checks that apply to their ask and fails when they drop below the baseline."""
+    from types import SimpleNamespace
+
+    import evals
+    import improvement_loop_workflow as loop
+
+    def score(passed: bool, reason: str) -> Any:
+        return SimpleNamespace(passed=passed, sample={"reason": reason})
+
+    items = [
+        SimpleNamespace(scores=[score(True, "On topic."), score(False, "Message 'Update'."), score(True, "Not this case.")]),
+        SimpleNamespace(scores=[score(True, "The plan came as an approval card."), score(True, "Not this case.")]),
+    ]
+    assert evals.applicable_checks(items) == (2, 3), "a 'Not this case.' pass is not counted"
+    baselines = tmp_path / "eval_baselines.json"
+    baselines.write_text('{"small": {"checks": 10}}', encoding="utf-8")
+    assert evals.gate(9, 14, baselines=baselines) == 1, "a drop fails the gate"
+    assert evals.gate(10, 14, baselines=baselines) == 0
+    assert evals.gate(11, 14, baselines=baselines) == 0
+    assert evals.gate(10, 14) == 0, "the recorded baseline is 10 of 14"
+    assert any("evals.py" in part for check in loop.GATE_CHECKS for part in check), "the loop's gate runs the evals"
