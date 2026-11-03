@@ -34,6 +34,13 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6, piece 6.4: the diagnosis feeds the loop, the cookbook's handoff to the coding agent. A round that
+  names no failure (`improve:` alone in the Agent tab, or no task on the command line) takes the first top
+  priority from `improvement_loop.py`'s handoff (`improvement_loop/<run>/handoff.md`, HALO's ranking), with the
+  whole handoff as its evidence; a named failure is used as named. `round_task` and `handoff_task` stop the round
+  with the reason when there is no handoff or it lists no priorities. The reader takes each `top_priorities` shape
+  HALO writes, and handoffs saved JSON-escaped. The improve skill says how to work such a task.
+  `test_a_round_that_names_nothing_takes_the_diagnosis_first_priority`.
 - Step 6, piece 6.3 (last part): the `improve` skill, the cookbook's repair procedure for the fixer: name the
   failing check in `evals.py`, find the cause in the harness, make the smallest change, prove it with a test in
   `test_harness.py`, stop and report; never weaken a check or the baseline. The loop's opening message names it

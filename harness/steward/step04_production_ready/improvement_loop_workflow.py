@@ -1,7 +1,8 @@
 """The improvement loop's change step as a MAF workflow (ADR-0001 item 12): attempt, check, then keep or drop.
 
 improvement_loop.py ends at a handoff for the coding agent; this workflow takes one change from it (or any
-task) and runs it to a decision. It is MAF's checkpoint_with_human_in_the_loop.py sample
+task) and runs it to a decision. A round that names no task ("improve:" alone in the Agent tab, or no task on
+the command line) takes the handoff's first top priority (round_task, step 6, 6.4). It is MAF's checkpoint_with_human_in_the_loop.py sample
 (samples/03-workflows/checkpoint), with Steward as the writer:
 
     prepare -> Steward -> checks -> (failed, attempts left) repair -> Steward -> checks ...
@@ -22,6 +23,7 @@ task) and runs it to a decision. It is MAF's checkpoint_with_human_in_the_loop.p
 
 Run from worlds/steward:
     .venv\\Scripts\\python harness\\steward\\step04_production_ready\\improvement_loop_workflow.py "<task>"
+    .venv\\Scripts\\python harness\\steward\\step04_production_ready\\improvement_loop_workflow.py   (the handoff's first priority)
     .venv\\Scripts\\python harness\\steward\\step04_production_ready\\improvement_loop_workflow.py --resume <checkpoint id>
 """
 
@@ -101,6 +103,20 @@ def _changed_paths() -> tuple[set[str], set[str]]:
     return tracked, untracked
 
 
+def round_task(task: str) -> str:
+    """The round's task: the failure the user named, or, when the round names none, the diagnosis's first top
+    priority from improvement_loop.py's handoff (the cookbook's handoff to the coding agent). No handoff, or one
+    without top_priorities, stops the round with the reason."""
+    task = task.strip()
+    if task.lower().startswith("improve:"):  # the Agent tab's improve conversations (step 6, 6.3)
+        task = task[len("improve:"):].strip()
+    if task:
+        return task
+    import improvement_loop as diagnosis  # noqa: PLC0415
+
+    return diagnosis.handoff_task(diagnosis.HANDOFF_PATH)
+
+
 @dataclass
 class CheckReport:
     """One attempt's check results, routed by the edges after the checks."""
@@ -143,9 +159,7 @@ class PrepareTask(Executor):
 
     @handler
     async def prepare(self, task: str, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
-        task = task.strip()
-        if task.lower().startswith("improve:"):  # the Agent tab's improve conversations (step 6, 6.3)
-            task = task[len("improve:"):].strip()
+        task = round_task(task)
         tracked, untracked = _changed_paths()
         ctx.set_state("task", task.strip())
         ctx.set_state("before_tracked", sorted(tracked))
@@ -348,7 +362,7 @@ async def main() -> None:
 
     load_dotenv(_REPO_DIR / ".env")
     resume = len(sys.argv) == 3 and sys.argv[1] == "--resume"
-    if not resume and len(sys.argv) != 2:
+    if not resume and len(sys.argv) > 2:
         raise SystemExit(__doc__)
     storage = FileCheckpointStorage(storage_path=CHECKPOINT_DIR)
     async with AsyncExitStack() as stack:
@@ -357,7 +371,7 @@ async def main() -> None:
         if resume:
             result = await run_loop(workflow, checkpoint_id=sys.argv[2])
         else:
-            result = await run_loop(workflow, task=sys.argv[1])
+            result = await run_loop(workflow, task=sys.argv[1] if len(sys.argv) == 2 else "")
     print(f"\nDecision: {result.decision} after {result.attempts} attempt(s); checks {'passed' if result.passed else 'failed'}.")
     print("Changed:", ", ".join(result.changed) or "(nothing)")
 
