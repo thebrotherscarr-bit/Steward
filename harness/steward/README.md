@@ -164,9 +164,36 @@ The order agreed for the workflow:
 1. The check sees every write. Done.
 2. Commit after a passing check. Done.
 3. Define once. Done.
-4. Evals as small single asks. Next.
-5. Memory across requests, as an eval case (the file memory's `steward` scope is already there).
-6. The cookbook's improvement loop, with the owner's approval at the merge.
+4. Evals as small single asks. In progress: the seven checks and the `evals` skill are built. Then, from
+   the 2026-11-02 deep dive: MAF 1.24.0 with pinned versions (a deployment package); `num_ctx` and
+   `keep_alive` sent on every agent; tool calls one at a time with detailed errors and caps; background
+   agents waited for; skills cached; a pass/fail exit for the evals.
+5. Memory across requests, as an eval case: MAF's `MemoryContextProvider` (automatic, same model),
+   history and sessions that survive a restart, and the memory case. The older eval sets retire here.
+6. The cookbook's improvement loop, with the owner's approval at the merge, gated on the evals and
+   measured (Ollama's reload and speed counters, metrics).
+
+After those, in order: safety (FIDES, Agent Hooks), long runs (summarising compaction, the loop's
+progress log, `think` per step), visibility (the workflow in DevUI, `WorkflowViz`, progress events),
+and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain). Gated on a ruling:
+Ollama web search (a cloud service), anything that loads an embedding model (a second model), and a
+sandboxed shell (Docker). Foundry Local is ruled out. The full plan is the SecondBrain note
+`steward-the-build-plan-after-the-deep-di-f92d04`; the gaps are in `steward-what-maf-and-ollama-offer-that-w-3acc5a`.
+
+### The Ollama server on this PC
+
+Set in the Windows user environment, 2026-11-02 (Ollama 0.35.0; AMD Radeon RX 6800 XT, 16 GB):
+
+| Setting | Value | Why |
+|---|---|---|
+| `OLLAMA_KEEP_ALIVE` | `30m` | It was `30`, which Ollama reads as 30 seconds: a reload after every turn |
+| `OLLAMA_MAX_LOADED_MODELS` | `1` | One model at a time, enforced by the server |
+| `OLLAMA_NUM_PARALLEL` | `1` | Context memory scales with it; 3 x 65,536 would spill gpt-oss:20b out of 16 GB |
+| `OLLAMA_CONTEXT_LENGTH` | `65536` | Matches the compaction budget |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | About half the context memory of f16 |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Needed for the q8_0 cache |
+
+Ollama reads these only when it starts: quit it from the tray and start it again after a change.
 
 ## Findings (2026-11-02)
 
