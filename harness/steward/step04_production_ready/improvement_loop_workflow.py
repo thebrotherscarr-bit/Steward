@@ -151,8 +151,8 @@ class PrepareTask(Executor):
         ctx.set_state("before_tracked", sorted(tracked))
         ctx.set_state("before_untracked", sorted(untracked))
         prompt = (
-            "Make this change in the workspace, then stop and summarize what you changed. The gate's checks "
-            f"run after you.\n\nTASK: {task.strip()}"
+            "This is an improvement round: follow your improve skill. Make this change in the workspace, then "
+            f"stop and summarize what you changed. The gate's checks run after you.\n\nTASK: {task.strip()}"
         )
         await ctx.send_message(
             AgentExecutorRequest(messages=[Message("user", contents=[prompt])], should_respond=True),

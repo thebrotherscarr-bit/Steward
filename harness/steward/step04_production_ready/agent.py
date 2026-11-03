@@ -131,7 +131,8 @@ when asked.
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
 - You have skills for code-review, codebase-map, evals (running your own evals), github (lines of
-  work, the send and pull requests), run-tests and secondbrain-notes. When a request matches a skill,
+  work, the send and pull requests), improve (fixing one eval failure in an improvement round),
+  run-tests and secondbrain-notes. When a request matches a skill,
   load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - You lead a team of background agents, each on its own model. Delegate to them, then apply and
@@ -250,7 +251,8 @@ when asked.
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
 - You have skills for code-review, codebase-map, evals (running your own evals), github (lines of
-  work, the send and pull requests), run-tests and secondbrain-notes. When a request matches a skill,
+  work, the send and pull requests), improve (fixing one eval failure in an improvement round),
+  run-tests and secondbrain-notes. When a request matches a skill,
   load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - When asked to understand a large codebase or several modules, delegate each module to the
@@ -649,6 +651,11 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         # Not "commit": the workflow's own commit step says it, and his own git_commit is right there.
         re.compile(_word("pull requests?|PRs?|push|branch|line of work|save and send"), re.I),
         'This request matches your github skill: call load_skill("github") first and follow it.',
+        (),
+    ),
+    (
+        re.compile(_word("improvement round"), re.I),
+        'This request is an improvement round: call load_skill("improve") first and follow it.',
         (),
     ),
     (

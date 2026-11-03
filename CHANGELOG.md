@@ -34,6 +34,11 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6, piece 6.3 (last part): the `improve` skill, the cookbook's repair procedure for the fixer: name the
+  failing check in `evals.py`, find the cause in the harness, make the smallest change, prove it with a test in
+  `test_harness.py`, stop and report; never weaken a check or the baseline. The loop's opening message names it
+  ("This is an improvement round"), and a request hint points to it. SecondBrain's Agent tab starts a round from a
+  conversation beginning `improve:` (SecondBrain #41).
 - Step 6, piece 6.3 (first part): the improvement loop on his host. A turn whose request metadata carries
   `{"steward_workflow": "improve"}` runs `improvement_loop_workflow.py` (the coder fixer, the gate, the review)
   instead of his request workflow; the loop has a fixed name (`steward_improve`) so card answers resume it, uses the
