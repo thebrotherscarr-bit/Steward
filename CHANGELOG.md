@@ -26,6 +26,14 @@ was never merged and has no entry.
   your evals", "run the small asks"), once, with `run_shell`, and reports every line as printed. His instructions
   name it, and a request that names evals gets the one-line hint to load it (`REQUEST_HINTS`). A skill script
   is not used: MAF's script runner stops a script after 30 seconds, and an eval set runs for minutes.
+- Three more skills, each a procedure he follows on request, with his instructions naming it and a one-line hint
+  (`REQUEST_HINTS`): `github` (a line of work, the commit, the send, the pull request and its checks, through the
+  door's `atlas_*` tools, each write on the user's card; the merge only on the user's word), `run-tests` (pytest
+  once through `run_shell`, the summary line reported exactly) and `secondbrain-notes` (search first, cite the
+  note and its date, append rather than replace, sources and dates on new notes).
+- `secondbrain_write_note` and `secondbrain_append_to_note` for the live Steward: his notes were read-only
+  (`_SECONDBRAIN_NOTES_TOOLS`), though the skill and the user expect him to write them. Both ask on a card, and
+  plan mode's gate counts them among the tools that change things.
 
 ### Changed
 

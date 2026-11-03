@@ -45,7 +45,7 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals")
+SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals", "github", "run-tests", "secondbrain-notes")
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
@@ -332,7 +332,9 @@ def test_plan_mode_states_the_tool_policy_and_every_tool_stays_offered() -> None
     """The cookbook's way: the tools stay offered (their approvals are the gate) and plan mode states the policy."""
     client, _, _ = run_steward(["Here is the plan."], "Do it.")
     offered, instructions = offered_tools(client.calls[0]), str(client.calls[0]["options"].get("instructions") or "")
-    assert steward._CHANGES_THINGS - {"run_shell", "atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr"} <= offered
+    # The door's and SecondBrain's tools come over MCP, which these tests do not connect.
+    over_mcp = {"atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr", "secondbrain_write_note", "secondbrain_append_to_note"}
+    assert steward._CHANGES_THINGS - {"run_shell", *over_mcp} <= offered
     assert {"todos_add", "mode_set"} <= offered
     assert steward.PLAN_MODE_TOOL_POLICY in instructions and "file_access_write" in steward.PLAN_MODE_TOOL_POLICY
     # The plan-mode gate: a write called in plan mode is refused with corrective feedback, with no card.
@@ -430,6 +432,13 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
     assert "execute_code" in hints_for("What percentage of the lines are tests?")
     assert "CodeExplorer" in hints_for("Explore it with the CodeExplorer agent.")
     assert 'load_skill("evals")' in hints_for("Run your small asks evals.")
+    assert 'load_skill("github")' in hints_for("Send this line and open a pull request.")
+    assert 'load_skill("run-tests")' in hints_for("Run the tests in the sample project.")
+    assert 'load_skill("secondbrain-notes")' in hints_for("Write it up in SecondBrain.")
+    import evals
+
+    assert "run-tests" not in hints_for(evals.SMALL_ASK_README), "the README eval ask stays as it was"
+    assert "github" not in hints_for("Commit your work now: call git_commit once."), "the commit step is not the github skill"
     assert hints_for("Hello, how are you?") == "", "nothing is added when nothing matches"
     assert hints_for("Fix the import in C:/Users/novad/Desktop/Research/worlds/x.py.") == "", "a word inside a path never counts"
 
