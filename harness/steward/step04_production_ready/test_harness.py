@@ -45,7 +45,7 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals", "github", "run-tests", "secondbrain-notes")
+SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals", "github", "improve", "run-tests", "secondbrain-notes")
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
@@ -435,6 +435,7 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
     assert 'load_skill("github")' in hints_for("Send this line and open a pull request.")
     assert 'load_skill("run-tests")' in hints_for("Run the tests in the sample project.")
     assert 'load_skill("secondbrain-notes")' in hints_for("Write it up in SecondBrain.")
+    assert 'load_skill("improve")' in hints_for("This is an improvement round: follow your improve skill.")
     import evals
 
     assert "run-tests" not in hints_for(evals.SMALL_ASK_README), "the README eval ask stays as it was"
