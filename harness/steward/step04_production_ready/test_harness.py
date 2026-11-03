@@ -1412,3 +1412,36 @@ def test_maf_tool_call_limits_stop_a_repeating_call() -> None:
     cap = steward.TOOL_CALLS["max_function_calls"]
     assert len(client.calls) <= cap + 2, f"{len(client.calls)} model calls: the repeat was not stopped at {cap}"
     assert steward.TOOL_CALLS["allow_concurrent_invocation"] is False
+
+
+def test_steward_and_his_team_send_their_own_ollama_window_and_keep_alive() -> None:
+    """Step 4, 4.2: Steward, CodeExplorer and WebResearchAgent send num_ctx and keep_alive on every call (MAF's
+    OllamaChatOptions), so his window never rests on the server's default; his compaction budget is that window; the
+    fixer's own 32K window wins over his."""
+    from agent_framework import BackgroundAgentsProvider
+
+    import improvement_loop_workflow as loop
+
+    def lookup(topic: str) -> str:
+        """A stand-in web tool."""
+        return topic
+
+    client = ScriptedChatClient(["Hello."])
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            [team] = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
+            await agent.run("Say hello.", session=agent.create_session())
+            fixer = await loop.build_fixer(stack, client=ScriptedChatClient([]), enable_shell=False)
+            return team, fixer
+
+    team, fixer = asyncio.run(_go())
+    wanted = {"num_ctx": 65_536, "keep_alive": "30m"}
+    assert steward.OLLAMA_OPTIONS == wanted
+    assert {k: client.calls[0]["options"].get(k) for k in wanted} == wanted, "his calls carry them"
+    assert {k: team._agents["codeexplorer"].default_options.get(k) for k in wanted} == wanted
+    research = steward._build_web_research_agent(client, lookup)
+    assert {k: research.default_options.get(k) for k in wanted} == wanted
+    assert fixer.default_options["num_ctx"] == loop.FIXER_CONTEXT and fixer.default_options["keep_alive"] == "30m"
+    assert steward._STEWARD_CONTEXT == wanted["num_ctx"], "the compaction budget is the same window"
