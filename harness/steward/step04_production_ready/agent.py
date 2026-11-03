@@ -130,7 +130,9 @@ when asked.
 
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
-- You have skills for code-review and codebase-map. When a request matches a skill, load it and
+- You have skills for code-review, codebase-map, evals (running your own evals), github (lines of
+  work, the send and pull requests), run-tests and secondbrain-notes. When a request matches a skill,
+  load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - You lead a team of background agents, each on its own model. Delegate to them, then apply and
   verify their output yourself. Start a task once, wait for it, then read its result with
@@ -247,7 +249,9 @@ when asked.
 
 - Read before you write. Use the file_access tools to open the relevant files (and grep for call
   sites) before answering questions about the code or changing it. Never guess at file contents.
-- You have skills for code-review and codebase-map. When a request matches a skill, load it and
+- You have skills for code-review, codebase-map, evals (running your own evals), github (lines of
+  work, the send and pull requests), run-tests and secondbrain-notes. When a request matches a skill,
+  load it and
   follow its instructions (read its references, run its scripts) rather than improvising.
 - When asked to understand a large codebase or several modules, delegate each module to the
   background CodeExplorer agent so they are explored concurrently, then combine the findings.
@@ -530,6 +534,8 @@ _CHANGES_THINGS = frozenset({
     # Skill scripts are not here (Kyle, 2026-10-31: "unless he has an actual skill he is calling, there is no
     # simple task"): a matching skill is followed directly, and its scripts keep their own approval card.
     *(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr")),
+    # His notes' writes (the secondbrain-notes skill, 2026-11-02): they ask too, so plan mode leaves them alone.
+    *(f"secondbrain_{name}" for name in ("write_note", "append_to_note")),
 })
 PLAN_MODE_TOOL_POLICY = (
     "\n\nTool policy in plan mode: you have the tools that change things ("
@@ -632,6 +638,29 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         "len(open(path).read().splitlines()), and never paste file text into the code. A project's lines are its "
         "code files' lines, not its README or other docs, unless the request says otherwise.",
         ("execute_code",),
+    ),
+    (
+        re.compile(_word("evals?|eval sets?|small asks"), re.I),
+        'This request matches your evals skill: call load_skill("evals") first and follow it, running the set once '
+        "with run_shell and reporting every line as printed.",
+        ("load_skill", "run_shell"),
+    ),
+    (
+        # Not "commit": the workflow's own commit step says it, and his own git_commit is right there.
+        re.compile(_word("pull requests?|PRs?|push|branch|line of work|save and send"), re.I),
+        'This request matches your github skill: call load_skill("github") first and follow it.',
+        ("load_skill",),
+    ),
+    (
+        # "the/my/your/all" only: the README eval ask says "how to run its tests" and must not change.
+        re.compile(r"\brun (?:the|my|your|all(?: the)?) tests\b", re.I),
+        'This request matches your run-tests skill: call load_skill("run-tests") first and follow it.',
+        ("load_skill",),
+    ),
+    (
+        re.compile(_word("secondbrain|my notes?|write (?:it|this|that) up"), re.I),
+        'This request matches your secondbrain-notes skill: call load_skill("secondbrain-notes") first and follow it.',
+        ("load_skill",),
     ),
 )
 # Regression run 9: in the Agent tab the work runs on the user's Approve turn, which matches no pattern, so a hint
@@ -1196,7 +1225,10 @@ async def _maybe_enable_local_memory() -> Any:
 
 _CHARTER_NOTE = "steward-charter"
 # The notes Steward reads in the live path (plan-steward-context-memory-reads, piece 2); reads only.
-_SECONDBRAIN_NOTES_TOOLS = ("search_notes", "read_note", "list_notes")
+# Reads run at once; writing and appending a note ask the user (the secondbrain-notes skill, 2026-11-02: the live
+# Steward could read his notes but had no tool to write one, though the skill and the user expect it).
+_SECONDBRAIN_NOTES_TOOLS = ("search_notes", "read_note", "list_notes", "write_note", "append_to_note")
+_SECONDBRAIN_NOTES_ASK = ("write_note", "append_to_note")
 # His file memory's one scope, the same in every session (piece 3).
 _FILE_MEMORY_SCOPE = "steward"
 
@@ -1493,7 +1525,10 @@ async def build_steward_agent(
                     mcp_client=secondbrain_client,
                     tool_name_prefix="secondbrain",
                     allowed_tools=list(_SECONDBRAIN_NOTES_TOOLS),
-                    approval_mode="never_require",
+                    approval_mode={
+                        "always_require_approval": list(_SECONDBRAIN_NOTES_ASK),
+                        "never_require_approval": [t for t in _SECONDBRAIN_NOTES_TOOLS if t not in _SECONDBRAIN_NOTES_ASK],
+                    },
                     load_prompts=False,
                 )
             )

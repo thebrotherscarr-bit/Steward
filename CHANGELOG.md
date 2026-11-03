@@ -13,6 +13,37 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Added
+
+- Step 4, evals as small single asks: `python evals.py small` runs three asks (a new function, the discount fix with the
+  bug planted, a README line) once each through the workflow as the Agent tab runs it, the plan and the writes
+  approved and the commit denied, and scores them with seven MAF `@evaluator` checks, one per failure seen live on
+  2026-11-02: the plan labelled as a clarification, a write the check missed, an edit that broke the file, "proceed?"
+  instead of `git_commit` (or the door's `atlas_git_commit`), a vague commit message, the loop's nudge in a reply, and
+  an off-topic answer. The sample project is reset after every ask. `test_the_small_asks_check_each_of_todays_failures`
+  proves each check fails on its failure and passes on the right run.
+- The `evals` skill (`harness/steward/skills/evals/SKILL.md`): Steward runs his own eval sets on request ("run
+  your evals", "run the small asks"), once, with `run_shell`, and reports every line as printed. His instructions
+  name it, and a request that names evals gets the one-line hint to load it (`REQUEST_HINTS`). A skill script
+  is not used: MAF's script runner stops a script after 30 seconds, and an eval set runs for minutes.
+- Three more skills, each a procedure he follows on request, with his instructions naming it and a one-line hint
+  (`REQUEST_HINTS`): `github` (a line of work, the commit, the send, the pull request and its checks, through the
+  door's `atlas_*` tools, each write on the user's card; the merge only on the user's word), `run-tests` (pytest
+  once through `run_shell`, the summary line reported exactly) and `secondbrain-notes` (search first, cite the
+  note and its date, append rather than replace, sources and dates on new notes).
+- `secondbrain_write_note` and `secondbrain_append_to_note` for the live Steward: his notes were read-only
+  (`_SECONDBRAIN_NOTES_TOOLS`), though the skill and the user expect him to write them. Both ask on a card, and
+  plan mode's gate counts them among the tools that change things.
+
+### Changed
+
+- The Ollama server's settings on this PC (Windows user environment, not the repo), recorded in
+  `harness/steward/README.md`: `OLLAMA_KEEP_ALIVE` `30` (seconds) to `30m`, `OLLAMA_MAX_LOADED_MODELS` 6 to 2 (the
+  chat model and the embedder), `OLLAMA_NUM_PARALLEL` 3 to 1. Ollama updated from 0.35.0 to 0.40.13; the embedding
+  model for Steward is now `embeddinggemma-2:270m`, run on the CPU; `nomic-embed-text-v2-moe` stays, because Manjuel's
+  index (`manjuel/skills.py` `EMBED_MODEL`, `index/vectors.db`) is built on it. The build plan from
+  the 2026-11-02 deep dive is in the README's "Where it stands".
+
 ### Findings
 
 Research recorded 2026-11-02 in the SecondBrain note `maf-solved-patterns-checked-2026-11-02-d8d89a`. No code changed.

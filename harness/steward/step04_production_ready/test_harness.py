@@ -45,7 +45,7 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map")
+SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals", "github", "run-tests", "secondbrain-notes")
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
@@ -332,7 +332,9 @@ def test_plan_mode_states_the_tool_policy_and_every_tool_stays_offered() -> None
     """The cookbook's way: the tools stay offered (their approvals are the gate) and plan mode states the policy."""
     client, _, _ = run_steward(["Here is the plan."], "Do it.")
     offered, instructions = offered_tools(client.calls[0]), str(client.calls[0]["options"].get("instructions") or "")
-    assert steward._CHANGES_THINGS - {"run_shell", "atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr"} <= offered
+    # The door's and SecondBrain's tools come over MCP, which these tests do not connect.
+    over_mcp = {"atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr", "secondbrain_write_note", "secondbrain_append_to_note"}
+    assert steward._CHANGES_THINGS - {"run_shell", *over_mcp} <= offered
     assert {"todos_add", "mode_set"} <= offered
     assert steward.PLAN_MODE_TOOL_POLICY in instructions and "file_access_write" in steward.PLAN_MODE_TOOL_POLICY
     # The plan-mode gate: a write called in plan mode is refused with corrective feedback, with no card.
@@ -429,6 +431,14 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
     assert "WebResearchAgent" in hints_for("Research Ollama and mem0 and summarize the latest news.")
     assert "execute_code" in hints_for("What percentage of the lines are tests?")
     assert "CodeExplorer" in hints_for("Explore it with the CodeExplorer agent.")
+    assert 'load_skill("evals")' in hints_for("Run your small asks evals.")
+    assert 'load_skill("github")' in hints_for("Send this line and open a pull request.")
+    assert 'load_skill("run-tests")' in hints_for("Run the tests in the sample project.")
+    assert 'load_skill("secondbrain-notes")' in hints_for("Write it up in SecondBrain.")
+    import evals
+
+    assert "run-tests" not in hints_for(evals.SMALL_ASK_README), "the README eval ask stays as it was"
+    assert "github" not in hints_for("Commit your work now: call git_commit once."), "the commit step is not the github skill"
     assert hints_for("Hello, how are you?") == "", "nothing is added when nothing matches"
     assert hints_for("Fix the import in C:/Users/novad/Desktop/Research/worlds/x.py.") == "", "a word inside a path never counts"
 
@@ -1137,3 +1147,71 @@ def test_improvement_loop_workflow_repairs_reviews_and_resumes(tmp_path: Path) -
     assert (result.decision, result.passed, result.attempts) == ("keep", True, 2)
     assert len(client.calls) == 3, "the rejected commit, then one attempt per check run"
     assert runs.read_text() == "2", "the checks ran after each attempt"
+
+
+def test_the_small_asks_check_each_of_todays_failures() -> None:
+    """Step 4: each small-ask check fails on the failure it is named for, passes on the right run, and passes an ask
+    that is not its own (the guide's evaluators)."""
+    import evals
+    import steward_workflow as wf
+    from agent import PLAN_REPLY_NUDGE
+
+    def card(name: str, args: dict[str, Any]) -> Message:
+        call = Content.from_function_call(call_id=f"{name}-1", name=name, arguments=args)
+        return Message(role="assistant", contents=[Content.from_function_approval_request(id=f"{name}-1", function_call=call)])
+
+    def approved_write(file_name: str) -> Message:
+        from agent_framework import FileAccessProvider
+
+        call = Content.from_function_call(
+            call_id="w1", name=FileAccessProvider.WRITE_TOOL_NAME, arguments={"file_name": file_name, "content": "x"}
+        )
+        request = Content.from_function_approval_request(id="w1", function_call=call)
+        return Message(role="user", contents=[request.to_function_approval_response(approved=True)])
+
+    def said(text: str) -> Message:
+        return Message(role="assistant", contents=[Content.from_text(text)])
+
+    def passed(check: Any, query: str, conversation: list[Any]) -> bool:
+        return scored(check, query, conversation).passed
+
+    new_code, discount, readme = evals.SMALL_ASK_NEW_CODE, evals.SMALL_ASK_DISCOUNT, evals.SMALL_ASK_README
+    module = "harness/steward/working/sample-project/inventory.py"
+    checks_passed = said("Checks passed:\n$ pytest -q harness/steward/working/sample-project\n(exit 0)")
+
+    # 1. The plan labelled as a clarification.
+    assert passed(evals.plan_is_approval, new_code, [card(wf.APPROVE_PLAN, {"steps": ["Add it"]})])
+    assert not passed(evals.plan_is_approval, new_code, [said("Should I proceed? (yes)")])
+    assert passed(evals.commit_by_tool, readme, []), "not the README ask's check"
+
+    # 2. A write missed behind a later card.
+    assert passed(evals.check_covers_writes, new_code, [approved_write(module), checks_passed])
+    assert not passed(evals.check_covers_writes, new_code, [approved_write(module), said("Done.")])
+
+    # 3. A broken edit (tabs).
+    evals.SMALL_ASK_ORIGINALS[module] = "def order_total(items):\n    return 0\n"
+    evals.SMALL_ASK_FILES[new_code] = {module: 'def order_total(items):\n    """Total."""\n    return 0\n'}
+    assert passed(evals.edit_keeps_file_whole, new_code, [])
+    evals.SMALL_ASK_FILES[new_code] = {module: 'def order_total(items):\n\t"""Total."""\n    return 0\n'}
+    assert not passed(evals.edit_keeps_file_whole, new_code, [])
+    evals.SMALL_ASK_FILES.clear()
+    evals.SMALL_ASK_ORIGINALS.clear()
+
+    # 4. "Proceed?" instead of git_commit, and the door's commit, which would park a real card.
+    commit_card = card("git_commit", {"message": "Add item_count to inventory.py"})
+    assert passed(evals.commit_by_tool, new_code, [checks_passed, commit_card])
+    assert not passed(evals.commit_by_tool, new_code, [checks_passed, said("Shall I proceed with the commit?")])
+    door = Message(role="assistant", contents=[Content.from_function_call(call_id="d1", name="atlas_git_commit", arguments={})])
+    assert not passed(evals.commit_by_tool, new_code, [checks_passed, door, commit_card])
+
+    # 5. A vague commit message.
+    assert passed(evals.commit_message_specific, new_code, [commit_card])
+    assert not passed(evals.commit_message_specific, new_code, [card("git_commit", {"message": "Update"})])
+
+    # 6. The loop's nudge in his reply.
+    assert passed(evals.no_nudge_in_reply, readme, [said("Added the line to README.md on running the tests.")])
+    assert not passed(evals.no_nudge_in_reply, readme, [said(PLAN_REPLY_NUDGE)])
+
+    # 7. An off-topic final answer.
+    assert passed(evals.answer_on_topic, discount, [said("Fixed the discount: it divides by 100 now.")])
+    assert not passed(evals.answer_on_topic, discount, [said("Paris is the capital of France.")])

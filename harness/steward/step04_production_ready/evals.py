@@ -22,6 +22,7 @@ import asyncio
 import subprocess
 import sys
 import tempfile
+import contextlib
 from contextlib import AsyncExitStack, contextmanager
 from pathlib import Path
 from typing import Any
@@ -723,8 +724,216 @@ async def steps_main() -> None:
                 print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
 
 
+# Step 4: evals as small single asks (the cookbook's evaluation flywheel: today's failures labelled, grouped, and
+# each given a check; MAF's guide evals.py: run each query yourself with its cards answered, then
+# evaluate_agent(..., responses=...)). Each ask runs once through the workflow as the Agent tab runs it
+# (run_steward), the plan and the writes approved as the user would, the commit card denied: nothing is committed.
+# A check that is not its ask's passes ("Not this case."), as the guide's evaluators do. Run: python evals.py small.
+
+# Live 2026-11-02 (run 1): order_total already had a docstring, so he rightly asked a clarification; and fixing
+# the planted discount bug puts inventory.py back to its committed text, so the check finds nothing changed and no
+# commit follows. The commit and check-coverage cases therefore ride on new code, which the tests still pass.
+SMALL_ASK_NEW_CODE = (
+    "Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total "
+    "quantity of all the items, with a docstring."
+)
+SMALL_ASK_DISCOUNT = "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project."
+SMALL_ASK_README = "Add one line to harness/steward/working/sample-project/README.md that says how to run its tests."
+SMALL_ASKS = [SMALL_ASK_NEW_CODE, SMALL_ASK_DISCOUNT, SMALL_ASK_README]
+# Which of today's failures each ask checks (the cookbook's axial codes, one check each).
+SMALL_ASK_CHECKS: dict[str, set[str]] = {
+    SMALL_ASK_NEW_CODE: {
+        "plan_is_approval", "edit_keeps_file_whole", "check_covers_writes", "commit_by_tool", "commit_message_specific",
+        "no_nudge_in_reply", "answer_on_topic",
+    },
+    SMALL_ASK_DISCOUNT: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic"},
+    SMALL_ASK_README: {"plan_is_approval", "no_nudge_in_reply", "answer_on_topic"},
+}
+# What an on-topic answer and a specific commit message name, per ask.
+SMALL_ASK_SUBJECT: dict[str, tuple[str, ...]] = {
+    SMALL_ASK_NEW_CODE: ("item_count",),
+    SMALL_ASK_DISCOUNT: ("discount",),
+    SMALL_ASK_README: ("readme", "test"),
+}
+VAGUE_COMMIT_MESSAGES = {"update", "updates", "changes", "change", "fix", "fixes", "wip", "checkpoint", "commit", "work"}
+# The files each run wrote, as they stood on disk when the run ended (read before the planted bug is put back).
+SMALL_ASK_FILES: dict[str, dict[str, str]] = {}
+SMALL_ASK_ORIGINALS: dict[str, str] = {}
+
+
+def _not_this_case(name: str, query: str) -> dict[str, object] | None:
+    return None if name in SMALL_ASK_CHECKS.get(query, set()) else {"passed": True, "reason": "Not this case."}
+
+
+def _assistant_text(conversation: list[Any]) -> str:
+    return "\n".join(m.text or "" for m in conversation or [] if getattr(m, "role", None) == "assistant")
+
+
+def _cards_named(conversation: list[Any], name: str) -> list[Any]:
+    return [
+        c for m in conversation or [] for c in getattr(m, "contents", None) or []
+        if c.type == "function_approval_request" and c.function_call is not None and c.function_call.name == name
+    ]
+
+
+@evaluator(name="plan_is_approval")
+def plan_is_approval(query: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 1, the plan labelled as a clarification: the run reaches the plan card (approve_plan)."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    if skip := _not_this_case("plan_is_approval", query):
+        return skip
+    ok = bool(_cards_named(conversation, wf.APPROVE_PLAN))
+    return {"passed": ok, "reason": "The plan came as an approval card." if ok else f"No plan card: {_assistant_text(conversation)[:160]!r}"}
+
+
+@evaluator(name="check_covers_writes")
+def check_covers_writes(query: str, response: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 2, a write missed behind a later card: the check ran the tests of every .py file the run wrote."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    if skip := _not_this_case("check_covers_writes", query):
+        return skip
+    written = wf.written_python_files(conversation)
+    if not written:
+        return {"passed": False, "reason": "No approved .py write in the run."}
+    missed = [f for f in written if f"$ pytest -q {Path(f).parent.as_posix()}" not in (response or "").replace("\\", "/")]
+    return {"passed": not missed, "reason": f"The check covered {written}." if not missed else f"Not checked: {missed}"}
+
+
+@evaluator(name="edit_keeps_file_whole")
+def edit_keeps_file_whole(query: str) -> dict[str, object]:
+    """Failure 3, a broken edit (tabs): every .py file the run wrote still parses, and gained no tab indentation."""
+    import ast  # noqa: PLC0415
+
+    if skip := _not_this_case("edit_keeps_file_whole", query):
+        return skip
+    files = SMALL_ASK_FILES.get(query, {})
+    if not files:
+        return {"passed": False, "reason": "The run wrote no .py file."}
+    for name, text in files.items():
+        try:
+            ast.parse(text)
+        except SyntaxError as error:
+            return {"passed": False, "reason": f"{name} no longer parses: {error}"}
+        before = SMALL_ASK_ORIGINALS.get(name, "")
+        if "\n\t" in text and "\n\t" not in before:
+            return {"passed": False, "reason": f"{name} gained tab indentation."}
+    return {"passed": True, "reason": f"{sorted(files)} parse, indentation kept."}
+
+
+@evaluator(name="commit_by_tool")
+def commit_by_tool(query: str, response: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 4, "proceed?" instead of git_commit: after "Checks passed" his own git_commit raises the card, and the
+    door's commit (atlas_git_commit, a real card in SecondBrain) is not used."""
+    if skip := _not_this_case("commit_by_tool", query):
+        return skip
+    if "Checks passed" not in (response or ""):
+        return {"passed": False, "reason": f"The checks did not pass, so no commit step: {(response or '')[-200:]!r}"}
+    if any(name == "atlas_git_commit" for name in _called(conversation)):
+        return {"passed": False, "reason": "Committed through the door (atlas_git_commit): deny that card in SecondBrain."}
+    ok = bool(_cards_named(conversation, "git_commit"))
+    return {"passed": ok, "reason": "git_commit raised the card." if ok else f"No git_commit card: {_assistant_text(conversation)[-200:]!r}"}
+
+
+@evaluator(name="commit_message_specific")
+def commit_message_specific(query: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 5, a vague commit message: the card's message names the change, not a word like "update"."""
+    if skip := _not_this_case("commit_message_specific", query):
+        return skip
+    cards = _cards_named(conversation, "git_commit")
+    if not cards:
+        return {"passed": False, "reason": "No git_commit card to read."}
+    message = str((cards[-1].function_call.parse_arguments() or {}).get("message", "")).strip()
+    vague = message.lower().strip(" .!") in VAGUE_COMMIT_MESSAGES
+    named = any(term in message.lower() for term in SMALL_ASK_SUBJECT[query])
+    ok = not vague and named
+    return {"passed": ok, "reason": f"Message {message!r}."}
+
+
+@evaluator(name="no_nudge_in_reply")
+def no_nudge_in_reply(query: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 6, the loop's nudge in his reply: no assistant text repeats a harness message meant for him."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent import PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE  # noqa: PLC0415
+
+    if skip := _not_this_case("no_nudge_in_reply", query):
+        return skip
+    said = _assistant_text(conversation)
+    harness_texts = [
+        PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, wf.PLAN_IS_APPROVAL, wf.PLAN_AGAIN, wf.COMMIT_NOW,
+        "open todo item(s) that must be addressed before you can finish",  # MAF's todos_remaining_message
+    ]
+    echoed = [text[:60] for text in harness_texts if text.split("{")[0][:60] in said]
+    return {"passed": not echoed, "reason": "No harness message in his replies." if not echoed else f"Echoed: {echoed}"}
+
+
+@evaluator(name="answer_on_topic")
+def answer_on_topic(query: str, conversation: list[Any]) -> dict[str, object]:
+    """Failure 7, an off-topic final answer: his last reply names what was asked."""
+    if skip := _not_this_case("answer_on_topic", query):
+        return skip
+    last = _last_said(conversation).lower()
+    ok = any(term in last for term in SMALL_ASK_SUBJECT[query])
+    return {"passed": ok, "reason": "On topic." if ok else f"Last reply misses {SMALL_ASK_SUBJECT[query]}: {last[:160]!r}"}
+
+
+async def small_main() -> None:
+    """Step 4's small asks, one run each, scored with their checks."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent import _WORKING_DIR  # noqa: PLC0415
+    from agent_framework import FileAccessProvider  # noqa: PLC0415
+
+    load_dotenv()
+    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    project = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project"
+    SMALL_ASK_ORIGINALS.clear()
+    SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
+    originals = {p: p.read_bytes() for p in project.iterdir() if p.is_file()}
+    approve = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001 - writes approved; git_commit denied
+    responses: list[AgentResponse[Any]] = []
+    steward = None
+    def reset() -> None:
+        """The sample project as committed: every file put back, anything a run added removed."""
+        for path in project.iterdir():
+            if path.is_file() and path not in originals:
+                path.unlink()
+        for path, data in originals.items():
+            path.write_bytes(data)
+
+    try:
+        for query in SMALL_ASKS:
+            # Only the discount ask has the bug planted: in the others a failing test would send the run to repair.
+            with discount_bug_planted() if query == SMALL_ASK_DISCOUNT else contextlib.nullcontext():
+                steward, response = await run_steward(query, approve, auto_approve_skill_scripts=True)
+                responses.append(response)
+                written = wf.written_python_files(response.messages)
+                SMALL_ASK_FILES[query] = {
+                    name: (_WORKING_DIR / name).read_text(encoding="utf-8") for name in written if (_WORKING_DIR / name).exists()
+                }
+            reset()  # each ask starts from the committed sample project
+    finally:
+        reset()  # the reset before any save
+    results = await evaluate_agent(
+        agent=steward,
+        queries=SMALL_ASKS,
+        responses=responses,
+        evaluators=LocalEvaluator(
+            plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
+            no_nudge_in_reply, answer_on_topic,
+        ),
+        conversation_split=ConversationSplit.FULL,
+    )
+    print(f"Small asks: {results[0].passed}/{results[0].total} passed")
+    for item in results[0].items:
+        print(f"  [{item.status}] {(item.input_text or '')[:70]}")
+        for score in item.scores:
+            if (score.sample or {}).get("reason") != "Not this case.":
+                print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+
+
 if __name__ == "__main__":
     # a reason can carry characters Windows' console code page cannot print (2026-10-30: U+2011)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    runs = {"plan": plan_main, "roundtrip": round_trip_main, "walkthrough": walkthrough_main, "steps": steps_main}
+    runs = {"plan": plan_main, "roundtrip": round_trip_main, "walkthrough": walkthrough_main, "steps": steps_main, "small": small_main}
     asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main())
