@@ -1262,3 +1262,20 @@ def test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done
     client, _, _ = run_steward(["The pull request is open."], "Open a pull request for this line.", mode="execute")
     assert len(client.calls) == 1, "no 'Before you finish' nudge for a skill read in another step"
     assert not any(steward.REQUIRED_TOOLS_NUDGE in str(m.text) for m in client.calls[0]["messages"])
+
+
+def test_the_improvement_loops_fixer_is_stewards_harness_on_the_coder_model() -> None:
+    """Step 6, 6.1: the loop's writer is Steward's own harness (same file tools and write cards) on the coder model,
+    asking Ollama for a 32K window so a whole harness file fits."""
+    import improvement_loop_workflow as loop
+
+    assert loop.fixer_client().model == steward._CODER_MODEL
+    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "devstral-small-2:24b")
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            return await loop.build_fixer(stack, client=ScriptedChatClient(["ok"]), enable_shell=False)
+
+    fixer = asyncio.run(_go())
+    assert fixer.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 32_768
+    assert any(type(p).__name__ == "FileAccessProvider" for p in fixer.context_providers), "the same file tools"
