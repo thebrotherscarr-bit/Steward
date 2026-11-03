@@ -34,6 +34,12 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6, piece 6.3 (first part): the improvement loop on his host. A turn whose request metadata carries
+  `{"steward_workflow": "improve"}` runs `improvement_loop_workflow.py` (the coder fixer, the gate, the review)
+  instead of his request workflow; the loop has a fixed name (`steward_improve`) so card answers resume it, uses the
+  host's checkpoints, and drops the `improve:` prefix from the task. The review comes back as MAF's `request_info`
+  call and is answered with `function_call_output`. The Agent tab's side is the next part.
+  `test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_comes_back_as_a_card`.
 - Step 6, piece 6.2: the eval gate. `evals.py small` prints `Small-ask checks: N/M` over the checks that apply to
   their ask, and with `--gate` exits 1 when they drop below the baseline in `eval_baselines.json` (10 of 14, the
   first clean run, 2026-11-02; the operator raises it after a real improvement). The improvement loop's gate now

@@ -1303,3 +1303,42 @@ def test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop(tmp_path: 
     assert evals.gate(11, 14, baselines=baselines) == 0
     assert evals.gate(10, 14) == 0, "the recorded baseline is 10 of 14"
     assert any("evals.py" in part for check in loop.GATE_CHECKS for part in check), "the loop's gate runs the evals"
+
+
+def test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_comes_back_as_a_card(monkeypatch: Any) -> None:
+    """Step 6, 6.3: a turn with {"steward_workflow": "improve"} runs the improvement loop on his host (the coder
+    fixer, the gate, the review). The review comes back as MAF's request_info call; its answer, sent as
+    function_call_output on previous_response_id, resumes the loop to its decision. Other turns are untouched."""
+    import json
+    import tempfile
+
+    import hosted
+    import improvement_loop_workflow as loop
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    monkeypatch.setattr(loop, "GATE_CHECKS", [[sys.executable, "-c", "print('gate ok')"]])
+    replies: list[Any] = ["Done: nothing needed changing."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    improve = {"store": True, "metadata": {"steward_workflow": "improve"}}
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        first = http.post("/responses", json={"input": "improve: the plan comes back as prose", **improve}).json()
+        [review] = [o for o in first["output"] if o["type"] == "function_call" and o["name"] == "request_info"]
+        asked = json.loads(review["arguments"])["request"]
+        assert asked["passed"] is True and "keep" in asked["prompt"], asked
+        asked_fixer = " ".join(m.text or "" for m in calls[0]["messages"])
+        assert "the plan comes back as prose" in asked_fixer, "the fixer got the task"
+        assert "improve:" not in asked_fixer, "without the improve: prefix"
+        answer = {"type": "function_call_output", "call_id": review["call_id"], "output": "keep"}
+        second = http.post("/responses", json={"previous_response_id": first["id"], "input": [answer], **improve}).json()
+    assert not any(o["type"] == "function_call" for o in second["output"]), "the loop decided; no further card"
+    assert "keep" in json.dumps(second["output"]), second["output"]
+    assert hosted.steward_options(None, {"metadata": {"steward_workflow": "improve"}}) == {}, "the key never reaches the model"
+    state.cleanup()
