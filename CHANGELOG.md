@@ -1,0 +1,218 @@
+# Changelog
+
+All notable changes to Steward are recorded in this file.
+
+The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Steward is pre-1.0 (0.y.z): a minor version may change
+behaviour, ports or interfaces.
+
+The current version is the `version` line in `pyproject.toml`. Versions are recorded here, not as git tags: a tag is
+created only on the owner's word. The versions below were assigned after the fact by grouping the merged pull requests
+by milestone. Each version carries the date of its last merge, and each entry cites its pull request. Pull request #12
+was never merged and has no entry.
+
+## [Unreleased]
+
+### Findings
+
+Research recorded 2026-11-02 in the SecondBrain note `maf-solved-patterns-checked-2026-11-02-d8d89a`. No code changed.
+
+- **Evals for a workflow with cards.** MAF's `evaluate_workflow(queries=...)` calls `workflow.run(q)` once per query
+  (`agent_framework/_evaluation.py`) and does not answer `request_info` cards, so a run with cards is scored only up
+  to its first card. The guide's own step 4 `evals.py` pattern applies instead: run each query yourself with its cards
+  answered, then score with `evaluate_agent(..., responses=...)`. Steward's `evals.py` already does this (`run_steward`,
+  `_run_answering_cards`). Its `steps` case groups `executor_completed` events by executor id, which is
+  `evaluate_workflow`'s per-agent breakdown done by hand because of the cards.
+- **The method is the cookbook's evaluation flywheel** (*Building resilient prompts using an evaluation flywheel*):
+  Analyze, Measure, Improve, and again. Today's live failures are the cases. Each becomes one small single-ask case
+  with one `@evaluator` reading the artifact or the run, scored by MAF's `LocalEvaluator`, one run per case. Planned
+  for step 4, not yet built:
+  - a plan labelled as a clarification;
+  - a write missed behind a later card;
+  - an edit that broke a file (tabs among spaces);
+  - "proceed?" asked instead of calling `git_commit`;
+  - a vague commit message;
+  - the loop's nudge visible in a reply;
+  - an off-topic final answer.
+- **Deploying locally.** MAF's hosting options (Learn, *Hosting*) are Foundry Hosted Agents, self-hosting and the
+  Durable Extension. Foundry Hosted Agents need Azure, which the estate's local-only rule rules out. MAF's
+  self-hosting helpers (`agent-framework-hosting`, `agent-framework-hosting-responses`, the sample
+  `04-hosting/af-hosting/local_responses_workflow`) cannot yet take an approval answer back in: `hosting-responses`'
+  `_parsing.py` raises "Unsupported Responses input content type" for any input item but message, text, image or
+  file, and workflow `request_info` and checkpoints are not handled. So the Foundry host,
+  `agent_framework_foundry_hosting.ResponsesHostServer` with `WorkflowTurn` and `CheckpointStoreProvider`, run on
+  loopback, stays Steward's host. Its cost is three local workarounds in `hosted.py`: a fixed
+  `FOUNDRY_AGENT_SESSION_ID`, a short `AGENTSERVER_STATE_ROOT` (`.as`) for Windows' 260-character path limit, and
+  dropping `additional_function_arguments` before the Ollama call.
+- **What Steward lacks to deploy locally:**
+  - A deployment package. `pyproject.toml` pins nothing and does not list packages the code imports:
+    `agent-framework-hosting`, `agent-framework-hosting-mcp`, `mcp`, `starlette` and `uvicorn` (`mcp_app.py`), and
+    `agent-framework-devui` (`devui_app.py`). Only the gate (`.github/workflows/gate.yml`) pins versions. The guide's
+    step 4 folder carries a `requirements.txt` and an `.agentignore`. Recorded as a finding only; the dependencies
+    are not changed here.
+  - An eval gate in front of deploying. The cookbook (*Agent Improvement Loop*): "a reviewed loop, where the system
+    proposes the change set and a developer approves the diff before merge."
+  - Proof of memory across requests. MAF's `FileMemoryProvider` is session-scoped by default; an explicit `scope`
+    shares it (MAF devblog, BUILD 2026; Learn, *Agent Harness*). `agent.py` already gives his file memory the
+    explicit scope `steward` (#20); what is missing is an eval case that proves a note saved in one request is
+    recalled in the next (step 5).
+  - The cookbook's improvement loop, with the owner's approval at the merge.
+- **The agreed order:** 1, the check sees every write (done, #33); 2, commit after a passing check (done, #34); 3,
+  define once (done, #35); 4, evals as small single asks (next); 5, memory across requests, as an eval case; 6, the cookbook's
+  improvement loop.
+
+## [0.7.0] - 2026-11-02
+
+Ports.
+
+### Changed
+
+- Steward's MCP endpoint (`mcp_app.py`) moves from port 8000, the MAF samples' port, which ComfyUI also takes, to
+  43121, beside his service (43120) and SecondBrain's MCP (43110). An MCP client points at
+  `http://127.0.0.1:43121/mcp`. (#37)
+
+## [0.6.0] - 2026-11-02
+
+The workflow's fixes from live runs, the commit step, and define once.
+
+### Added
+
+- `steward_workflow.build_steward(stack, **build)` builds Steward and his workflow in one place and returns
+  `(agent, workflow)`; the guide's Part 4: "The agent is defined once; only the host around it changes." `hosted.py`
+  and `evals.py` build from it, and `test_every_host_builds_the_same_steward_workflow` checks that the service's graph
+  is the builder's. (#35)
+- The commit step. After the check passes on changed code, ASK_COMMIT says "Checks passed" and asks Steward to commit
+  (`COMMIT_TODO`); COMMIT runs his own `git_commit`, which comes to the user on its own card. EXECUTE is told not to
+  commit; failing work, and runs that changed nothing, go to REPORT. (#34)
+- EXECUTE and COMMIT stream to the caller as intermediate output (MAF's `intermediate_output_from`), so the Agent tab
+  shows his work as it happens. REPORT gives only the checks' result. (#35)
+- The plan step sends a plan labelled a clarification with no choices the guide's `PlanningResponseType` definitions,
+  once per run. (#32)
+- `halo_traces.py` caps the trace file at `HALO_TRACE_MAX_BYTES` (100 MB), keeping the newest whole spans. (#32)
+
+### Changed
+
+- The check reads the files on disk, not the transcript: pytest runs in the folder of each `.py` file that differs
+  from the committed state (`git ls-files --modified --others`), whichever tool or card wrote it. The check's own
+  pytest carries `STEWARD_CHECK_RUNNING`, so a workflow under test does not start the check again. (#33)
+- REPAIR runs in execute mode with the fix as its one todo (`REPAIR_TODO`). (#36)
+- The plan card's id is its request id, as MAF's `AgentExecutor` raises approvals, so an answer through
+  `workflow.as_agent()` finds it. (#35)
+- `evals.py` runs each case through the workflow as an agent (Learn, *Using Workflows as Agents*), in a fresh build
+  without a session. (#35)
+
+### Fixed
+
+- A write approved before a later card was missed by the check, so a broken test file passed. (#33)
+- A repair after finished todos came back as a new plan, because the finished todos had returned him to plan mode.
+  (#36)
+- The sample project's `test_inventory.py` is put back after a live run's half-done docstring edit broke it. (#32)
+
+## [0.5.0] - 2026-11-01
+
+Steward as a MAF workflow.
+
+### Added
+
+- `steward_workflow.py`: plan (structured output, `StewardPlan`) -> read_plan -> ask_approval (the `approve_plan`
+  card) -> execute (the plan's steps as his todos, in execute mode) -> report. Denied, nothing runs. (#30)
+- A model-free check after EXECUTE, repaired until it passes, at most three attempts. The attempt count is workflow
+  state, kept across a card's pause. (#30)
+- `hosted.py` serves the workflow on MAF's `ResponsesHostServer(workflow=...)`: a fresh Steward and graph per request,
+  the host's state in `.as`, and one local session id. (#30)
+- Evals: the plan names its work; round-trip and walkthrough cases. (#30)
+
+### Fixed
+
+- From the workflow's first live runs: a plan needs at least one step and one question; a clarification reaches the
+  user as text; an empty plan reply is asked again once; the check counts writes approved on a card and not denied
+  ones; the user's No on a card ends the run; an approved `run_shell` no longer fails the run. (#31)
+- The shell is Git Bash on Windows and MAF's default shell elsewhere, so the gate's Linux runner can run the shell
+  check. (#31)
+
+## [0.4.0] - 2026-11-01
+
+Plan mode.
+
+### Added
+
+- The plan-mode gate: in plan mode nothing that changes things is offered, and his own switch out of plan mode is
+  refused. (#25)
+- Plan-before-act evals (`python evals.py plan`, gate 0.8). (#27)
+- Request hints carry the tools their work needs; misspelled tool names are repaired before dispatch. (#29)
+
+### Changed
+
+- Every session starts in plan mode, MAF's own default. (#22)
+- He keeps a todo list for every task; no "simple task" skips the plan. (#24)
+- The guide's plan mode on the host: `PlanningResponse` in plan mode, and the user's Approve switches the session to
+  execute (`hosted.py`'s `plan_mode_turns`). Finished todos return him to plan mode. (#23, #26, #27)
+
+### Fixed
+
+- Finished work is no longer asked for a plan. (#28)
+- Evals: full-conversation scoring, the discount bug planted for its case, and the test share computed from disk.
+  (#29)
+
+## [0.3.0] - 2026-10-31
+
+The ADR-0001 items.
+
+### Added
+
+- Microsoft's `agent-framework-builder-python` skill, pinned to the python-1.23.0 release. (#9)
+- MAF's `ShellEnvironmentProvider` tells him his shell environment before each run. (#10)
+- Harness looping while his todos are open in execute mode, at most ten iterations. (#11)
+- Gate stage 2: model-free checks of the harness (`test_harness.py`) on a scripted chat client. (#13)
+- Atlas's door tools (`git`, `git_branch`, `git_diff`, `git_commit`, `git_push`, `records`) on his existing
+  SecondBrain connection, kept to his own world by `steward_world_only`; `git_pr` joins them. (#15, #16, #21)
+- DevUI with tracing (`devui_app.py`). (#17)
+- Steward as an MCP tool (`mcp_app.py`, after MAF's `session_app.py` sample), on loopback port 8000. (#18)
+- The improvement loop's change step as a checkpointed MAF workflow (`improvement_loop_workflow.py`). (#19)
+- His SecondBrain notes as reads, the `steward-charter` note in his instructions every turn, and file memory with
+  one explicit scope, `steward`, shared across sessions. (#20)
+
+### Changed
+
+- The workspace default is the repo root, so his own harness code is in reach. (#14)
+- Reads run without a card, and the file store never reads, searches or lists a `.env` file; this supersedes the card
+  per read of #14. (#20)
+- The door's `state/` and `steward-mcp.log` are ignored. (#21)
+
+### Removed
+
+- The stdio bridge to the door with a key of its own, added in #15. (#16)
+
+## [0.2.0] - 2026-10-30
+
+The guide's Parts 2 to 4, the improvement loop and the CI gate.
+
+### Added
+
+- Parts 2 to 4 as the claw guide plans them: SecondBrain's `web_search` and `web_fetch` on one shared MCP client,
+  the background `WebResearchAgent` beside `CodeExplorer`, and SecondBrain's skill notes beside the file skills. (#2)
+- `improvement_loop.py`: the cookbook's agent improvement loop. (#2)
+- CI gate stage 1: every Python file compiles and the sample project's tests pass. (#3)
+- Four regression cases from the improvement loop in `evals.py`. (#5)
+
+### Changed
+
+- The improvement loop uses the cookbook's `reasoning_effort`, medium, for every stage. (#4)
+- From Part 3 the web tools belong to the `WebResearchAgent` alone. (#7)
+- The evals run each query streamed, so MAF's tool checks see every round. (#8)
+
+### Fixed
+
+- `evals.py` prints its results in UTF-8. (#6)
+
+## [0.1.0] - 2026-10-29
+
+The MAF redo.
+
+### Added
+
+- MAF's get-started samples 01 to 07, the harness samples and the claw guide's steps 1 to 4, on local Ollama
+  (committed before the first pull request).
+- `hosted.py` serves Steward on 127.0.0.1:43120 (Responses protocol); every span is written to
+  `halo_traces/traces.jsonl`.
+- `steward.Modelfile` and the stewardship changes to `agent.py` and step 1. (#1)

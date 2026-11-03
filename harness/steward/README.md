@@ -8,7 +8,7 @@ of the guide's finance assistant. Everything runs on local Ollama and reuses the
 - **Step 1: `step01_meet_steward.py`**: the minimal harness, with planning, compaction and a `get_repo_status` tool.
 - **Step 2: `step02_working_with_code.py`**: file access over the workspace, approval-gated `git_commit`, and durable file memory.
 - **Step 3: `step03_scaling_capabilities.py`**: skills (`code-review`, `codebase-map`), a confined shell, CodeAct, and a background `CodeExplorer` agent.
-- **Step 4: `step04_production_ready/`**: one shared `build_steward_agent` factory, a console host with OpenTelemetry, and local evals.
+- **Step 4: `step04_production_ready/`**: one shared `build_steward_agent` factory, Steward's workflow (`steward_workflow.py`), a console host with OpenTelemetry, the local service the Agent tab talks to (`hosted.py`), an MCP host (`mcp_app.py`), DevUI (`devui_app.py`), and local evals.
 
 ## Setup
 
@@ -18,9 +18,11 @@ From the repo root:
 copy .env.example .env      # OLLAMA_MODEL=gpt-oss:20b by default
 ```
 
-`STEWARD_WORKSPACE` (optional, in `.env`) points Steward at a real repo. It defaults to
-`harness/steward/working`, which holds `sample-project/`: a small module with one deliberately
-failing test.
+`STEWARD_WORKSPACE` (optional, in `.env`) points Steward at a real repo. It defaults to this
+repo's root, so his own harness code is in reach (ADR-0001 item 11). Reads run without a card,
+writes ask, and his file store never reads, searches or lists a `.env` file.
+`harness/steward/working/sample-project/` is a small module the walkthrough and the evals use; the
+evals plant its discount bug in the working copy for a run and put it back after.
 
 ## Changes from the guide (local Ollama)
 
@@ -30,7 +32,8 @@ failing test.
 - The shell is passed as `shell.as_function()`, because the Ollama client doesn't implement
   `SupportsShellTool`.
 - Foundry memory is Mem0 running locally (step 2 on). Left out because they need Microsoft Foundry
-  or Azure: Foundry hosting and Foundry evaluators.
+  or Azure: Foundry Hosted Agents and Foundry evaluators. The Foundry host's own server
+  (`ResponsesHostServer`) runs on loopback instead (see the Agent tab, below).
 - The step 4 factory replaces the rest with local pieces: Purview with Presidio
   (`PRESIDIO_ENTITIES`), Foundry Toolbox skills with SecondBrain's skill notes over MCP
   (`MCPSkillsSource`), and the web-search research sub-agent with `WebResearchAgent` on
@@ -85,8 +88,10 @@ with local evaluators. Like the console, it writes every span to `halo_traces/tr
 at 100 MB, newest kept), and a failed check prints its reason.
 
 Defined once (the guide's Part 4): `build_steward_agent` is the guide's harness agent, and
-`steward_workflow.build_steward` builds it with the workflow below. The Agent tab's service and
-`evals.py` run the workflow from that one builder. `console_app.py` runs the same harness agent on
+`steward_workflow.build_steward(stack, **build)` builds it with the workflow below and returns
+`(agent, workflow)`. The Agent tab's service (`hosted.py`), `evals.py` (its default and `steps` runs) and the tests run
+the workflow from that one builder; `test_every_host_builds_the_same_steward_workflow` checks that the service's
+graph is the builder's. `console_app.py` runs the same harness agent on
 its own, as the guide's console ships: a workflow's cards resume from checkpoints, which MAF's
 Responses host keeps, and not from a console's session (MAF issue #5818). In SecondBrain, the Agent
 tab is Steward's console.
@@ -98,9 +103,11 @@ SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF work
 streams to the tab as it happens (MAF's `intermediate_output_from`):
 
 ```
-request -> plan -> approve_plan card -> execute -> check -> commit (git_commit card) -> report
-                                           ^          |
-                                           +- repair -+   (tests failed; at most 3 attempts)
+request -> plan -> read_plan -> ask_approval (approve_plan card) -> execute -> check
+                                                                      ^          |
+                                                                      +- repair -+   (tests failed; at most 3 attempts)
+check passed on changed code -> ask_commit ("Checks passed") -> commit (git_commit card)
+nothing changed, or attempts spent -> report
 ```
 
 1. **Plan:** structured output (`StewardPlan`: the guide's PlanningResponse plus its steps), read
@@ -110,18 +117,37 @@ request -> plan -> approve_plan card -> execute -> check -> commit (git_commit c
    own card, and your No on a card ends the run.
 4. **Check:** model-free, on the files themselves. The tests in the folder of each Python file that
    differs from the committed state are run (pytest), whichever tool or card wrote it, so the
-   workspace starts each run at the committed state. Failing, the output goes back to him;
-   passing, the report says "Checks passed".
-5. **Commit:** only after passing checks on changed code. He is asked to commit his work, and his
-   `git_commit` comes to you on its own card. Execute is told not to commit; failing work never
-   reaches this step.
+   workspace starts each run at the committed state. The check's own pytest carries
+   `STEWARD_CHECK_RUNNING`, so a workflow run inside those tests does not start the check again.
+5. **Repair:** failing, the output goes back to him in execute mode, with "Fix the failing
+   checks" (`REPAIR_TODO`) as his todo, and the check runs again; at most 3 attempts.
+6. **Commit:** only after passing checks on changed code. The tab shows "Checks passed", he is
+   asked to commit his work (`COMMIT_TODO`), and his `git_commit` comes to you on its own card.
+   Execute is told not to commit; failing work never reaches this step.
+7. **Report:** when nothing changed, or the attempts are spent, the run ends with the checks'
+   result. His answer has already streamed, so it is not repeated.
 
-The host keeps its state in `worlds/steward/.as` (gitignored).
+The host keeps its state in `worlds/steward/.as` (gitignored). Its short name keeps the host's file
+paths under Windows' 260-character limit.
 
 With the factory (SecondBrain's Agent tab or `console_app.py`), Step 3's list adds:
 
 7. `Research Microsoft Agent Framework, Ollama and mem0 with the WebResearchAgent and summarize the latest news.` (background research agent)
 8. `How do I set up a flow in SecondBrain?` (loads a SecondBrain skill over MCP)
+
+### Ports (all on loopback)
+
+| Port  | What                                                                          |
+|-------|-------------------------------------------------------------------------------|
+| 43120 | Steward's service, `hosted.py` (Responses protocol; `STEWARD_PORT`)           |
+| 43121 | Steward as an MCP tool, `mcp_app.py` (`http://127.0.0.1:43121/mcp`)           |
+| 43110 | SecondBrain's MCP (`SECONDBRAIN_MCP_URL`)                                     |
+| 43111 | The Atlas door                                                                |
+| 8091  | The glass                                                                     |
+| 11434 | Ollama (`OLLAMA_HOST`)                                                        |
+
+Cards (approvals) do not cross the MCP endpoint, so a tool that waits for approval does not run
+through it; the Agent tab, where you answer his cards, is the way to work with him.
 
 ## Known limits on gpt-oss:20b
 
@@ -129,3 +155,38 @@ The background-agent and todo tools don't always work on this model. In testing,
 CodeExplorer succeeded 2 times out of 4. The failures were malformed `todos_add` calls, or the model
 trying to call the background tools from inside the CodeAct sandbox. A larger local model such as
 `qwen3-coder:30b` (set `OLLAMA_MODEL` in `.env`) may do better.
+
+## Where it stands
+
+The version is in `pyproject.toml`; what each version holds is in `CHANGELOG.md` at the repo root.
+The order agreed for the workflow:
+
+1. The check sees every write. Done.
+2. Commit after a passing check. Done.
+3. Define once. Done.
+4. Evals as small single asks. Next.
+5. Memory across requests, as an eval case (the file memory's `steward` scope is already there).
+6. The cookbook's improvement loop, with the owner's approval at the merge.
+
+## Findings (2026-11-02)
+
+From the SecondBrain note `maf-solved-patterns-checked-2026-11-02-d8d89a`; the details are in
+`CHANGELOG.md` under Unreleased.
+
+- **Evals with cards.** MAF's `evaluate_workflow(queries=...)` runs each query once and does not
+  answer cards, so a run is scored only up to its first card. As in the guide's `evals.py`, each
+  query is run with its cards answered and scored with `evaluate_agent(..., responses=...)`;
+  `evals.py` does this (`run_steward`, `_run_answering_cards`). Step 4 turns today's live failures
+  into small single-ask cases, by the cookbook's evaluation flywheel (Analyze, Measure, Improve).
+- **Hosting.** MAF's self-hosting helpers (`agent-framework-hosting-responses`, sample
+  `04-hosting/af-hosting/local_responses_workflow`) cannot yet take an approval answer back in
+  (`_parsing.py`: "Unsupported Responses input content type") and do not handle workflow
+  `request_info`, so the Foundry host's `ResponsesHostServer`, with `WorkflowTurn` and
+  `CheckpointStoreProvider`, on loopback stays his host. `hosted.py` carries three local
+  workarounds for it: a fixed `FOUNDRY_AGENT_SESSION_ID`, the short `AGENTSERVER_STATE_ROOT` `.as`,
+  and dropping `additional_function_arguments` before the Ollama call.
+- **Missing to deploy locally.** A deployment package (`pyproject.toml` pins nothing and does not
+  list `agent-framework-hosting`, `agent-framework-hosting-mcp`, `mcp`, `starlette`, `uvicorn` or
+  `agent-framework-devui`, which the hosts import; the guide's step 4 folder has `requirements.txt`
+  and `.agentignore`); an eval gate in front of deploying; an eval case proving memory across requests; and the
+  cookbook's improvement loop with approval at the merge.
