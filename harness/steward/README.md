@@ -175,19 +175,22 @@ The order agreed for the workflow:
 
 After those, in order: safety (FIDES, Agent Hooks), long runs (summarising compaction, the loop's
 progress log, `think` per step), visibility (the workflow in DevUI, `WorkflowViz`, progress events),
-and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain). Gated on a ruling:
-Ollama web search (a cloud service), anything that loads an embedding model (a second model), and a
-sandboxed shell (Docker). Foundry Local is ruled out. The full plan is the SecondBrain note
+and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain). Ruled 2026-11-02:
+web search and web fetch go only through SecondBrain's route, the one Steward already uses (no Ollama
+web search); the embedding model is `embeddinggemma-2:270m` (303 MB, 8K context, MTEB code 78.68; it
+replaced `nomic-embed-text-v2-moe`), used for semantic code search and memory, run on the CPU
+(`options: {"num_gpu": 0}`) beside the chat model on the GPU; no Docker sandbox; Foundry Local is ruled out. The full plan is the SecondBrain note
 `steward-the-build-plan-after-the-deep-di-f92d04`; the gaps are in `steward-what-maf-and-ollama-offer-that-w-3acc5a`.
 
 ### The Ollama server on this PC
 
-Set in the Windows user environment, 2026-11-02 (Ollama 0.35.0; AMD Radeon RX 6800 XT, 16 GB):
+Set in the Windows user environment, 2026-11-02 (Ollama 0.40.13, updated from 0.35.0 the same day;
+AMD Radeon RX 6800 XT, 16 GB; 32 GB RAM):
 
 | Setting | Value | Why |
 |---|---|---|
 | `OLLAMA_KEEP_ALIVE` | `30m` | It was `30`, which Ollama reads as 30 seconds: a reload after every turn |
-| `OLLAMA_MAX_LOADED_MODELS` | `1` | One model at a time, enforced by the server |
+| `OLLAMA_MAX_LOADED_MODELS` | `2` | The chat model on the GPU and the embedder on the CPU; no second chat model |
 | `OLLAMA_NUM_PARALLEL` | `1` | Context memory scales with it; 3 x 65,536 would spill gpt-oss:20b out of 16 GB |
 | `OLLAMA_CONTEXT_LENGTH` | `65536` | Matches the compaction budget |
 | `OLLAMA_KV_CACHE_TYPE` | `q8_0` | About half the context memory of f16 |
