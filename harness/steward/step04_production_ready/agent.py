@@ -608,12 +608,12 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
     (
         re.compile(_word("map|codebase-map") + r"|how (?:is|it's) (?:it |this )?structured|where (?:do i|to) start", re.I),
         'This request matches your codebase-map skill: call load_skill("codebase-map") first and follow it, running its script.',
-        ("load_skill", "run_skill_script"),
+        ("run_skill_script",),
     ),
     (
         re.compile(_word("review"), re.I),
         'This request matches your code-review skill: call load_skill("code-review") first and follow it.',
-        ("load_skill",),
+        (),
     ),
     (
         re.compile(_word("research|latest news"), re.I),
@@ -643,30 +643,33 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         re.compile(_word("evals?|eval sets?|small asks"), re.I),
         'This request matches your evals skill: call load_skill("evals") first and follow it, running the set once '
         "with run_shell and reporting every line as printed.",
-        ("load_skill", "run_shell"),
+        ("run_shell",),
     ),
     (
         # Not "commit": the workflow's own commit step says it, and his own git_commit is right there.
         re.compile(_word("pull requests?|PRs?|push|branch|line of work|save and send"), re.I),
         'This request matches your github skill: call load_skill("github") first and follow it.',
-        ("load_skill",),
+        (),
     ),
     (
         # "the/my/your/all" only: the README eval ask says "how to run its tests" and must not change.
         re.compile(r"\brun (?:the|my|your|all(?: the)?) tests\b", re.I),
         'This request matches your run-tests skill: call load_skill("run-tests") first and follow it.',
-        ("load_skill",),
+        (),
     ),
     (
         re.compile(_word("secondbrain|my notes?|write (?:it|this|that) up"), re.I),
         'This request matches your secondbrain-notes skill: call load_skill("secondbrain-notes") first and follow it.',
-        ("load_skill",),
+        (),
     ),
 )
 # Regression run 9: in the Agent tab the work runs on the user's Approve turn, which matches no pattern, so a hint
 # that lived only on the matching turn never reached the work. The request's hints and the tools they need are kept
 # in his session until the work is done (ReturnToPlanWhenDone clears them), and the tools he calls are recorded, so
 # the harness loop can check the work used them (the cookbook's evidence-coverage check before finishing).
+# The tools a hint requires are the WORK's tools only, never load_skill: in his workflow he reads a skill while
+# planning, and the work is checked in the execute step's own session, so a required load_skill read as missing
+# and the loop told him to start over (live 2026-11-02: the evals skill, loaded in plan, ran the whole set twice).
 HINTS_KEY = "steward_request_hints"
 CALLED_KEY = "steward_called_tools"
 NUDGED_KEY = "steward_required_nudged"

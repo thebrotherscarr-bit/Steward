@@ -1252,3 +1252,13 @@ def test_his_shell_runs_his_own_python() -> None:
     result = asyncio.run(_go())
     assert result.exit_code == 0, f"python in his shell cannot import agent_framework: {result.stderr[-300:]}"
     assert Path(result.stdout.strip()).resolve() == Path(sys.prefix).resolve(), result.stdout
+
+
+def test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done() -> None:
+    """Live 2026-11-02: he loaded the evals skill in the plan step; the execute step's session never saw that call, the
+    required-tools check said load_skill was missing, and he ran the whole eval set a second time. A hint requires only
+    the work's tools, so finished work that never re-reads its skill is not sent back."""
+    assert all("load_skill" not in tools for _, _, tools in steward.REQUEST_HINTS), "no hint may require load_skill"
+    client, _, _ = run_steward(["The pull request is open."], "Open a pull request for this line.", mode="execute")
+    assert len(client.calls) == 1, "no 'Before you finish' nudge for a skill read in another step"
+    assert not any(steward.REQUIRED_TOOLS_NUDGE in str(m.text) for m in client.calls[0]["messages"])

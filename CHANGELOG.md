@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A request hint requires only the work's tools, never `load_skill`. In his workflow he reads a skill while
+  planning and the work is checked in the execute step's own session, so the required-tools check read the skill
+  as never loaded and sent him back: live 2026-11-02 he ran the whole eval set twice, and the nudge's text leaked
+  into his reply. `test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done`.
 - His shell starts with his own virtual environment active (`_own_python_env`: `VIRTUAL_ENV` and his
   `Scripts` folder first on `PATH`), so `python`, `pip` and `pytest` are the Python he runs on. Live 2026-11-02 he ran
   `python .../evals.py` and the system Python had no `agent_framework`. `test_his_shell_runs_his_own_python`.
