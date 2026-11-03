@@ -63,6 +63,9 @@ CHECKPOINT_DIR = _REPO_DIR / "improvement_loop" / "checkpoints"
 GATE_CHECKS: tuple[tuple[str, ...], ...] = (
     (sys.executable, "-m", "pytest", "-q", "harness/steward/working/sample-project"),
     (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "harness/steward/step04_production_ready/test_harness.py"),
+    # Step 6, 6.2: the eval gate, run once on Steward's model; it fails when the small-ask checks drop below the
+    # recorded baseline (eval_baselines.json).
+    (sys.executable, "-W", "ignore", "harness/steward/step04_production_ready/evals.py", "small", "--gate"),
 )
 MAX_ATTEMPTS = 3
 # The fixer's window: agent.py alone is about 20K tokens and the fixer must see a whole file (the operator's 32K,
