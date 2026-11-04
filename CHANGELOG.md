@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- He never asks about committing in words (live evals 2026-11-04, three runs: "Do you approve this commit?" in prose,
+  so no card). The commit step writes only the message: one structured-output call (`CommitMessage`, one line of at
+  most 72 characters, at least two words), then the workflow raises his `git_commit` card itself; Approve commits,
+  Deny commits nothing. An unparseable message is asked again once, then built from the request and the changed
+  files.
 - Evals never reach the owner's door (live 2026-11-04: the eval's Steward committed through the door and parked a real
   card in his window). An eval's Steward is built with `eval_build=True`: no Atlas door tool, no `pr_checks`, no note
   write; note reads, the Charter, skills and the web stay.
