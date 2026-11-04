@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A tool call written as plain text runs as that call. gpt-oss sometimes ended a turn with a tool's arguments as its
+  reply (live 2026-11-03: `{"directory":"steward/working","glob_pattern":""}`), so nothing ran. `recover_text_tool_calls`
+  (chat middleware, inside MAF's tool loop) turns one JSON object that fits exactly one offered tool into that call;
+  only a streamed reply that opens with `{` or a fence is held back, so prose still streams. The Ollama
+  malformed-call retry stays on the client: streamed, that error arises outside the chat middleware.
 - The memory eval's recall check reads a Unicode hyphen as a hyphen. Live 2026-11-03 (the first memory eval to finish
   with an approved run_shell), he recalled the codename in a new conversation as "Kestrel‑47" with U+2011, and the
   check, looking for "Kestrel-47", failed a recall that had happened.
