@@ -833,8 +833,9 @@ def test_a_tool_call_written_as_text_runs_and_an_unclear_one_is_left_as_it_is() 
         "the streamed run's own updates carry the call (the buffered stream released the rewritten reply)"
     )
 
-    # {"file_name": ...} fits file_access_read and file_access_delete (and the memory's two): which one is a guess.
-    for unclear in ('{"file_name": "x.py"}', '{"no_such_parameter": 1}', "{}", f"Here: {LISTED_AS_TEXT}"):
+    # Arguments that fit no tool, or are not one object, stay his text. ({"file_name": ...} was here until 2026-11-04;
+    # it is now the one read-only fit, file_access_read: test_a_read_written_as_text_is_the_one_read_only_tool_that_fits.)
+    for unclear in ('{"no_such_parameter": 1}', "{}", f"Here: {LISTED_AS_TEXT}"):
         client, _, response = run_steward([unclear, "never"], "Read x.py.")
         assert len(client.calls) == 1 and response.text == unclear, unclear
     tools = client.calls[0]["options"]["tools"]
@@ -1035,6 +1036,56 @@ def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a
     assert wf.steward_plan_in(response.text) is not None
     client, response = run_unstreamed([plan, "never"], _plan_shaped_tool())
     assert len(client.calls) == 1 and response.text == plan, "not streamed, a valid plan is never a call"
+
+
+# Live eval 2026-11-04 (the discount ask): PLAN replied with file_access_read's arguments as text, which also fit
+# file_access_delete and file memory's read and delete, so it was left as text and no plan card came.
+READ_AS_TEXT = '{"file_name": "harness/steward/working/sample-project/test_inventory.py"}'
+
+
+def test_a_read_written_as_text_is_the_one_read_only_tool_that_fits() -> None:
+    """recover_text_tool_calls: when the keys fit several tools and exactly one is read-only by MAF's read-only
+    auto-approval rules (READ_ONLY_RULES), the reply runs as that read; two read-only fits, or none, stay his text."""
+    from agent_framework import tool
+
+    import steward_workflow as wf
+
+    client, _, response = run_steward([READ_AS_TEXT, "It tests order_total."], "Read test_inventory.py.", mode="execute")
+    assert {"file_access_read", "file_access_delete", "file_memory_read", "file_memory_delete"} <= offered_tools(client.calls[0])
+    assert len(client.calls) == 2 and response.text == "It tests order_total.", "the recovered read ran"
+    assert any("class OrderTotalTests" in r for r in function_results(client.calls[1])), "file_access_read read the file"
+    assert [c.name for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_call"] == ["file_access_read"]
+
+    tools = client.calls[0]["options"]["tools"]
+    assert steward.is_read_only_tool("file_access_read") and not steward.is_read_only_tool("file_access_delete")
+    assert not steward.is_read_only_tool("file_memory_read"), "never_require is not read-only by itself (MAF's rules decide)"
+    assert steward.tool_call_in_text(READ_AS_TEXT, tools) == ("file_access_read", {"file_name": "harness/steward/working/sample-project/test_inventory.py"})
+    # Only writes fit (file_access_write and file_memory_write): never chosen by a tie-break.
+    assert steward.tool_call_in_text('{"file_name": "x.py", "content": "y"}', tools) is None
+
+    @tool(name="load_skill", approval_mode="never_require")
+    def load_skill(file_name: str) -> str:
+        """A second read-only tool (by SkillsProvider's rule) that fits {"file_name": ...}."""
+        return "never"
+
+    two_reads = [t for t in tools if getattr(t, "name", "") != "load_skill"] + [load_skill]
+    assert steward.tool_call_in_text(READ_AS_TEXT, two_reads) is None, "two read-only fits: which one is a guess"
+
+    # The live fault where it happened: the workflow's PLAN step, streamed, goes on to its plan card.
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix it"]}'
+    client = ScriptedChatClient([READ_AS_TEXT, plan])
+
+    async def _go() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+                return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+    cards = asyncio.run(_go())
+    assert len(client.calls) == 2, "the recovered read ran and PLAN was called again"
+    assert any("class OrderTotalTests" in r for r in function_results(client.calls[1])), "file_access_read ran in PLAN"
+    assert cards == [wf.APPROVE_PLAN], "and the run yields the plan card"
 
 
 def test_work_that_skips_the_tool_its_request_needs_is_asked_once_and_hints_outlive_the_approve() -> None:
