@@ -1014,6 +1014,40 @@ def test_an_approved_shell_command_runs_through_the_hosted_workflow_with_automat
     assert "echo hi" in saved, "the approved command's turn is in his memory's transcript"
 
 
+def test_the_harness_loops_nudges_never_reach_the_agent_tab(monkeypatch: Any) -> None:
+    """Live 2026-11-03: in an execute turn the harness loop re-ran him with its nudges (MAF's AgentLoopMiddleware streams
+    them as user updates), and the Agent tab showed one message: his reply, "Progress so far", the open-todo reminder and
+    his next reply, run together. The tab shows only his own words, each pass its own message."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    plan = '{"type": "approval", "questions": [{"message": "Answer."}], "steps": ["Answer: Juniper"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "answered"}]})
+    # Two passes end with the todo open, so the loop nudges twice; the third marks it done and answers.
+    replies: list[Any] = [plan, "First part.", "Still going.", done, "Juniper."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        turn = http.post("/responses", json={"input": "What is the codename?", "store": True}).json()
+        [card] = [o for o in turn["output"] if o["type"] == "mcp_approval_request"]
+        answer = {"type": "mcp_approval_response", "approval_request_id": card["id"], "approve": True}
+        turn = http.post("/responses", json={"previous_response_id": turn["id"], "store": True, "input": [answer]}).json()
+    state.cleanup()
+    assert turn["status"] == "completed", turn.get("error")
+    assert any("open todo item(s)" in (m.text or "") for m in calls[2]["messages"]), "the loop nudged him"
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["First part.", "Still going.", "Juniper."], texts
+
+
 def test_the_steps_eval_scores_each_workflow_step_by_its_own_evaluator() -> None:
     """Piece 5: evals.py steps groups a run's conversations by executor id and scores PLAN and EXECUTE apart."""
     import evals
