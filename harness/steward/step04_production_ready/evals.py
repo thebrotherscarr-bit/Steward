@@ -5,7 +5,7 @@ with local evaluators. Foundry evaluators are left out: they need Microsoft Foun
 to halo_traces/traces.jsonl, as in console_app.py, and a failed check prints its reason.
 
 The shell is disabled and skill scripts are auto-approved for this unattended run, so no query
-stops on an approval prompt. Nothing here writes files or commits.
+stops on an approval prompt. Nothing here writes files or commits, save the results history below.
 
 The last four queries are regression cases from MAF's improvement loop (Kyle, 2026-10-30, the plan
 "fix Steward's four failures with MAF's improvement loop"): each is a failure the improvement loop's
@@ -17,6 +17,8 @@ Beside that default set: ``small`` (step 4's small asks, with ``--gate`` the imp
 
 Every set exits 1 when any case fails (``small --gate``: when the checks drop below the baseline), 0 otherwise. A case
 whose run raises fails with the exception's type and first line (run_completed), and the set goes on to the next case.
+Every set run also appends one JSON line to storage/evals/history.jsonl (record_history); the report and the exit
+code never depend on it.
 
 ``--options NAME`` runs a set with a named settings set from eval_options.json (per-step model options, the
 STEWARD_<STEP>_THINK / _TEMPERATURE / _SEED that steward_workflow reads at build); the report's first line names it.
@@ -29,12 +31,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import subprocess
 import sys
 import tempfile
 import contextlib
 from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -292,6 +297,74 @@ def run_completed(query: str) -> dict[str, object]:
     return {"passed": False, "reason": CASE_ERRORS[query]}
 
 
+# Results history (2026-11-04, for SecondBrain's evals shelf): every set run appends one JSON line to
+# storage/evals/history.jsonl in this repo (storage/ is gitignored), the newest EVAL_HISTORY_KEEP lines kept. The
+# printed report and the exit code never depend on it: a write that fails is a warning on the log, nothing more.
+_REPO = Path(__file__).resolve().parents[3]
+EVAL_HISTORY = _REPO / "storage" / "evals" / "history.jsonl"
+EVAL_HISTORY_KEEP = 500
+# The settings set this run uses (cli's --options), as {"name", "values"}; None when it uses none.
+OPTIONS_IN_USE: dict[str, Any] | None = None
+logger = logging.getLogger(__name__)
+
+
+def _git_head() -> str | None:
+    """This repo's HEAD, short (a read: git rev-parse), or None when git cannot say."""
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=_REPO, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (head.stdout.strip() or None) if head.returncode == 0 else None
+
+
+def history_entry(name: str, results: dict[str, Any], code: int) -> dict[str, Any]:
+    """One run's line: the set, its settings set, its counts (applicable_checks for the checks), the exit code, each
+    case with its failed checks (a step's cases carry the step's name), the repo's HEAD and the model's name."""
+    items = [(step, item) for step, result in results.items() for item in result.items]
+    checks_passed, checks_total = applicable_checks(item for _, item in items)
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "set": name,
+        "options": OPTIONS_IN_USE,
+        "passed": sum(result.passed for result in results.values()),
+        "total": sum(result.total for result in results.values()),
+        "checks_passed": checks_passed,
+        "checks_total": checks_total,
+        "exit_code": code,
+        "cases": [
+            {
+                **({"step": step} if step else {}),
+                "input": (item.input_text or "")[:80],
+                "passed": item.status == "pass",
+                "failed_checks": [
+                    {"name": score.name, "reason": str((score.sample or {}).get("reason", ""))}
+                    for score in item.scores
+                    if score.passed is False
+                ],
+            }
+            for step, item in items
+        ],
+        "git_head": _git_head(),
+        "model": os.environ.get("OLLAMA_MODEL") or None,  # the model's name only; never a key
+    }
+
+
+def record_history(name: str, results: dict[str, Any], code: int, path: Path | None = None) -> None:
+    """Append the run's line to the history (EVAL_HISTORY), keeping the newest EVAL_HISTORY_KEEP lines; written to a
+    temp file and moved into place. Any failure is a logged warning: the report and the exit code are never touched."""
+    path = path or EVAL_HISTORY
+    try:
+        line = json.dumps(history_entry(name, results, code), default=str)
+        old = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        kept = [*(old_line for old_line in old if old_line.strip()), line][-EVAL_HISTORY_KEEP:]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        written = path.with_suffix(".tmp")
+        written.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        written.replace(path)
+    except Exception as exc:  # noqa: BLE001 - the history never changes a set's report or exit code
+        logger.warning("Eval history not written (%s): %s", path, exc)
+
+
 async def main() -> int:
     """Run the local Steward evals; the exit code is exit_code's."""
     load_dotenv()
@@ -330,7 +403,9 @@ async def main() -> int:
         for score in item.scores:
             if score.passed is False:
                 print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
-    return exit_code(results)
+    code = exit_code(results)
+    record_history("regression", {"": results[0]}, code)
+    return code
 
 
 def _called(conversation: list[Any]) -> list[str]:
@@ -493,6 +568,7 @@ async def steps_main() -> int:
             for score in item.scores:
                 if (score.sample or {}).get("reason") != "Not this case.":
                     print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
+    record_history("steps", scored, code)
     return code
 
 
@@ -755,7 +831,9 @@ async def small_main(use_gate: bool = False) -> int:
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
     passed, total = applicable_checks(result.items)
     print(f"Small-ask checks: {passed}/{total}")
-    return gate(passed, total) if use_gate else exit_code([result])
+    code = gate(passed, total) if use_gate else exit_code([result])
+    record_history("small", {"": result}, code)
+    return code
 
 
 # Step 5, piece 5.3: a note saved in one request is recalled in the next. Two requests through his workflow
@@ -812,7 +890,9 @@ async def memory_main() -> int:
         for score in item.scores:
             if (score.sample or {}).get("reason") != "Not this case.":
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
-    return exit_code(results)
+    code = exit_code(results)
+    record_history("memory", {"": results[0]}, code)
+    return code
 
 
 # Settings sets (2026-11-04): Steward fumbled an inline `VAR=x VAR=y python evals.py small`. A named set of per-step
@@ -835,12 +915,16 @@ def apply_options(name: str, path: Path = EVAL_OPTIONS) -> str:
         raise ValueError(f"settings set {name!r} names {unknown}, which are not step options ({', '.join(sorted(known))})")
     wf.step_options_from_env(values)  # a bad value raises here, naming its variable
     os.environ.update(values)
+    global OPTIONS_IN_USE
+    OPTIONS_IN_USE = {"name": name, "values": values}
     return f"Settings set {name}: {', '.join(f'{key}={value}' for key, value in values.items()) or 'no step options'}"
 
 
 def cli(argv: list[str]) -> int:
     """evals.py's command line, ``[small [--gate] | steps | memory] [--options NAME]``: the set's exit code, or 2 for a
     settings set that cannot be used (the reason on stderr, and nothing run)."""
+    global OPTIONS_IN_USE
+    OPTIONS_IN_USE = None  # a run uses only the settings set it names
     args = list(argv)
     if "--options" in args:
         at = args.index("--options")

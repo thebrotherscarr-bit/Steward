@@ -84,6 +84,16 @@ def _his_traces_are_never_the_real_ones(tmp_path: Path, monkeypatch: pytest.Monk
     ):
         monkeypatch.setattr(function, "__defaults__", (path, *function.__defaults__[1:]))
 
+
+@pytest.fixture(autouse=True)
+def _his_shelf_files_are_never_the_real_ones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The eval history (evals.py record_history) and the tool-policy table (agent.py write_tool_policy) go to a
+    throwaway folder, never the repo's storage/ that SecondBrain's shelves read."""
+    import evals
+
+    monkeypatch.setattr(evals, "EVAL_HISTORY", tmp_path / "storage" / "evals" / "history.jsonl")
+    monkeypatch.setattr(steward, "TOOL_POLICY_PATH", tmp_path / "storage" / "tool-policy.json")
+
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
 for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
     os.environ.pop(_name, None)
@@ -2343,6 +2353,62 @@ def test_an_eval_never_reaches_the_users_door_or_writes_his_notes(monkeypatch: A
     assert [b.get("eval_build") for b in built] == [True, True], built
 
 
+def test_the_live_build_writes_its_tool_policy_and_an_eval_build_writes_nothing(monkeypatch: Any) -> None:
+    """SecondBrain's tool-policy shelf: the live build writes storage/tool-policy.json, each tool's approval read off the
+    built agent (its approval_mode, then the auto-approval rules the build hands MAF). His git_commit and a note write
+    ask ("always"); a file read is let through by MAF's read-only rule ("rule", named); a read over MCP asks nothing
+    ("never"). An eval's build writes nothing, and a table that cannot be written never stops the build."""
+    import json
+
+    import evals
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("secondbrain")
+
+    @server.tool()
+    def read_note(id: str) -> str:
+        return ""
+
+    @server.tool()
+    def write_note(id: str, content: str) -> str:
+        return "written"
+
+    @server.tool()
+    def git_commit(project: str, message: str) -> str:
+        return "HELD: parked as hold_1"
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    policy = steward.TOOL_POLICY_PATH
+    run_steward(["Hello."], "Hello")  # the live build, as his hosts make it
+    table = json.loads(policy.read_text(encoding="utf-8"))
+    assert table["ts"] and "test-key" not in policy.read_text(encoding="utf-8")
+    rows = {row["name"]: row for row in table["tools"]}
+    assert (rows["git_commit"]["approval"], rows["git_commit"]["source"]) == ("always", "git"), rows["git_commit"]
+    assert rows["secondbrain_write_note"]["approval"] == "always" and rows["secondbrain_write_note"]["source"] == "mcp:secondbrain"
+    assert rows["secondbrain_read_note"]["approval"] == "never"
+    read = rows["file_access_read"]
+    assert (read["approval"], read["source"], read["rule"]["name"]) == (
+        "rule", "file access", "FileAccessProvider.read_only_tools_auto_approval_rule"
+    ), read
+    assert rows["file_access_write"]["approval"] == "always" and "plan-mode gate" in rows["file_access_write"]["notes"]
+    assert rows["run_skill_script"]["approval"] == "always" and rows["load_skill"]["approval"] == "never"
+    assert rows["atlas_git_commit"]["source"] == "mcp:door" and "door holds" in rows["atlas_git_commit"]["notes"]
+    assert {"execute_code", "todos_add", "background_agents_start_task", "file_memory_write"} <= set(rows)
+    assert not [p for p in policy.parent.iterdir() if p != policy], "the throwaway store and the temp file are gone"
+
+    policy.unlink()
+    asyncio.run(evals.run_steward("Hello", set(), client=ScriptedChatClient(["Just words."]), enable_shell=False))
+    assert not policy.exists(), "an eval's build wrote the tool-policy table"
+
+    blocker = policy.parent / "blocker"
+    blocker.write_text("a file, so no folder can be made under it", encoding="utf-8")
+    monkeypatch.setattr(steward, "TOOL_POLICY_PATH", blocker / "tool-policy.json")
+    client, _, response = run_steward(["Hello."], "Hello")
+    assert response.text == "Hello." and client.calls, "a table that cannot be written stopped the build"
+
+
 def test_pr_checks_waits_through_the_door_for_the_open_and_the_checks(monkeypatch: Any) -> None:
     """The door's PR results, visible: pr_checks is on his live tool list with no card, reads only the door's git_pr
     list on his world, and waits until his Approve has opened the pull request and its checks have finished."""
@@ -3111,6 +3177,66 @@ def test_a_named_settings_set_reaches_its_steps_call_and_heads_the_report(monkey
         evals.apply_options("typo", odd)
     with pytest.raises(ValueError, match="STEWARD_PLAN_TEMPERATURE"):
         evals.apply_options("hot", odd)
+
+
+def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_code_stay_the_same(
+    monkeypatch: Any, capsys: Any
+) -> None:
+    """SecondBrain's evals shelf: a set run appends one JSON line to storage/evals/history.jsonl with its counts, its
+    settings set, each case's failed checks, the repo's HEAD and the model's name. The printed report and the exit code
+    are the same whether the line is written or the write fails; the newest 500 lines are kept."""
+    import json
+    import subprocess
+    from types import SimpleNamespace
+
+    import evals
+
+    for name in STEP_OPTION_NAMES:
+        monkeypatch.setenv(name, "")
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_README])
+    history = evals.EVAL_HISTORY
+    clients: list[ScriptedChatClient] = []
+    _scripted_eval_runs(monkeypatch, clients)
+
+    def small_run() -> tuple[int, str]:
+        clients.append(ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER]))
+        code = evals.cli(["small", "--options", "plan_t0"])
+        return code, capsys.readouterr().out
+
+    code, out = small_run()
+    assert code == 0, out
+    [line] = history.read_text(encoding="utf-8").splitlines()
+    entry = json.loads(line)
+    checks = next(row for row in out.splitlines() if row.startswith("Small-ask checks: ")).split(": ")[1]
+    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=evals._REPO, capture_output=True, text=True).stdout.strip()
+    assert (entry["set"], entry["passed"], entry["total"], entry["exit_code"]) == ("small", 1, 1, 0), entry
+    assert f"{entry['checks_passed']}/{entry['checks_total']}" == checks and entry["checks_total"] > 0, entry
+    assert entry["options"] == {"name": "plan_t0", "values": {"STEWARD_PLAN_TEMPERATURE": "0"}}, entry
+    assert entry["cases"] == [{"input": evals.SMALL_ASK_README[:80], "passed": True, "failed_checks": []}], entry
+    assert (entry["git_head"], entry["model"]) == (head or None, "gpt-oss:20b") and entry["ts"], entry
+
+    blocker = history.parent / "blocker"
+    blocker.write_text("a file, so no folder can be made under it", encoding="utf-8")
+    monkeypatch.setattr(evals, "EVAL_HISTORY", blocker / "history.jsonl")
+    assert small_run() == (code, out), "a failed history write changed the report or the exit code"
+    assert len(history.read_text(encoding="utf-8").splitlines()) == 1
+
+    def score(name: str, passed: bool, reason: str) -> Any:
+        return SimpleNamespace(name=name, passed=passed, sample={"reason": reason})
+
+    failing = SimpleNamespace(passed=0, total=1, items=[SimpleNamespace(
+        input_text="x" * 100, status="fail",
+        scores=[score("plan_is_approval", False, "No plan card."), score("answer_on_topic", True, "Not this case.")],
+    )])
+    history.write_text("".join(f'{{"n": {n}}}\n' for n in range(evals.EVAL_HISTORY_KEEP)), encoding="utf-8")
+    evals.OPTIONS_IN_USE = None
+    evals.record_history("memory", {"": failing}, 1, history)
+    lines = history.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == evals.EVAL_HISTORY_KEEP and lines[0] == '{"n": 1}', "the oldest line goes, the newest stay"
+    last = json.loads(lines[-1])
+    assert (last["set"], last["options"], last["exit_code"], last["checks_passed"], last["checks_total"]) == ("memory", None, 1, 0, 1)
+    assert last["cases"] == [{"input": "x" * 80, "passed": False, "failed_checks": [{"name": "plan_is_approval", "reason": "No plan card."}]}]
 
 
 def test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_comes_back_as_a_card(monkeypatch: Any) -> None:
