@@ -716,6 +716,8 @@ MEMORY_FACT = "Kestrel-47"
 MEMORY_REMEMBER = f"Remember this about harness/steward/working/sample-project: its next release is codenamed {MEMORY_FACT}."
 MEMORY_RECALL = "What is the codename of harness/steward/working/sample-project's next release?"
 MEMORY_QUERIES = [MEMORY_REMEMBER, MEMORY_RECALL]
+# gpt-oss types a hyphen as Unicode's (live 2026-11-03: "Kestrel‑47" with U+2011 failed a recall that had happened).
+_HYPHENS = str.maketrans({c: "-" for c in "‐‑‒–—−"})
 
 
 @evaluator(name="memory_recalled")
@@ -723,7 +725,7 @@ def memory_recalled(query: str, response: str) -> dict[str, object]:
     """The second request, a new conversation, answers with the fact the first one saved."""
     if query != MEMORY_RECALL:
         return {"passed": True, "reason": "Not the recall case."}
-    ok = MEMORY_FACT.lower() in (response or "").lower()
+    ok = MEMORY_FACT.lower() in (response or "").translate(_HYPHENS).lower()
     return {"passed": ok, "reason": f"Recalled {MEMORY_FACT} in a new conversation." if ok else f"Not recalled: {(response or '')[-160:]!r}"}
 
 
