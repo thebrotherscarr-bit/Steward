@@ -26,6 +26,7 @@ import json
 import sys
 import tempfile
 import contextlib
+from collections.abc import Callable
 from contextlib import AsyncExitStack, contextmanager
 from pathlib import Path
 from typing import Any
@@ -614,14 +615,25 @@ def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BA
     return 0 if ok else 1
 
 
-async def small_main(use_gate: bool = False) -> int:
-    """Step 4's small asks, one run each, scored with their checks; with use_gate, the exit code is the gate's."""
+SMALL_ASK_EVALUATORS = (
+    plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
+    no_nudge_in_reply, answer_on_topic,
+)
+
+
+async def run_small_asks(
+    asks: list[str], around: Callable[[str], Any] | None = None, **build: Any
+) -> tuple[Agent[Any] | None, list[AgentResponse[Any]]]:
+    """Each ask once through his workflow (run_steward), as small_main runs the small asks: the plan card and the writes
+    approved, every other card denied, the discount bug planted for the discount ask only, the sample project put back
+    after each, each run on its own throwaway memory. ``around(ask)`` is a context entered around each run (the
+    diagnosis opens the ask's trace span there). Define once: small_main and the diagnosis (improvement_loop.py) both
+    run their asks here."""
     import steward_workflow as wf  # noqa: PLC0415
     from agent import _WORKING_DIR  # noqa: PLC0415
     from agent_framework import FileAccessProvider  # noqa: PLC0415
 
-    load_dotenv()
-    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    build.setdefault("auto_approve_skill_scripts", True)
     project = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project"
     SMALL_ASK_ORIGINALS.clear()
     SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
@@ -638,10 +650,12 @@ async def small_main(use_gate: bool = False) -> int:
             path.write_bytes(data)
 
     try:
-        for query in SMALL_ASKS:
+        for query in asks:
             # Only the discount ask has the bug planted: in the others a failing test would send the run to repair.
-            with discount_bug_planted() if query == SMALL_ASK_DISCOUNT else contextlib.nullcontext():
-                steward, response = await run_steward(query, approve, auto_approve_skill_scripts=True)
+            with (around or contextlib.nullcontext)(query), (
+                discount_bug_planted() if query == SMALL_ASK_DISCOUNT else contextlib.nullcontext()
+            ):
+                steward, response = await run_steward(query, approve, **build)
                 responses.append(response)
                 written = wf.written_python_files(response.messages)
                 SMALL_ASK_FILES[query] = {
@@ -650,30 +664,41 @@ async def small_main(use_gate: bool = False) -> int:
             reset()  # each ask starts from the committed sample project
     finally:
         reset()  # the reset before any save
+    return steward, responses
+
+
+async def score_small_asks(steward: Any, asks: list[str], responses: list[AgentResponse[Any]]) -> Any:
+    """The small-ask checks on each ask's run (MAF's evaluate_agent, the full split): one result, an item per ask."""
     results = await evaluate_agent(
         agent=steward,
-        queries=SMALL_ASKS,
+        queries=asks,
         responses=responses,
-        evaluators=LocalEvaluator(
-            plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
-            no_nudge_in_reply, answer_on_topic,
-        ),
+        evaluators=LocalEvaluator(*SMALL_ASK_EVALUATORS),
         conversation_split=ConversationSplit.FULL,
     )
-    print(f"Small asks: {results[0].passed}/{results[0].total} passed")
-    for item in results[0].items:
+    return results[0]
+
+
+async def small_main(use_gate: bool = False) -> int:
+    """Step 4's small asks, one run each, scored with their checks; with use_gate, the exit code is the gate's."""
+    load_dotenv()
+    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    steward, responses = await run_small_asks(SMALL_ASKS)
+    result = await score_small_asks(steward, SMALL_ASKS, responses)
+    print(f"Small asks: {result.passed}/{result.total} passed")
+    for item in result.items:
         print(f"  [{item.status}] {(item.input_text or '')[:70]}")
         for score in item.scores:
             if (score.sample or {}).get("reason") != "Not this case.":
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
-    passed, total = applicable_checks(results[0].items)
+    passed, total = applicable_checks(result.items)
     print(f"Small-ask checks: {passed}/{total}")
     return gate(passed, total) if use_gate else 0
 
 
 # Step 5, piece 5.3: a note saved in one request is recalled in the next. Two requests through his workflow
-# (run_steward), each a new conversation, share one throwaway memory (file memory and MAF's MemoryContextProvider
-# store), so nothing reaches his real memory. The first states a fact about the sample project that cannot be guessed
+# (run_steward), each a new conversation, share one throwaway automatic memory (MAF's MemoryContextProvider store;
+# file memory is each request's own), so a recall proves the provider and nothing reaches his real memory. The first states a fact about the sample project that cannot be guessed
 # and asks him to remember it; the second asks for it. Run once: python evals.py memory.
 MEMORY_FACT = "Kestrel-47"
 MEMORY_REMEMBER = f"Remember this about harness/steward/working/sample-project: its next release is codenamed {MEMORY_FACT}."
