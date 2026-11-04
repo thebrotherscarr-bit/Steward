@@ -105,6 +105,10 @@ was never merged and has no entry.
 
 ### Added
 
+- Data for SecondBrain's shelves. Every eval set appends one JSON line to `storage/evals/history.jsonl` (newest 500
+  kept; a failed write is only a warning; the report and exit code are unchanged). The live build writes
+  `storage/tool-policy.json`: each tool's approval (always, never, or a rule, named) read off the built agent and its
+  auto-approval rules; eval builds and the improvement round's diagnoser write nothing.
 - Per-step model options, for measuring gpt-oss: `STEWARD_<STEP>_THINK` (low, medium, high, true, false),
   `_TEMPERATURE` (0 to 2) and `_SEED` for route, plan, answer, execute and repair, read once at build and logged; a
   bad value stops the build. Unset, every call's options are unchanged. Plan, answer and execute get them through
