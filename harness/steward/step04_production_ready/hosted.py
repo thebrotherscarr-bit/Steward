@@ -10,6 +10,10 @@ Changes from the guide for local Ollama:
     * File access and the shell stay on: this runs on Kyle's own PC, not a shared container.
     * Background tasks are still released at the end of each request, as in the guide.
 
+Its own telemetry stays local (steward_observability): spans to halo_traces/traces.jsonl as before, metrics and
+OpenTelemetry log records to halo_traces/metrics.jsonl and halo_traces/logs.jsonl (one compact JSON line each, rotated
+at 10 MB, five kept), and nothing of it on stdout, which SecondBrain writes to steward.log.
+
 Environment variables:
     OLLAMA_HOST, OLLAMA_MODEL, STEWARD_WORKSPACE, SECONDBRAIN_MCP_* — see agent.py
     STEWARD_PORT — port to serve on (defaults to 43120)
@@ -29,6 +33,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 from contextlib import AsyncExitStack, asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from agent_framework import (
@@ -44,15 +49,18 @@ from agent_framework import (
     get_agent_mode,
     set_agent_mode,
 )
+from agent_framework.observability import OBSERVABILITY_SETTINGS
 from agent_framework_foundry_hosting import CheckpointStoreProvider, HostedResponseRequest, ResponsesHostServer, WorkflowTurn
 from azure.ai.agentserver.responses import FileResponseStore
 from dotenv import load_dotenv
+from opentelemetry.sdk._logs.export import ConsoleLogRecordExporter
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent, steward_memory_store  # noqa: E402
 from console.observers.planning_models import PlanningResponse  # noqa: E402
-from halo_traces import setup_halo_tracing  # noqa: E402
+from halo_traces import HALO_TRACE_PATH, setup_halo_tracing  # noqa: E402
 
 logger = logging.getLogger(__name__)
 # A turn's request metadata key naming the mode to switch to before it runs: the Agent tab's Approve
@@ -322,8 +330,96 @@ def steward_options(request: HostedResponseRequest, options: dict[str, Any]) -> 
     return options
 
 
-def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any) -> ResponsesHostServer:
-    """Steward's workflow on MAF's Responses host (Kyle, 2026-11-01: MAF native hosting)."""
+# <observability>
+# The host's default observability (azure.ai.agentserver core/_base.py:271, configure_observability) is the
+# microsoft-opentelemetry distro, which turns on its console exporters when no Azure Monitor, A365 or OTLP exporter is
+# set (microsoft/opentelemetry/_distro.py:344, _console/handler.py:46-52): every metric, span and OTel log record
+# pretty-printed as JSON on stdout, which SecondBrain writes to steward.log (192 MB on 2026-11-03). The host takes "a
+# custom callable to override the setup" (_base.py:252-258), so Steward's is MAF's configure_otel_providers, through
+# setup_halo_tracing: spans to HALO as before, and metrics and OTel logs through OpenTelemetry's own console exporters
+# writing to a file instead of stdout (their out= and formatter=, opentelemetry/sdk/metrics/_internal/export/
+# __init__.py:143-146 and sdk/_logs/_internal/export/__init__.py:147-150), one compact line each (to_json(indent=None)).
+TELEMETRY_DIR = HALO_TRACE_PATH.parent  # halo_traces/, gitignored
+TELEMETRY_MAX_BYTES = 10 * 1024 * 1024
+TELEMETRY_BACKUPS = 5
+
+
+class RotatingLines:
+    """A text stream for the console exporters' ``out``: each line goes through stdlib logging's RotatingFileHandler,
+    so the file is rolled over at max_bytes with ``backups`` old files kept."""
+
+    def __init__(self, path: Path, max_bytes: int = TELEMETRY_MAX_BYTES, backups: int = TELEMETRY_BACKUPS) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8", delay=True)
+
+    def write(self, text: str) -> None:
+        for line in text.splitlines():
+            if line.strip():
+                self.handler.handle(logging.makeLogRecord({"msg": line}))
+
+    def flush(self) -> None:
+        self.handler.flush()
+
+    def close(self) -> None:
+        self.handler.close()
+
+
+def telemetry_file_exporters(directory: Path = TELEMETRY_DIR) -> list[Any]:
+    """Metrics (gen_ai.client.operation.duration, gen_ai.client.token.usage, agent_framework.function.invocation.duration)
+    and OTel log records, each as one JSON line in a rotating file under ``directory``, never on stdout."""
+    return [
+        ConsoleMetricExporter(
+            out=RotatingLines(directory / "metrics.jsonl"), formatter=lambda data: data.to_json(indent=None) + "\n"
+        ),
+        ConsoleLogRecordExporter(
+            out=RotatingLines(directory / "logs.jsonl"), formatter=lambda record: record.to_json(indent=None) + "\n"
+        ),
+    ]
+
+
+# MAF's workflow host logs a failed turn by its exception's type alone, inside the except block
+# (agent_framework_foundry_hosting/_workflow_responses.py:583, and :416 for a failed abort), so the TypeError of
+# 2026-11-03 left no trace and cost a day. The same package's _log_response_failure (_responses.py:182-196) attaches
+# exc_info when sensitive data is on; this filter does the same for the workflow host's records: the exception being
+# handled when it logs is the one it names.
+WORKFLOW_HOST_LOGGER = "agent_framework_foundry_hosting._workflow_responses"
+
+
+def _with_traceback(record: logging.LogRecord) -> bool:
+    if record.levelno >= logging.ERROR and not record.exc_info and OBSERVABILITY_SETTINGS.SENSITIVE_DATA_ENABLED:
+        handled = sys.exc_info()
+        if handled[1] is not None:
+            record.exc_info = handled
+    return True
+
+
+def show_workflow_failure_tracebacks() -> None:
+    """Put the traceback on the workflow host's error records (a logging filter on its logger; idempotent)."""
+    host = logging.getLogger(WORKFLOW_HOST_LOGGER)
+    if _with_traceback not in host.filters:
+        host.addFilter(_with_traceback)
+
+
+def steward_observability(**_: Any) -> None:
+    """The host's configure_observability hook. The host passes connection_string, log_level and enable_sensitive_data
+    (_base.py:306-311); nothing leaves this PC, the log level is main's, and sensitive data is on, as for HALO."""
+    show_workflow_failure_tracebacks()
+    setup_halo_tracing(exporters=telemetry_file_exporters())
+
+
+# </observability>
+
+
+def steward_server(
+    client_factory: Callable[[], Any] | None = None,
+    observability: Callable[..., None] | None = None,
+    **build: Any,
+) -> ResponsesHostServer:
+    """Steward's workflow on MAF's Responses host (Kyle, 2026-11-01: MAF native hosting).
+
+    ``observability`` is the host's configure_observability: main passes steward_observability; None (tests) sets
+    nothing up, where the host's default would print every metric to stdout.
+    """
     os.environ.setdefault("AGENTSERVER_STATE_ROOT", str(_AGENTSERVER_STATE_DIR))
     # One user on one PC: one platform session, so a reply (previous_response_id) finds the run it answers. Without
     # it the first request gets a random session and its reply a derived one, two scopes, and the reply is refused
@@ -332,6 +428,7 @@ def steward_server(client_factory: Callable[[], Any] | None = None, **build: Any
     os.environ.setdefault("FOUNDRY_AGENT_SESSION_ID", _LOCAL_SESSION_ID)
     return ResponsesHostServer(
         workflow=lambda request: steward_graph(request, client_factory, **dict(build)),
+        configure_observability=observability,
         parse_response=steward_turn,
         prepare_options=steward_options,
         response_store=FileResponseStore(_STORAGE_DIR),
@@ -358,10 +455,11 @@ async def main() -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     port = int(os.environ.get("STEWARD_PORT", "43120"))
-    # Every span goes to halo_traces/traces.jsonl (cookbook improvement loop, step 2).
-    setup_halo_tracing()
+    # Every span goes to halo_traces/traces.jsonl (cookbook improvement loop, step 2), metrics and OTel logs to their
+    # rotating files beside it: the host runs steward_observability as it is built.
+    server = steward_server(observability=steward_observability)
     logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol, MAF workflow).", port)
-    await steward_server().run_async(host="127.0.0.1", port=port)
+    await server.run_async(host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

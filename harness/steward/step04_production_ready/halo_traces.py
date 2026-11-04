@@ -220,12 +220,21 @@ class HaloJsonlSpanExporter(SpanExporter):
             self._file.close()
 
 
-def setup_halo_tracing(path: Path = HALO_TRACE_PATH) -> HaloJsonlSpanExporter:
-    """Write every span to the HALO JSONL file, alongside whatever tracing is already set up."""
+# An OTLP collector named by OTEL_EXPORTER_OTLP_ENDPOINT is spoken to over http/protobuf: MAF's otlp_protocol defaults
+# to "grpc" (agent_framework/observability.py:1671-1672), and only the http exporter package is installed here.
+OTLP_PROTOCOL = "http/protobuf"
+
+
+def setup_halo_tracing(path: Path = HALO_TRACE_PATH, exporters: Sequence[Any] = ()) -> HaloJsonlSpanExporter:
+    """Write every span to the HALO JSONL file, alongside whatever tracing is already set up.
+
+    ``exporters``: metric and log exporters for MAF's providers (hosted.py's telemetry files), used when this call is
+    the one that sets the providers up.
+    """
     exporter = HaloJsonlSpanExporter(path)
     provider = trace.get_tracer_provider()
     if isinstance(provider, TracerProvider):
         provider.add_span_processor(SimpleSpanProcessor(exporter))
     else:
-        configure_otel_providers(exporters=[exporter], enable_sensitive_data=True)
+        configure_otel_providers(exporters=[exporter, *exporters], enable_sensitive_data=True, otlp_protocol=OTLP_PROTOCOL)
     return exporter

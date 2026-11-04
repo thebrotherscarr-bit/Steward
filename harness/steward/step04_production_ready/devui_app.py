@@ -3,8 +3,8 @@
 MAF's DevUI with tracing (ui/devui/tracing), run as MAF's github_mcp_example.py
 (samples/02-agents/security) runs it for an agent that holds live MCP connections: DevUI's serve()
 starts its own event loop, which would orphan Steward's MCP sessions, so DevServer runs under uvicorn
-on this loop. Tracing is on as configure_otel_providers sets it, with every span also written to
-halo_traces/traces.jsonl, as console_app.py does.
+on this loop. Tracing is on as configure_otel_providers sets it (through setup_halo_tracing), with every
+span also written to halo_traces/traces.jsonl, as console_app.py does.
 
 Beside the agent, his workflow (steward_workflow.build_steward, the graph every host runs): DevUI shows its graph,
 runs it with its approval cards (human in the loop) and keeps a checkpoint per conversation
@@ -18,7 +18,9 @@ asks for DevUI's bearer token.
 Environment variables:
     OLLAMA_HOST, OLLAMA_MODEL, STEWARD_WORKSPACE — see agent.py
     DEVUI_AUTH_TOKEN            — DevUI's bearer token; a fresh one is made and printed when unset
-    OTEL_EXPORTER_OTLP_ENDPOINT — Optional OTLP collector endpoint
+    OTEL_EXPORTER_OTLP_ENDPOINT — Optional OTLP collector endpoint, spoken to over http/protobuf
+                                  (setup_halo_tracing passes otlp_protocol="http/protobuf"; MAF's default
+                                  is gRPC, whose exporter is not installed)
 
 Run:
     python harness/steward/step04_production_ready/devui_app.py
@@ -36,13 +38,12 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from agent_framework.observability import configure_otel_providers
 from agent_framework_devui._server import DevServer
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent, steward_memory_store  # noqa: E402
-from halo_traces import HaloJsonlSpanExporter  # noqa: E402
+from halo_traces import setup_halo_tracing  # noqa: E402
 from steward_workflow import build_steward  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -61,7 +62,7 @@ async def main() -> None:
     """Serve Steward and his workflow in DevUI, on the loop that holds their MCP connections."""
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    setup_halo_tracing()
 
     async with AsyncExitStack() as stack:
         agent = await stack.enter_async_context(await build_steward_agent(stack, memory_store=steward_memory_store()))

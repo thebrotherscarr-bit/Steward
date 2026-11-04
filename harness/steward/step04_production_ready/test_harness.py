@@ -1106,6 +1106,135 @@ def test_the_trace_file_is_capped_and_keeps_the_newest_whole_spans() -> None:
         assert lines and lines[-1].find("span-59") >= 0, "the newest span is kept"
 
 
+def test_metrics_and_otel_logs_are_compact_lines_in_rotating_files_never_stdout(tmp_path: Path) -> None:
+    """2026-11-03: steward.log reached 192 MB of pretty-printed metric JSON. The service's metrics and OTel log records go
+    through OpenTelemetry's own console exporters onto rotating files (stdlib RotatingFileHandler), one line each."""
+    import json
+    import logging
+
+    import hosted
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+
+    metrics_out, logs_out = hosted.telemetry_file_exporters(tmp_path)
+    assert metrics_out.out not in (sys.stdout, sys.__stdout__) and logs_out.out not in (sys.stdout, sys.__stdout__)
+    meters = MeterProvider(metric_readers=[PeriodicExportingMetricReader(metrics_out, export_interval_millis=3_600_000)])
+    meters.get_meter("steward-test").create_histogram("gen_ai.client.operation.duration").record(1.5)
+    meters.shutdown()
+    records = LoggerProvider()
+    records.add_log_record_processor(SimpleLogRecordProcessor(logs_out))
+    planted = logging.getLogger("steward.test.otel")
+    planted.propagate = False
+    handler = LoggingHandler(logger_provider=records)
+    planted.addHandler(handler)
+    planted.warning("planted telemetry line")
+    planted.removeHandler(handler)
+    records.shutdown()
+    metrics_out.out.close()
+    logs_out.out.close()
+    metric_lines = (tmp_path / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    assert metric_lines and all(json.loads(line) for line in metric_lines), "one whole JSON document per line"
+    assert "gen_ai.client.operation.duration" in metric_lines[0]
+    assert "planted telemetry line" in (tmp_path / "logs.jsonl").read_text(encoding="utf-8")
+
+    lines = hosted.RotatingLines(tmp_path / "small.jsonl", max_bytes=200, backups=2)
+    for n in range(30):
+        lines.write(f'{{"n": {n}, "pad": "{"x" * 30}"}}\n')
+    lines.close()
+    kept = sorted(p.name for p in tmp_path.glob("small.jsonl*"))
+    assert kept == ["small.jsonl", "small.jsonl.1", "small.jsonl.2"], kept
+    assert all((tmp_path / name).stat().st_size <= 200 for name in kept), "each file is rolled over at its cap"
+
+
+def test_the_service_sets_up_its_own_local_telemetry_instead_of_the_hosts_console_dumps(tmp_path: Path, monkeypatch: Any) -> None:
+    """The host's default observability prints every metric to stdout (microsoft-opentelemetry's console exporters).
+    The service hands the host steward_observability instead: HALO spans, the telemetry files, and OTLP (if a collector
+    is named) over http/protobuf, the one OTLP exporter installed; the console and DevUI set tracing up the same way."""
+    import inspect
+
+    import console_app
+    import devui_app
+    import halo_traces
+    import hosted
+
+    # main builds its server with steward_observability ...
+    built: list[dict[str, Any]] = []
+
+    class Served:
+        async def run_async(self, **_: Any) -> None:
+            return None
+
+    def server(**kwargs: Any) -> Served:
+        built.append(kwargs)
+        return Served()
+
+    monkeypatch.setattr(hosted, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(hosted.logging, "basicConfig", lambda **k: None)
+    monkeypatch.setattr(hosted, "steward_server", server)
+    asyncio.run(hosted.main())
+    assert [b.get("observability") for b in built] == [hosted.steward_observability]
+    monkeypatch.undo()
+
+    # ... which steward_server hands to the host as its configure_observability ...
+    hosts: list[dict[str, Any]] = []
+    monkeypatch.setattr(hosted, "ResponsesHostServer", lambda **kwargs: hosts.append(kwargs))
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", str(tmp_path / "as"))
+    monkeypatch.setenv("FOUNDRY_AGENT_SESSION_ID", "steward-test")
+    hosted.steward_server(observability=hosted.steward_observability)
+    assert hosts[0]["configure_observability"] is hosted.steward_observability
+
+    # ... and which sets up HALO with the telemetry files, OTLP over http/protobuf.
+    configured: list[dict[str, Any]] = []
+    monkeypatch.setattr(halo_traces.trace, "get_tracer_provider", lambda: object())  # no SDK provider yet, as at startup
+    monkeypatch.setattr(halo_traces, "configure_otel_providers", lambda **kwargs: configured.append(kwargs))
+    monkeypatch.setattr(hosted, "setup_halo_tracing", lambda **kwargs: halo_traces.setup_halo_tracing(tmp_path / "t.jsonl", **kwargs))
+    monkeypatch.setattr(hosted, "telemetry_file_exporters", lambda: ["metrics", "logs"])
+    hosted.steward_observability(connection_string=None, log_level=None, enable_sensitive_data=True)
+    [setup] = configured
+    halo, *rest = setup["exporters"]
+    halo.shutdown()
+    assert isinstance(halo, halo_traces.HaloJsonlSpanExporter) and rest == ["metrics", "logs"]
+    assert setup["otlp_protocol"] == "http/protobuf" and setup["enable_sensitive_data"] is True
+    for host in (console_app, devui_app):
+        assert "setup_halo_tracing()" in inspect.getsource(host.main), host.__name__
+
+
+def test_a_swallowed_workflow_failure_is_logged_with_its_traceback(caplog: Any, monkeypatch: Any) -> None:
+    """2026-11-03: MAF's workflow host logged 'Native Responses workflow failed ... (TypeError)' and nothing else, and
+    finding the fault took a day. Its error records now carry the exception being handled, as MAF's own
+    _log_response_failure does when sensitive data is on."""
+    import logging
+
+    import hosted
+    from agent_framework.observability import OBSERVABILITY_SETTINGS
+    from agent_framework_foundry_hosting import _workflow_responses
+
+    monkeypatch.setattr(OBSERVABILITY_SETTINGS, "enable_instrumentation", True)
+    monkeypatch.setattr(OBSERVABILITY_SETTINGS, "enable_sensitive_data", True)
+    hosted.show_workflow_failure_tracebacks()
+    hosted.show_workflow_failure_tracebacks()
+    assert _workflow_responses.logger.filters.count(hosted._with_traceback) == 1, "installed once"  # noqa: SLF001
+    with caplog.at_level(logging.ERROR, logger=_workflow_responses.logger.name):
+        try:
+            raise TypeError("planted: unhashable type 'dict'")
+        except TypeError as exc:
+            # The host's own call, word for word (_workflow_responses.py:583).
+            _workflow_responses.logger.error("Native Responses workflow failed during %s (%s).", "run", type(exc).__name__)
+    assert "Traceback" in caplog.text and "planted: unhashable type 'dict'" in caplog.text, caplog.text
+
+
+def test_his_telemetry_is_named_steward() -> None:
+    """MAF's create_harness_agent(otel_provider_name=...): his spans and metrics say steward, not MAF's harness."""
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            return await steward.build_steward_agent(stack, client=ScriptedChatClient([]), enable_shell=False)
+
+    assert asyncio.run(_go()).otel_provider_name == steward.OTEL_PROVIDER_NAME == "steward"
+
+
 def test_every_host_builds_the_same_steward_workflow() -> None:
     """Define once (the guide's Part 4): the Agent tab's service and the evals build Steward and his workflow in one
     place (steward_workflow.build_steward). The service's graph is the builder's graph (MAF's graph_signature_hash);

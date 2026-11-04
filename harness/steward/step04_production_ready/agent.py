@@ -125,6 +125,9 @@ _TEAM_CONTEXT = 32_768
 
 # Startup diagnostics go through ``logging`` so every host decides where they appear.
 logger = logging.getLogger(__name__)
+# His telemetry source name (create_harness_agent's otel_provider_name, agent_framework/_harness/_agent.py:537 and :700):
+# his invoke_agent spans and metrics carry gen_ai.provider.name "steward", not MAF's "microsoft.agent_framework.harness".
+OTEL_PROVIDER_NAME = "steward"
 
 STEWARD_INSTRUCTIONS = """\
 ## Steward: Engineering Assistant Instructions
@@ -1754,6 +1757,7 @@ async def build_steward_agent(
             loop_max_iterations=10,
             # Step 4, 4.2: his Ollama options; a caller's own (the fixer's 32K window) win.
             default_options={**OLLAMA_OPTIONS, **(default_options or {})},
+            otel_provider_name=OTEL_PROVIDER_NAME,
         )
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
@@ -1823,6 +1827,7 @@ async def build_steward_agent(
         max_output_tokens=8_192,
         default_options={"num_ctx": _STEWARD_CONTEXT},
         disable_web_search=True,
+        otel_provider_name=OTEL_PROVIDER_NAME,
     )
     # </create_agent>
 
