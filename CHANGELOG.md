@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The plan step runs a tool call written as text (live eval 2026-11-04, the discount ask: the plan came back as
+  `{"directory":...,"glob_pattern":"*"}`). `recover_text_tool_calls` now also recovers when a Pydantic
+  `response_format` is set, but only when the reply does not validate as that format, so a valid plan is never made a
+  call; a dict schema is left as before.
 - His memory holds only what he saves (Kyle, 2026-11-04: "Deliberate only"). Live, MAF's automatic extraction on
   gpt-oss saved his own answers (order_total) and his memory eval's output (Kestrel-47 codenames) as facts and doubled
   what he had saved himself with `write_memory`, whatever its prompt said. `steward_memory()` sets

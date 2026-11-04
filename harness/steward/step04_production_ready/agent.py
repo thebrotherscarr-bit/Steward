@@ -1160,9 +1160,35 @@ async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaita
 # calls in the response the middleware hands back (_tools.py, _process_model_function_calls; streamed, the stream's
 # final response, _tools.py:6168). So a reply that is one JSON object whose keys fit exactly one offered tool (its
 # required parameters <= the keys <= its parameters) becomes that call. Everything else is left as it is: two tools
-# that fit ({"file_name": ...} fits file_access_read and file_access_delete), none, an empty object, or a call that
-# asked for structured output (the plan's JSON). Arguments are only ever the model's own.
+# that fit ({"file_name": ...} fits file_access_read and file_access_delete), none, an empty object, or a reply that
+# is the structured output its call asked for (the plan's JSON). Arguments are only ever the model's own.
+# Live eval 2026-11-04 (the discount-bug ask): in the workflow's PLAN step (response_format StewardPlan) he replied
+# with file_access_ls's arguments as text and the run ended with no plan card. So a call that asked for a Pydantic
+# format is recovered too, but only when the reply does not validate as that format, as MAF itself parses it
+# (model_validate_json, agent_framework/_types.py:3075-3079): a valid plan is never made a call. A dict schema is
+# left as before (MAF reads any JSON as its value, _types.py:3080-3084, so no reply can be told apart from it).
 _FENCED_JSON = re.compile(r"\A```(?:json)?\s*(.*?)\s*```\Z", re.S | re.I)
+
+
+def _pydantic_format(response_format: Any) -> bool:
+    """Whether response_format is a Pydantic model, the one kind of structured output a reply can be checked against."""
+    from pydantic import BaseModel  # noqa: PLC0415
+
+    return isinstance(response_format, type) and issubclass(response_format, BaseModel)
+
+
+def is_the_asked_format(text: str, response_format: Any) -> bool:
+    """Whether text (fenced or not) validates as the Pydantic response_format its call asked for."""
+    if not _pydantic_format(response_format):
+        return False
+    body = (text or "").strip()
+    if fenced := _FENCED_JSON.match(body):
+        body = fenced.group(1)
+    try:
+        response_format.model_validate_json(body)
+    except ValueError:  # pydantic's ValidationError is a ValueError
+        return False
+    return True
 
 
 def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, Any]] | None:
@@ -1188,12 +1214,17 @@ def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, A
     return (fits.pop(), arguments) if len(fits) == 1 else None
 
 
-def recovered_tool_call(response: ChatResponse[Any], tools: Sequence[Any]) -> ChatResponse[Any] | None:
-    """The response with its text-only tool call made a real one (a fresh call_id), or None when it holds none."""
+def recovered_tool_call(
+    response: ChatResponse[Any], tools: Sequence[Any], response_format: Any = None
+) -> ChatResponse[Any] | None:
+    """The response with its text-only tool call made a real one (a fresh call_id), or None when it holds none or its
+    text is the response_format its call asked for."""
     if any(c.type in ("function_call", "function_approval_request") for m in response.messages for c in m.contents):
         return None
     spoken = [m for m in response.messages if m.role == "assistant" and (m.text or "").strip()]
-    if len(spoken) != 1 or (found := tool_call_in_text(spoken[0].text, tools)) is None:
+    if len(spoken) != 1 or is_the_asked_format(spoken[0].text, response_format):
+        return None
+    if (found := tool_call_in_text(spoken[0].text, tools)) is None:
         return None
     name, arguments = found
     logger.info("Tool call recovered from the reply's text: %s", name)
@@ -1207,7 +1238,9 @@ def _could_be_a_call(text: str) -> bool:
     return text.lstrip().startswith(("{", "```"))
 
 
-def held_back_when_it_could_be_a_call(inner: ResponseStream[Any, Any], tools: Sequence[Any]) -> ResponseStream[Any, Any]:
+def held_back_when_it_could_be_a_call(
+    inner: ResponseStream[Any, Any], tools: Sequence[Any], response_format: Any = None
+) -> ResponseStream[Any, Any]:
     """The model's stream, released as it comes unless its first text could be a call's arguments.
 
     MAF's stream hooks cannot do this: buffering is fixed before the first update is read (ResponseStream
@@ -1218,7 +1251,8 @@ def held_back_when_it_could_be_a_call(inner: ResponseStream[Any, Any], tools: Se
     before any text (his reasoning) and every update of a reply that opens with prose or a call pass at once. A reply
     that opens with "{" or a fence is held to its end: then it is released as it came, or, when it was one tool's
     arguments, as that call (its other contents, such as usage, kept). The final response is the inner one, so MAF's
-    function loop and history middleware see the same response as before (rewritten in place when recovered).
+    function loop and history middleware see the same response as before (rewritten in place when recovered). A held
+    reply that is the response_format its call asked for is released as it came (recovered_tool_call).
     """
     finals: list[ChatResponse[Any]] = []
 
@@ -1242,7 +1276,7 @@ def held_back_when_it_could_be_a_call(inner: ResponseStream[Any, Any], tools: Se
         finals.append(final)
         if not holding:
             return
-        if recovered_tool_call(final, tools) is None:
+        if recovered_tool_call(final, tools, response_format) is None:
             for update in held:
                 yield update
             return
@@ -1261,8 +1295,10 @@ async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], 
     """Chat middleware: a reply that is only a tool call's arguments runs as that call, streamed or not."""
     options = context.options or {}
     tools = list(options.get("tools") or [])
+    response_format = options.get("response_format")
     await call_next()
-    if not tools or options.get("response_format") is not None or options.get("tool_choice") == "none":
+    # A Pydantic format is checked reply by reply (recovered_tool_call); a dict schema is left alone, as before.
+    if not tools or options.get("tool_choice") == "none" or (response_format is not None and not _pydantic_format(response_format)):
         return
     if isinstance(context.result, ResponseStream):
         # On the stream itself, as MAF's PerServiceCallHistoryPersistingMiddleware does (_sessions.py:1802): streamed,
@@ -1272,9 +1308,9 @@ async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], 
         # the caller's transcript, and a streamed update cannot be taken back; prose streams as before. MAF's history
         # middleware, inner to this one, persists the reply first; his hosts' InMemoryHistoryProvider keeps that same
         # Message, rewritten here.
-        context.result = held_back_when_it_could_be_a_call(context.result, tools)
+        context.result = held_back_when_it_could_be_a_call(context.result, tools, response_format)
     elif context.result is not None:
-        recovered_tool_call(context.result, tools)
+        recovered_tool_call(context.result, tools, response_format)
 
 
 # Session state set when the harness returns him to plan mode because every todo is done; read once by plan_reply_loop.

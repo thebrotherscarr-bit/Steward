@@ -909,6 +909,73 @@ def test_a_tool_call_written_as_text_runs_through_the_hosted_workflow(monkeypatc
     assert texts == ["It holds the sample project."], texts
 
 
+# Live eval 2026-11-04 (the discount-bug ask): in PLAN (response_format StewardPlan) his reply was file_access_ls's
+# arguments as text, and the run ended with no plan card.
+LISTED_IN_PLAN = '{"directory": "harness/steward/working/sample-project", "glob_pattern": "*"}'
+
+
+def _plan_shaped_tool() -> Any:
+    """A tool whose parameters are exactly a StewardPlan's keys, so a plan's JSON also fits it as a call."""
+    from agent_framework import tool
+
+    @tool(name="plan_shaped", approval_mode="never_require")
+    def plan_shaped(type: str, questions: list[dict[str, Any]], steps: list[str]) -> str:
+        """Never to be called by a plan reply."""
+        return "plan_shaped ran"
+
+    return plan_shaped
+
+
+def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a_call() -> None:
+    """recover_text_tool_calls with a response_format: a reply that does not validate as the format and fits one tool
+    runs as that tool, and PLAN goes on to its approve_plan card (streamed, as the workflow runs it, and not); a reply
+    that validates as the format is never made a call, even when it fits a tool."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix it"]}'
+
+    def run_plan_step(replies: list[Any], *extra: Any) -> tuple[ScriptedChatClient, list[str]]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> list[str]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=extra)
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+                    return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+        return client, asyncio.run(_go())
+
+    client, cards = run_plan_step([LISTED_IN_PLAN, plan])
+    assert client.calls[0]["options"].get("response_format") is wf.StewardPlan
+    assert len(client.calls) == 2, "the recovered call ran and PLAN was called again"
+    assert any("inventory.py" in r for r in function_results(client.calls[1])), "file_access_ls listed the sample project"
+    assert cards == [wf.APPROVE_PLAN], "and the run yields the plan card"
+
+    client, cards = run_plan_step([plan, "never"], _plan_shaped_tool())
+    assert "plan_shaped" in offered_tools(client.calls[0]), "the plan's JSON fits an offered tool"
+    assert len(client.calls) == 1 and cards == [wf.APPROVE_PLAN], "a valid plan is the plan, never a call"
+
+    def run_unstreamed(replies: list[Any], *extra: Any) -> tuple[ScriptedChatClient, Any]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> Any:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=extra)
+                async with agent:
+                    return await agent.run(
+                        "Fix the discount bug.", session=agent.create_session(), options={"response_format": wf.StewardPlan}
+                    )
+
+        return client, asyncio.run(_go())
+
+    client, response = run_unstreamed([LISTED_IN_PLAN, plan])
+    assert len(client.calls) == 2 and any("inventory.py" in r for r in function_results(client.calls[1])), "not streamed too"
+    assert wf.steward_plan_in(response.text) is not None
+    client, response = run_unstreamed([plan, "never"], _plan_shaped_tool())
+    assert len(client.calls) == 1 and response.text == plan, "not streamed, a valid plan is never a call"
+
+
 def test_work_that_skips_the_tool_its_request_needs_is_asked_once_and_hints_outlive_the_approve() -> None:
     """The evidence check: a count finished without CodeAct is asked once; a hint is kept through the Approve turn."""
     from agent_framework import AgentModeProvider, set_agent_mode
