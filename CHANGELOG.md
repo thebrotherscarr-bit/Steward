@@ -21,6 +21,15 @@ was never merged and has no entry.
   `halo_traces/traces.jsonl` (runs, model calls by model, tool calls by tool, errors), reading only the file's tail
   (`--kb`, 1024 by default, at most 4096), never the whole file. Both are reads and run through the skills' script
   runner. Test: `test_the_eval_history_and_telemetry_skills_compare_runs_and_read_only_the_traces_tail`.
+- Approvals cross the MCP door: a turn through `mcp_app.py` (Manjuel's `maf` face, Aurora's `ask_steward`) that
+  reaches a tool needing approval no longer ends with the card unanswered. Each `function_approval_request` is asked on
+  SecondBrain's `approval_ask` (its MCP server, `SECONDBRAIN_MCP_URL` and `SECONDBRAIN_MCP_KEY`, on a client of its own
+  read for 660 s), which raises the card in the Agent tab, the Approvals shelf and Telegram tagged "Manjuel / MCP" and
+  answers No after 10 minutes. The answer goes back on the same session as MAF's `function_approval_response`, and
+  the turn continues (`run_with_cards`, at most `MAX_CARD_ROUNDS` rounds). Without SecondBrain the cards are left
+  unanswered, as before. Tests: `test_a_card_under_the_mcp_host_is_asked_in_secondbrain_and_allow_runs_the_tool`,
+  `test_a_card_under_the_mcp_host_denied_runs_nothing_and_the_turn_still_ends`,
+  `test_secondbrain_cards_asks_approval_ask_and_only_an_allow_is_yes`.
 - Ollama's timings on every chat call: `load_duration`, `prompt_eval_duration`, `eval_count` and `eval_duration`
   (nanoseconds; tokens for the count), which MAF's `OllamaChatClient` drops, are added to the call's usage as
   `ollama.<field>` (MAF's `UsageDetails` is open for provider fields, `_types.py:553-557`) and set on its chat span

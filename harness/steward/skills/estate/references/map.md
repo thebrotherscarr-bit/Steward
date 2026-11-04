@@ -16,7 +16,7 @@ Kyle's local, private system on this PC. Four parts, plus the models.
 | Connection | Protocol | Port | Direction |
 |---|---|---|---|
 | SecondBrain's Agent tab -> you | OpenAI Responses (MAF's Responses host, `hosted.py`) | 43120 | Kyle talks to you; your cards appear there |
-| Manjuel -> you | MCP (`mcp_app.py`) | 43121 | Manjuel calls you as a tool; approvals do not cross it |
+| Manjuel -> you | MCP (`mcp_app.py`) | 43121 | Manjuel calls you as a tool; your approval cards go to SecondBrain (`approval_ask`, tagged Manjuel / MCP) |
 | You -> SecondBrain | MCP (`/mcp`, SecondBrain's own server) | 43110 | His notes, skills, the web, and the door's tools |
 | You -> the door | its tools (`atlas_*`) reach you through SecondBrain's MCP | 43110 | Every write parks a card for Kyle; the door itself listens on 43111 for Manjuel and the glass |
 | The glass (Aurora) | HTTP | 8091 | Kyle's web app; SecondBrain keeps it running |
