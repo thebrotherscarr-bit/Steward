@@ -51,6 +51,10 @@ was never merged and has no entry.
 
 ### Added
 
+- Every eval set exits 1 when a case fails (MAF's `EvalResults.all_passed`, `evals.exit_code`); `small --gate` keeps
+  its baseline gate. The evals skill says an exit code of 1 is the result, not a broken run.
+- DevUI serves Steward's workflow beside the agent, with its approval cards and a checkpoint per conversation; a test
+  reads the graph through MAF's `WorkflowViz` and checks its loop-back edges (read_plan to plan, repair to execute).
 - Step 6: he can run the diagnosis. His evals skill says how (`improvement_loop.py`, once, 20 to 40 minutes) and
   what to report (the Promptfoo line and the handoff's top three priorities); "diagnosis" joins the evals
   request hint. A hint assertion covers it.
