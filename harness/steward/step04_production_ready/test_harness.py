@@ -1541,3 +1541,50 @@ def test_a_turn_does_not_end_while_a_background_agent_still_runs() -> None:
     reminder = " ".join(m.text or "" for m in client.calls[2]["messages"])
     assert "#1 (CodeExplorer): Explore harness" in reminder, "the loop names the running task"
     assert [task["status"] for task in state["tasks"]] == ["completed"], "and stops once none runs"
+
+
+def test_his_skills_are_discovered_once_per_build_not_every_turn(monkeypatch: Any) -> None:
+    """Step 4, 4.5: MAF's CachingSkillsSource wraps his skills source, so a second turn on the same agent reads the
+    cached list instead of walking the skill files (and re-listing SecondBrain's skills) again."""
+    discoveries: list[int] = []
+    discover = steward.FileSkillsSource.get_skills
+
+    async def counted(self: Any, context: Any) -> Any:
+        discoveries.append(1)
+        return await discover(self, context)
+
+    monkeypatch.setattr(steward.FileSkillsSource, "get_skills", counted)
+    client = ScriptedChatClient(["Hello.", "Hello again."])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                session = agent.create_session()
+                await agent.run("Hello", session=session)
+                await agent.run("Hello again", session=session)
+
+    asyncio.run(_go())
+    assert len(client.calls) == 2, "two turns ran"
+    assert all(skill in str(call["options"].get("instructions") or "") for call in client.calls for skill in SKILLS)
+    assert len(discoveries) == 1, f"the skill files were discovered {len(discoveries)} times in two turns"
+
+
+def test_reading_a_skill_asks_no_card_and_running_its_script_still_does() -> None:
+    """Step 4, 4.5: MAF's SkillsProvider.read_only_tools_auto_approval_rule approves load_skill and
+    read_skill_resource (they only read a skill), while run_skill_script, which runs code, keeps its card."""
+    read = Content.from_function_call(
+        call_id="s1",
+        name="read_skill_resource",
+        arguments={"skill_name": "code-review", "resource_name": "references/review-checklist.md"},
+    )
+    client, _, response = run_steward([read, "Read it."], "Read the code-review checklist.", mode="execute")
+    assert not approval_requests(response), "reading a skill's resource asked a card"
+    assert any("Code review checklist" in r for r in function_results(client.calls[1])), "the resource was read"
+
+    script = Content.from_function_call(
+        call_id="s2", name="run_skill_script", arguments={"skill_name": "codebase-map", "script_name": "scripts/repo_map.py"}
+    )
+    client, _, response = run_steward([script], "Map the codebase.", mode="execute")
+    assert [r.function_call.name for r in approval_requests(response)] == ["run_skill_script"]
+    assert len(client.calls) == 1, "nothing ran before the approval"

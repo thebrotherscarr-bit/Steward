@@ -40,6 +40,15 @@ was never merged and has no entry.
   him which tasks still run and to wait for their results. Before, a turn could end while a background agent still
   ran. With no task running the loop is as before, and `loop_max_iterations` still bounds it.
   `test_a_turn_does_not_end_while_a_background_agent_still_runs`.
+- Step 4, piece 4.5: skills, MAF's way. His skills source is wrapped in MAF's `CachingSkillsSource`, under the
+  `DeduplicatingSkillsSource` as `SkillsProvider.from_paths` composes it, so the skill files are walked and
+  SecondBrain's skills listed once per build instead of on every turn (MAF never caches a caller's own source).
+  MAF's `SkillsProvider.read_only_tools_auto_approval_rule` joins his auto-approval rules, so reading a skill
+  (`load_skill`, `read_skill_resource`) never asks a card, while `run_skill_script` keeps its card unless the run is
+  unattended. The hosted workflow builds him for every request, so there the cache lasts one request (the runs and
+  loop passes inside it, such as execute and its repairs); the console, DevUI and MCP hosts keep it for the session.
+  `test_his_skills_are_discovered_once_per_build_not_every_turn`,
+  `test_reading_a_skill_asks_no_card_and_running_its_script_still_does`.
 - Step 6: the split fixer (the operator, 2026-11-03: "the fixer doesn't need some big huge model"), Aider's architect
   and editor in MAF's pieces. Steward diagnoses on his own model (gpt-oss reads long prompts fast) and hands each edit
   to the coder with his new `hand_to_coder` tool: a file, at most 80 lines, and the change in words. A new `HandToCoder`
