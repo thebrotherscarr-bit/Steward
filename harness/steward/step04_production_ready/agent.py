@@ -649,7 +649,7 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         ("execute_code",),
     ),
     (
-        re.compile(_word("evals?|eval sets?|small asks"), re.I),
+        re.compile(_word("evals?|eval sets?|small asks|diagnosis"), re.I),
         'This request matches your evals skill: call load_skill("evals") first and follow it, running the set once '
         "with run_shell and reporting every line as printed.",
         ("run_shell",),

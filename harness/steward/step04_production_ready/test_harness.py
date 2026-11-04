@@ -441,6 +441,7 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
     assert "execute_code" in hints_for("What percentage of the lines are tests?")
     assert "CodeExplorer" in hints_for("Explore it with the CodeExplorer agent.")
     assert 'load_skill("evals")' in hints_for("Run your small asks evals.")
+    assert 'load_skill("evals")' in hints_for("Run your diagnosis.")
     assert 'load_skill("github")' in hints_for("Send this line and open a pull request.")
     assert 'load_skill("run-tests")' in hints_for("Run the tests in the sample project.")
     assert 'load_skill("secondbrain-notes")' in hints_for("Write it up in SecondBrain.")

@@ -42,6 +42,9 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6: he can run the diagnosis. His evals skill says how (`improvement_loop.py`, once, 20 to 40 minutes) and
+  what to report (the Promptfoo line and the handoff's top three priorities); "diagnosis" joins the evals
+  request hint. A hint assertion covers it.
 - Step 6: the diagnosis traces the real workflow: `improvement_loop.py` no longer asks a bare `build_steward_agent`
   Part 3's five old read-only questions. It traces evals.py small's three asks (item_count, the discount fix, the
   README line) plus one plain question ("What does order_total do in harness/steward/working/sample-project?"), each
