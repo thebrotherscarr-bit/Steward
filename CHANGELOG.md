@@ -74,6 +74,12 @@ was never merged and has no entry.
 
 ### Added
 
+- `search_code`: he searches the workspace's tracked .py and .md files by meaning (MAF's `InMemoryCollection` and
+  `create_vector_search_tool`; embeddinggemma-2:270m on the CPU, `num_gpu` 0, Kyle's ruling of 2026-11-02). Chunks are
+  top-level defs and classes, and Markdown headings. The index is built on the first search; each chunk's vector is
+  kept in `storage/code-search/embeddings.json`, keyed by the model and the chunk's text, so only new or changed
+  chunks are embedded (after a restart 0.3 s, against 263 s cold). Reads only, no card; `STEWARD_CODE_SEARCH=off`
+  turns it off.
 - FIDES records what it would block, and blocks nothing (Learn, Agent Security). MAF's label tracker and enforcer in
   its record-only branch (`block_on_violation=False`; the documented dry run builds no enforcer and records nothing),
   last in his middleware: SecondBrain notes are labelled untrusted and the door trusted through `SecureMCPToolProxy`,
