@@ -133,7 +133,8 @@ COMMIT_PROMPT = (
 COMMIT_NOW = "The checks passed on this change. Write its commit message.\n\nRequest: {request}\n\nChanged files:\n{files}\n\nChecks:\n{output}"
 # Sent once when the message did not parse (the cookbook's "Validate JSON ... in code": a bad reply is asked again).
 COMMIT_AGAIN = "That is not a valid commit message ({error}). Reply with the JSON object only."
-COMMIT_NOT_APPROVED = "The commit was not approved, so nothing was committed."
+# Says which change was not committed (2026-11-04: the bare sentence left a denied run's last reply naming nothing).
+COMMIT_NOT_APPROVED = 'The commit "{message}" was not approved, so nothing was committed.'
 # The card's tool: his own git_commit (agent.py), found by name on the agent the graph is built over.
 GIT_COMMIT = "git_commit"
 _COMMIT_SUMMARY_MAX = 72
@@ -713,10 +714,10 @@ class Commit(Executor):
 
     @response_handler
     async def on_answer(self, original_request: Content, response: Content, ctx: WorkflowContext[Any, Any]) -> None:
-        if not getattr(response, "approved", False):
-            await ctx.yield_output(COMMIT_NOT_APPROVED)
-            return
         arguments = original_request.function_call.parse_arguments() or {}
+        if not getattr(response, "approved", False):
+            await ctx.yield_output(COMMIT_NOT_APPROVED.format(message=arguments.get("message", "")))
+            return
         # His git_commit itself (agent.py), run as the tool runs it once approved (FunctionTool.invoke).
         result = await self._git_commit.invoke(arguments=arguments, skip_parsing=True)
         await ctx.yield_output(str(result))
