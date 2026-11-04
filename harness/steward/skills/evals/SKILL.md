@@ -1,6 +1,6 @@
 ---
 name: evals
-description: Run your own evals, the checks that measure how you work, and report their results exactly. Use when the user asks you to run your evals, an eval set (small asks, regression, steps, memory), or to check your progress.
+description: Run your own evals, the checks that measure how you work, and report their results exactly. Use when the user asks you to run your evals, an eval set (small asks, regression, steps, memory), the diagnosis, or to check your progress.
 ---
 
 ## Usage
@@ -30,3 +30,13 @@ When the user asks you to run your evals:
 5. Do not change any file during or after the run. The evals plant and remove their own test bug, answer their
    own cards, and put the sample project back when they finish. If a card from SecondBrain's door appears
    during the run (a commit through the door), tell the user to deny it.
+
+## The diagnosis
+
+When the user asks you to run your diagnosis (the cookbook's improvement loop, first half): run it once with
+run_shell, from the workspace root:
+`.venv/Scripts/python.exe -W ignore harness/steward/step04_production_ready/improvement_loop.py`
+It traces your workflow on the small asks and a plain question, generates evals, scores them with Promptfoo and
+ranks harness changes with HALO. It takes 20 to 40 minutes; wait for it. Then report the Promptfoo line
+(`Promptfoo gate completed ...: N/M passed`) and the three priorities under `## Top 3 changes to implement first`
+in `improvement_loop/latest/handoff.md`, exactly as written. The same rules apply: once, no changes, no reruns.
