@@ -1293,9 +1293,52 @@ Rules:
 """
 
 
+def plain_tool_results(message: Message) -> Message:
+    """MAF's history_message_filter for his memory's transcripts: a tool result's text as a plain str.
+
+    An approved run_shell's result is MAF's _ShellResultText (agent_framework_tools/shell/_types.py), a str subclass,
+    and the transcript's msgspec encoder (agent_framework/_sessions.py, _default_json_dumps) refuses it: with automatic
+    memory on, every approved command failed the hosted run ("Encoding objects of type _ShellResultText is
+    unsupported"). A function_result keeps its text in result and in its text items (_types.py,
+    Content.from_function_result), so both are made plain, on copies (Content.__copy__): the message itself is the
+    run's and is left as it is. Any other message is returned unchanged.
+    """
+
+    def plain(value: Any) -> Any:
+        return str(value) if isinstance(value, str) and type(value) is not str else value
+
+    def plain_text(item: Any) -> Any:
+        if getattr(item, "type", None) != "text" or plain(item.text) is item.text:
+            return item
+        item = copy.copy(item)
+        item.text = plain(item.text)
+        return item
+
+    contents = []
+    changed = False
+    for content in message.contents:
+        if content.type == "function_result":
+            result, items = plain(content.result), [plain_text(i) for i in content.items or []]
+            if result is not content.result or any(a is not b for a, b in zip(items, content.items or [])):
+                content = copy.copy(content)
+                content.result = result
+                content.items = items if content.items is not None else None
+                changed = True
+        contents.append(content)
+    if not changed:
+        return message
+    message = copy.copy(message)
+    message.contents = contents
+    return message
+
+
 def steward_memory(memory_store: Any) -> MemoryContextProvider:
-    """His automatic memory: MAF's MemoryContextProvider on memory_store, with his extraction rules."""
-    return MemoryContextProvider(store=memory_store, extraction_prompt=MEMORY_EXTRACTION_PROMPT)
+    """His automatic memory: MAF's MemoryContextProvider on memory_store, with his extraction rules. His transcripts go
+    through MAF's history_message_filter ("rewrite or drop messages before transcript save", _harness/_memory.py,
+    MemoryContextProvider.__init__), plain_tool_results."""
+    return MemoryContextProvider(
+        store=memory_store, extraction_prompt=MEMORY_EXTRACTION_PROMPT, history_message_filter=plain_tool_results
+    )
 
 
 async def memory_owner(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
