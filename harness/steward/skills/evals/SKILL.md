@@ -21,6 +21,7 @@ When the user asks you to run your evals:
 2. Run it once with the run_shell tool, from the workspace root:
    `.venv/Scripts/python.exe -W ignore harness/steward/step04_production_ready/evals.py <set>`
    (leave `<set>` out for the regression set). It takes several minutes; wait for it to finish.
+   To run with a settings set, add --options NAME (names in eval_options.json).
 3. Report the pass count line and every line printed under each case, exactly as printed. Do not summarise
    the failures away or explain them before you have reported them. The run exits with code 1 when any case
    failed and 0 when all passed; an exit code of 1 is the result, not a broken run.

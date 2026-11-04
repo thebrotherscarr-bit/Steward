@@ -1,0 +1,6 @@
+{
+  "baseline": {},
+  "plan_t0": {"STEWARD_PLAN_TEMPERATURE": "0"},
+  "execute_think_low": {"STEWARD_EXECUTE_THINK": "low"},
+  "plan_think_high": {"STEWARD_PLAN_THINK": "high"}
+}

@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- An eval case whose run raises fails, and the set goes on (live 2026-11-04: Ollama's "error parsing tool call" in
+  one ask aborted the whole `small` set with a traceback). The case is scored "the run raised <Type>: <first line>"
+  (`run_completed`), the sample project is put back, and the exit code is 1. `--options NAME` runs a set with a named
+  settings set from `eval_options.json` (baseline, plan_t0, execute_think_low, plan_think_high); the report's first
+  line names it.
 - The plan step runs a tool call written as text (live eval 2026-11-04, the discount ask: the plan came back as
   `{"directory":...,"glob_pattern":"*"}`). `recover_text_tool_calls` now also recovers when a Pydantic
   `response_format` is set, but only when the reply does not validate as that format, so a valid plan is never made a
