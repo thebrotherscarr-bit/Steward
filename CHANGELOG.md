@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- He never asks about committing in words (live evals 2026-11-04, three runs: "Do you approve this commit?" in prose,
+  so no card). The commit step writes only the message: one structured-output call (`CommitMessage`, one line of at
+  most 72 characters, at least two words), then the workflow raises his `git_commit` card itself; Approve commits,
+  Deny commits nothing. An unparseable message is asked again once, then built from the request and the changed
+  files.
 - A stale Ollama runner recovers by itself. When both malformed-call retries fail, Steward unloads the model once
   (`keep_alive` 0) and asks again on a fresh runner, at most once per 10 minutes per process. Measured 2026-11-04: a
   runner past 141,000 tasks wrote garbage into tool calls and failed a whole eval; a fresh one on the same settings
