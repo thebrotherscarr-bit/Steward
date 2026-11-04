@@ -70,6 +70,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A run ended by a cut connection after the stale-runner unload (eval run 2026-11-04 21:46, README ask: two malformed
+  tool calls, the unload, then httpx's `ReadError`). The unload ends the runner and cuts the connection it was serving,
+  so within `_AFTER_UNLOAD_SECONDS` (120 s) of an unload a call cut by `httpx.ReadError` or `RemoteProtocolError`
+  (ollama's `AsyncClient` is httpx) is asked once more against the reloaded model; with no unload behind it, it is the
+  run's error as before. Test: `test_a_call_cut_right_after_the_runner_is_unloaded_is_asked_again`.
 - The answer given twice in a non-streaming run (the MCP door). After #93 the Agent tab showed it once, but MAF's
   loop returns a non-streaming run as one combined response (`_aggregate_response`: every pass plus the injected
   nudges), so the text carried the answer, the open-todo reminder and the answer again. `answer_once`, outside the

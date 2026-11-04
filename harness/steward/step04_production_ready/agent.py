@@ -1899,6 +1899,16 @@ _TOOL_CALL_RETRIES = 2
 # unload per _RUNNER_UNLOAD_WINDOW_SECONDS per process, so a model that truly cannot write the call never thrashes.
 _RUNNER_UNLOAD_WINDOW_SECONDS = 600.0
 _RUNNER_UNLOADED_AT: float | None = None  # time.monotonic() of this process's last unload
+# Eval run 2026-11-04 21:46 (small asks, README ask): the unload went through, and the call asked after it died on
+# httpx's ReadError, the run with it: the unload ends the runner, and a connection it was serving (the call that
+# follows while the model loads again, or another call in flight on the same model) is cut. So for this long after an
+# unload, a call cut that way (ollama's AsyncClient is httpx: ReadError, RemoteProtocolError) is asked once more.
+_AFTER_UNLOAD_SECONDS = 120.0
+
+
+def _just_unloaded() -> bool:
+    """Whether this process unloaded the runner within _AFTER_UNLOAD_SECONDS."""
+    return _RUNNER_UNLOADED_AT is not None and time.monotonic() - _RUNNER_UNLOADED_AT < _AFTER_UNLOAD_SECONDS
 
 
 def _may_unload_runner() -> bool:
@@ -1919,9 +1929,16 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
     retry, so the same request is re-asked (without streaming) up to _TOOL_CALL_RETRIES times.
     When those fail too, the runner may be stale: the model is unloaded and asked once more.
     """
+    import httpx  # noqa: PLC0415 - ollama's AsyncClient is built on httpx (ollama/_client.py)
     from ollama import ResponseError
 
     chat = client.client.chat
+    cut = (httpx.ReadError, httpx.RemoteProtocolError)
+
+    async def _ask_after_unload(kwargs: dict[str, Any], exc: Exception) -> Any:
+        """A call cut while the runner was unloaded and loaded again: asked once more, not streamed."""
+        logger.warning("A call to Ollama was cut right after the runner was unloaded (%s); asking once more.", type(exc).__name__)
+        return await chat(**{**kwargs, "stream": False})
 
     async def _ask_again(kwargs: dict[str, Any], first: ResponseError) -> Any:
         error = first
@@ -1944,7 +1961,10 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
         except Exception as exc:  # noqa: BLE001 - an unload that fails leaves the parse error as the run's error
             logger.warning("Unloading %s failed (%s); giving up on the malformed tool call.", model, type(exc).__name__)
             raise error from exc
-        return await chat(**{**kwargs, "stream": False})
+        try:
+            return await chat(**{**kwargs, "stream": False})
+        except cut as exc:
+            return await _ask_after_unload(kwargs, exc)
 
     async def chat_with_retry(*args: Any, **kwargs: Any) -> Any:
         if not kwargs.get("stream"):
@@ -1954,7 +1974,16 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
                 if "error parsing tool call" not in str(exc):
                     raise
                 return await _ask_again(kwargs, exc)
-        stream = await chat(*args, **kwargs)
+            except cut as exc:
+                if not _just_unloaded():
+                    raise
+                return await _ask_after_unload(kwargs, exc)
+        try:
+            stream = await chat(*args, **kwargs)
+        except cut as exc:
+            if not _just_unloaded():
+                raise
+            return _one(await _ask_after_unload(kwargs, exc))
 
         async def parts() -> Any:
             try:
@@ -1964,8 +1993,15 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
                 if "error parsing tool call" not in str(exc):
                     raise
                 yield await _ask_again(kwargs, exc)
+            except cut as exc:
+                if not _just_unloaded():
+                    raise
+                yield await _ask_after_unload(kwargs, exc)
 
         return parts()
+
+    async def _one(response: Any) -> Any:  # a whole answer, given where a stream was asked for
+        yield response
 
     client.client.chat = chat_with_retry  # type: ignore[method-assign]
     return client
