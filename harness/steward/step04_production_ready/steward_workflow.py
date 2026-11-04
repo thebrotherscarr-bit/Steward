@@ -57,6 +57,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -98,7 +99,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
-from agent import WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import ESTATE_READS, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +162,15 @@ PLAN_IS_APPROVAL = (
 )
 # The router's one instruction, and the line the answer step is given with a question: short, since the graph routes.
 ROUTE_PROMPT = (
-    'Classify the user\'s request. "answer": a question to answer in words, reading files at most. "task": it asks '
-    "to change, create, run, fix, commit or send something."
+    'Classify the user\'s request. "answer": a question to answer in words, reading files or read-only tools at '
+    "most: what is, show, list, how many, status, logs, history (e.g. 'What is the estate status? Read it with "
+    "estate_status.'). \"task\": it asks to change, create, run, fix, commit or send something."
+)
+# A request that names one of the Estate's read-only tools and asks for no change is a question, whatever the model
+# says (live 2026-11-04: "Read it with estate_status and list each service" was routed to the plan).
+_CHANGE_WORDS = re.compile(
+    r"\b(write|fix|add|commit|restart|update|delete|change|create|edit|remove|send|push|install|stop|start|run|unload|apply)\b",
+    re.IGNORECASE,
 )
 ANSWER_IN_WORDS = "Answer this question in plain words. Read what you need; change nothing; no plan."
 
@@ -179,6 +187,11 @@ class RoutedRequest(AgentExecutorRequest):
     reply was no Route, which falls to the Default branch (the plan)."""
 
     kind: str | None = None
+
+
+def asks_only_to_read(request: str) -> bool:
+    """Whether the request names one of the Estate's read-only tools (ESTATE_READS) and no change (_CHANGE_WORDS)."""
+    return any(name in request for name in ESTATE_READS) and not _CHANGE_WORDS.search(request)
 
 
 def routed_to_answer(request: Any) -> bool:
@@ -218,6 +231,8 @@ class Router(Executor):
             kind: str | None = Route.model_validate_json((reply.text or "").strip()).kind
         except ValueError:
             kind = None  # no Route: the Default branch, the plan as before
+        if asks_only_to_read(request):
+            kind = "answer"
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))

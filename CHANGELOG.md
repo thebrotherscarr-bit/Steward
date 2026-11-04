@@ -35,6 +35,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A read routed to the plan (live 2026-11-04 13:41, "What is the estate status right now? Read it with
+  estate_status and list each service with up or down."): the router's model called it a task, so it got a plan card
+  and todos. `ROUTE_PROMPT` now counts read-only tools, status, logs, history, "what is", "show", "list" and "how
+  many" as an answer, with that request as its example; and `asks_only_to_read` sends a request that names one of
+  the Estate's reads (`ESTATE_READS`) and no change word (write, fix, add, commit, restart, update, delete, ...) to
+  the answer step whatever the model says. "Restart the glass" and "Fix the bug in inventory.py" still plan.
 - An answer given twice after the open-todo nudge (live 2026-11-04, Agent tab, "What is the estate status right
   now?"). His first pass gave the table but left the plan's todos open, so MAF's `todos_remaining` loop re-ran him
   with `todos_remaining_message` ("Continue working through them now ... only stop once every todo item is
