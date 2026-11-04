@@ -4532,3 +4532,24 @@ def test_a_request_naming_only_read_only_tools_is_answered_even_when_the_router_
     for request in ("Restart the glass", "Fix the bug in inventory.py", "Read estate_status, then restart the glass"):
         client, events = run(request, [plan])
         assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], request
+
+
+def test_a_non_streaming_answer_after_the_todo_nudge_is_given_once() -> None:
+    """After PR #93 the Agent tab (streaming) showed the answer once, but a non-streaming run (the MCP door) returned
+    MAF's combined response (_loop.py, _aggregate_response): the answer, the open-todo reminder, and the answer again.
+    answer_once keeps his own words, and the answer once; his tool calls stay."""
+    table = "| Service | Up/Down |\n|---------|---------|\n| steward | **up** |\n| door | **up** |\n| ollama | **up** |"
+    answer = f"Here's the current status of all estate services:\n\n{table}\n\nAll services are running."
+    again = f"All remaining todo items have been finished.\nThe estate status table:\n\n{table}\n\nNo further work remains."
+    todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Read the status"}]})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "read"}]})
+    client, _, response = run_steward([todo, answer, done, again], "What is the estate status?", mode="execute")
+    nudge = " ".join(m.text or "" for m in client.calls[2]["messages"])
+    assert "open todo item(s)" in nudge, "the loop nudged him after his complete answer"
+    assert response.text == answer, response.text
+    assert all(m.role != "user" for m in response.messages), "the loop's reminder is not his answer"
+    calls = [c.name for m in response.messages for c in m.contents if c.type == "function_call"]
+    assert calls == ["todos_add", "todos_complete"], calls
+    # New words after a nudge are still given.
+    client, _, response = run_steward([todo, answer, done, "Juniper."], "What is the estate status?", mode="execute")
+    assert response.text == answer + "Juniper.", response.text

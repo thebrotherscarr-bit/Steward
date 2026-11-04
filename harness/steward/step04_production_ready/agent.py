@@ -70,6 +70,7 @@ from agent_framework import (
     Agent,
     AgentContext,
     AgentModeProvider,
+    AgentResponse,
     AggregatingSkillsSource,
     BackgroundAgentsProvider,
     CachingSkillsSource,
@@ -1654,11 +1655,59 @@ PLAN_TODOS_NUDGE = (
 REQUIRED_TOOLS_NUDGE = "Before you finish: this request needs a tool you have not used yet. Do this now, then finish:"
 # Live 2026-11-04: his answer was complete but the plan's todos were open, so MAF's open-todo reminder
 # (todos_remaining_message, "Continue working through them now") re-ran him, and he gave the same answer again. The
-# reminder now says his words are already shown (the Agent tab also holds back a repeat: hosted.repeats_what_was_shown).
+# reminder now says his words are already shown (the Agent tab also holds back a repeat: repeats_what_was_shown).
 TODOS_ALREADY_SHOWN = (
     "Your replies so far are already shown to the user. If that work is done, mark those todos complete with "
     "todos_complete; do not repeat your answer, and say only what is new."
 )
+# A passage after a nudge is a repeat when at least this share of it is runs of at least this many characters
+# already shown (whitespace collapsed). Live 2026-11-04: the repeated table was most of the second passage.
+_REPEAT_SHARE = 0.5
+_REPEAT_MIN_RUN = 20
+
+
+def repeats_what_was_shown(shown: str, words: str) -> bool:
+    """Whether ``words`` (his passage after a loop nudge) mostly repeats ``shown`` (what the tab already shows)."""
+    new, old = " ".join(words.split()), " ".join(shown.split())
+    if not new or not old:
+        return False
+    blocks = difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks if b.size >= _REPEAT_MIN_RUN) >= _REPEAT_SHARE * len(new)
+
+
+async def answer_once(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """A non-streaming run's response holds his answer once, and only his own words (2026-11-04, after PR #93).
+
+    MAF's AgentLoopMiddleware returns a non-streaming run as one combined response: "each iteration's response
+    messages plus the injected 'nudge' messages" (_harness/_loop.py, _process_non_streaming, then _aggregate_response,
+    since return_final_only defaults to False). So when the open-todo reminder re-ran him after a complete answer, the
+    MCP door's text (AgentResponse.text, every message's text) carried the reminder and the answer twice. Here, outside
+    the loop, the loop's own user messages are dropped, as the Agent tab drops them (hosted._only_his_own_words), and a
+    passage after a nudge that repeats what is already given (repeats_what_was_shown, the tab's rule) loses its text;
+    his tool calls stay. A streamed run is the Agent tab's, which holds the repeat back itself.
+    """
+    await call_next()
+    result = context.result
+    if context.stream or not isinstance(result, AgentResponse):
+        return
+    given: list[str] = []
+    kept: list[Message] = []
+    nudged = False
+    for message in result.messages:
+        if message.role == "user":  # the loop's next_message: in an aggregate, only the loop adds user messages
+            nudged = True
+            continue
+        text = message.text
+        if nudged and text and repeats_what_was_shown("\n".join(given), text):
+            contents = [c for c in message.contents if c.type != "text"]
+            if not contents:
+                continue
+            message = copy.copy(message)  # the run's own message is not changed in place
+            message.contents = contents
+        elif text:
+            given.append(text)
+        kept.append(message)
+    result.messages = kept
 
 
 def denied_by_user(messages: Any) -> bool:
@@ -3000,6 +3049,9 @@ async def build_steward_agent(
             default_options={**OLLAMA_OPTIONS, **(default_options or {})},
             otel_provider_name=OTEL_PROVIDER_NAME,
         )
+        # Outside the loop (create_harness_agent puts AgentLoopMiddleware first, outermost of its own), so it reads the
+        # loop's combined non-streaming response, as hosted.py puts the Agent tab's middleware outside it.
+        agent.middleware = [answer_once, *(agent.middleware or [])]
         # SecondBrain's tool-policy shelf (<tool_policy>): his live build only. An eval's build writes nothing, nor
         # does a build with a caller's extra tools (the improvement round's diagnoser), which is not the agent he serves.
         if part4 and not eval_build and not extra_tools:
