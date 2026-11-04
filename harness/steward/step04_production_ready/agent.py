@@ -33,7 +33,8 @@ Environment variables:
     STEWARD_SAFETY_OBSERVE     — "off" turns off MAF's FIDES in its record-only mode (default on); it only
                                  records, to halo_traces/fides.jsonl, and never refuses or changes a call
     STEWARD_CODE_SEARCH        — "off" drops his search_code tool (default on): the workspace's tracked .py and .md
-                                 files searched by meaning, embedded on the CPU with embeddinggemma-2:270m
+                                 files searched by meaning, embedded on the CPU with embeddinggemma-2:270m; the
+                                 vectors are kept in storage/code-search/embeddings.json (gitignored)
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ import ast
 import asyncio
 import copy
 import difflib
+import hashlib
 import json
 import logging
 import os
@@ -525,8 +527,12 @@ def _build_conversation_agent() -> Any:
 # integrations/by-component/vector-stores, Python pivot): a @vectorstoremodel record in MAF's InMemoryCollection with an
 # embedding_generator, exposed with create_vector_search_tool (agent_framework/_vectors.py:2551), approval_mode
 # "never_require" as MAF's VectorCollectionContextProvider leaves its search ("get and search don't" ask). The index is
-# built on the first search, not at startup, and a file is embedded again when its mtime changes. In memory only.
+# built on the first search, not at startup, and a file is read again when its mtime changes. The collection is in
+# memory; each chunk's vector is kept across restarts in CODE_SEARCH_CACHE, keyed by a hash of the model and the text,
+# so only a new or changed chunk is ever embedded. No file-backed MAF collection is installed (the Qdrant, DuckDB and
+# SQL connectors are separate packages), so the cache is one JSON file under storage/, which .gitignore already holds.
 CODE_SEARCH_ENV = "STEWARD_CODE_SEARCH"
+CODE_SEARCH_CACHE = _WORKING_DIR / "storage" / "code-search" / "embeddings.json"
 CODE_EMBED_MODEL = "embeddinggemma-2:270m"
 # The operator, 2026-11-02: the embedder runs on the CPU, beside the chat model on the GPU (Ollama's num_gpu 0).
 CODE_EMBED_OPTIONS: dict[str, Any] = {"num_gpu": 0}
@@ -628,13 +634,41 @@ class CodeIndex:
     """The workspace's code in MAF's InMemoryCollection, searched through MAF's SupportsVectorSearch.search: each search
     first embeds the tracked files that are new or changed (by mtime) and drops the ones that are gone."""
 
-    def __init__(self, root: Path, embedding_generator: Any) -> None:
+    def __init__(self, root: Path, embedding_generator: Any, cache_path: Path | None = None) -> None:
         self.root = root
+        self.cache_path = cache_path
+        self.model = str(getattr(embedding_generator, "model", None) or type(embedding_generator).__name__)
         self.collection: InMemoryCollection[str, CodeChunk] = InMemoryCollection(CodeChunk, embedding_generator=embedding_generator)
         self.definition = self.collection.definition  # read by create_vector_search_tool for its filters
-        self._files: dict[str, tuple[int, list[str]]] = {}  # path -> (mtime_ns, its chunk keys)
+        self._files: dict[str, tuple[int, list[str], list[str]]] = {}  # path -> (mtime_ns, its chunk keys, their hashes)
+        self._vectors: dict[str, list[float]] | None = None  # the cache: chunk hash -> vector, read at the first search
         self._lock: asyncio.Lock | None = None
         self._lock_loop: Any = None
+
+    def chunk_hash(self, embedded_text: str) -> str:
+        """The cache key: the embedding model and the exact text embedded (a chunk's path and body)."""
+        return hashlib.sha256(f"{self.model}\0{embedded_text}".encode()).hexdigest()
+
+    def _read_cache(self) -> dict[str, list[float]]:
+        if self.cache_path is None or not self.cache_path.is_file():
+            return {}
+        try:
+            vectors = json.loads(self.cache_path.read_text(encoding="utf-8")).get("vectors", {})
+        except (OSError, ValueError, AttributeError) as exc:  # a broken cache is only a slower first search
+            logger.warning("Code search cache not read (%s): %s", self.cache_path, exc)
+            return {}
+        return {k: v for k, v in vectors.items() if isinstance(v, list) and len(v) == CODE_EMBED_DIMENSIONS}
+
+    def _write_cache(self, vectors: dict[str, list[float]]) -> None:
+        if self.cache_path is None:
+            return
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            written = self.cache_path.with_suffix(".tmp")
+            written.write_text(json.dumps({"model": self.model, "vectors": vectors}), encoding="utf-8")
+            written.replace(self.cache_path)
+        except OSError as exc:  # a cache that cannot be written never fails his search
+            logger.warning("Code search cache not written (%s): %s", self.cache_path, exc)
 
     def tracked_files(self) -> dict[str, int]:
         """Each tracked .py and .md file under the root (git ls-files), outside the skipped folders, with its mtime."""
@@ -651,14 +685,19 @@ class CodeIndex:
         return files
 
     async def refresh(self) -> list[str]:
-        """Embed the new and changed files, drop the gone ones; returns the paths embedded."""
+        """Read the new and changed files (by mtime) and drop the gone ones; a chunk whose vector is in the cache goes in
+        as it is (generate_vectors=False), and only the others are embedded, through MAF's upsert. Returns the paths read."""
         loop = asyncio.get_running_loop()
         if self._lock is None or self._lock_loop is not loop:
             self._lock, self._lock_loop = asyncio.Lock(), loop
         async with self._lock:
             await self.collection.ensure_collection_exists()
+            if self._vectors is None:
+                self._vectors = self._read_cache()
+            cached_before = len(self._vectors)
             tracked = self.tracked_files()
-            embedded: list[str] = []
+            read: list[str] = []
+            embedded = 0
             for path in [p for p in self._files if p not in tracked]:
                 await self.collection.delete(self._files.pop(path)[1])
             for path, mtime in tracked.items():
@@ -671,13 +710,31 @@ class CodeIndex:
                     CodeChunk(f"{path}:{start}", path, start, end, body, f"{path}\n{body}")
                     for start, end, body in code_chunks(path, text)
                 ]
-                for first in range(0, len(records), _EMBED_BATCH):
-                    await self.collection.upsert(records[first : first + _EMBED_BATCH])
-                self._files[path] = (mtime, [r.key for r in records])
-                embedded.append(path)
-            if embedded:
-                logger.info("Code search: embedded %d file(s).", len(embedded))
-            return embedded
+                hashes = [self.chunk_hash(str(r.embedding)) for r in records]
+                known = [r for r, h in zip(records, hashes) if h in self._vectors]
+                for record in known:
+                    record.embedding = self._vectors[self.chunk_hash(str(record.embedding))]
+                if known:
+                    await self.collection.upsert(known, generate_vectors=False)
+                fresh = [(r, h) for r, h in zip(records, hashes) if h not in self._vectors]
+                for first in range(0, len(fresh), _EMBED_BATCH):
+                    batch = fresh[first : first + _EMBED_BATCH]
+                    keys = await self.collection.upsert([r for r, _ in batch])
+                    stored = {c.key: c.embedding for c in await self.collection.get(keys, include_vectors=True)}
+                    for record, digest in batch:
+                        self._vectors[digest] = list(stored[record.key])
+                    embedded += len(batch)
+                self._files[path] = (mtime, [r.key for r in records], hashes)
+                read.append(path)
+            # Prune: keep only the vectors of chunks that still exist.
+            live = {h for _, _, hashes in self._files.values() for h in hashes}
+            pruned = {h: v for h, v in self._vectors.items() if h in live}
+            if embedded or len(pruned) != cached_before:
+                self._vectors = pruned
+                self._write_cache(pruned)
+            if read:
+                logger.info("Code search: read %d file(s), embedded %d chunk(s).", len(read), embedded)
+            return read
 
     async def search(self, values: Any = None, **kwargs: Any) -> Any:
         await self.refresh()
@@ -690,7 +747,7 @@ _CODE_INDEXES: dict[Path, CodeIndex] = {}
 def code_index() -> CodeIndex:
     """One index of the workspace per process: his hosts build Steward per request, and the index outlives each build."""
     if _WORKING_DIR not in _CODE_INDEXES:
-        _CODE_INDEXES[_WORKING_DIR] = CodeIndex(_WORKING_DIR, code_embedder())
+        _CODE_INDEXES[_WORKING_DIR] = CodeIndex(_WORKING_DIR, code_embedder(), CODE_SEARCH_CACHE)
     return _CODE_INDEXES[_WORKING_DIR]
 
 

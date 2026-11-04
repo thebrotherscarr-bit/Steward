@@ -310,6 +310,45 @@ def test_search_code_finds_a_chunk_by_meaning_and_embeds_a_changed_file_again(tm
     assert len(index.collection._state.records) == 6, "the changed file's old chunks were replaced, not added to"  # noqa: SLF001
 
 
+def test_search_code_keeps_each_chunks_vector_across_restarts(tmp_path: Path) -> None:
+    """The vectors outlive a restart (CodeIndex's cache, keyed by the model and the chunk's text): a second index over
+    the unchanged repo embeds nothing, a moved mtime embeds nothing, a changed chunk embeds only itself, and the cache
+    keeps only chunks that exist. His cache is under storage/, which .gitignore holds."""
+    import json
+
+    (tmp_path / "repo").mkdir()
+    repo = code_repo(tmp_path / "repo")
+    cache = tmp_path / "cache" / "embeddings.json"
+    first = WordEmbeddings()
+    asyncio.run(steward.CodeIndex(repo, first, cache).refresh())
+    assert len(first.texts) == 5 and len(json.loads(cache.read_text(encoding="utf-8"))["vectors"]) == 5
+
+    restarted = WordEmbeddings()
+    index = steward.CodeIndex(repo, restarted, cache)
+    asyncio.run(index.refresh())
+    assert restarted.texts == [], "a restart over an unchanged repo embedded again"
+    hits = asyncio.run(steward.code_search_tool(index).invoke(arguments={"query": "send the receipt email"}))
+    assert hits[0].text.startswith("shop.py:8-10"), "the cached vectors are searched"
+    assert restarted.texts == ["send the receipt email"], "only the query was embedded"
+
+    shop = tmp_path / "repo" / "shop.py"
+
+    def later() -> None:
+        os.utime(shop, ns=(shop.stat().st_atime_ns, shop.stat().st_mtime_ns + 5_000_000_000))
+
+    later()
+    assert asyncio.run(index.refresh()) == ["shop.py"] and len(restarted.texts) == 1, "a moved mtime embedded again"
+    shop.write_text(shop.read_text(encoding="utf-8").replace("the relay", "the outbox"), encoding="utf-8")
+    later()
+    asyncio.run(index.refresh())
+    assert restarted.texts[1:] == ["shop.py\n# Mail goes out through the outbox.\ndef send_receipt_email(address):\n"
+                                   "    return f'mail receipt to {address}'"], restarted.texts
+    vectors = json.loads(cache.read_text(encoding="utf-8"))["vectors"]
+    assert len(vectors) == 5 and index.chunk_hash(restarted.texts[1]) in vectors, "the old chunk's vector was pruned"
+    assert steward.code_index().cache_path == steward.CODE_SEARCH_CACHE == steward._WORKING_DIR / "storage" / "code-search" / "embeddings.json"
+    assert steward._git("check-ignore", "-q", str(steward.CODE_SEARCH_CACHE)).returncode == 0, "his cache is not gitignored"
+
+
 def test_search_code_is_on_his_live_path_with_no_card_and_its_embedder_runs_on_the_cpu(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
