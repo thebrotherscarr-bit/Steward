@@ -2299,7 +2299,8 @@ def test_an_eval_run_never_touches_stewards_real_memory() -> None:
         asyncio.run(evals.run_steward("Remember the word leak.", set(), client=client, enable_shell=False))
         his_calls = [c for c in client.calls if "durable memory" not in " ".join(m.text or "" for m in c["messages"])]
         assert len(his_calls) == 2, "the memory write ran"
-        assert len(client.calls) > len(his_calls), "his automatic memory ran in the eval, on its throwaway store"
+        offered = {getattr(t, "name", "") for t in client.calls[0]["options"].get("tools") or []}
+        assert "write_memory" in offered, "his automatic memory is in the eval, on its throwaway store"
         assert not real.exists(), "an eval's memory write must not reach his real memory"
         assert not steward.MEMORY_DIR.exists(), "nor his real automatic memory"
     finally:
@@ -2692,16 +2693,13 @@ def test_reading_a_skill_asks_no_card_and_running_its_script_still_does() -> Non
 
 
 def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_path: Path) -> None:
-    """Step 5 (5.1): MAF's MemoryContextProvider beside his history. After a turn, one call on his own client extracts
-    a durable fact; a new conversation starts with it in front of him; within a conversation his history is intact."""
-    client = ScriptedChatClient([
-        "Noted.",
-        '{"memories": [{"topic": "releases", "memory": "The release codename is Juniper."}]}',
-        "You told me the codename.",
-        '{"memories": []}',
-        "Juniper.",
-        '{"memories": []}',
-    ])
+    """Step 5 (5.1): MAF's MemoryContextProvider beside his history. He saves a durable fact with its write_memory tool;
+    a new conversation starts with it in front of him; within a conversation his history is intact. There is no
+    automatic extraction call (max_extractions=0, Kyle 2026-11-04: "Deliberate only")."""
+    save = Content.from_function_call(
+        call_id="m1", name="write_memory", arguments={"topic": "releases", "memory": "The release codename is Juniper."}
+    )
+    client = ScriptedChatClient([save, "Noted.", "You told me the codename.", "Juniper."])
 
     async def _go() -> None:
         async with AsyncExitStack() as stack:
@@ -2709,7 +2707,7 @@ def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_p
                 stack, client=client, enable_shell=False, memory_store=steward.steward_memory_store(tmp_path / "memory")
             )
             first = agent.create_session()
-            await agent.run("The release codename is Juniper.", session=first)
+            await agent.run("The release codename is Juniper. Remember it.", session=first)
             await agent.run("What did I just tell you?", session=first)
             await agent.run("What is the release codename?", session=agent.create_session())
 
@@ -2718,40 +2716,25 @@ def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_p
     def texts(call: int) -> str:
         return " ".join(m.text or "" for m in client.calls[call]["messages"])
 
-    assert "durable memory" in texts(1), "after a turn, the extraction call on his own client"
-    assert client.calls[1]["messages"][0].text == steward.MEMORY_EXTRACTION_PROMPT, "with his extraction rules"
-    assert "harness's own messages" in steward.MEMORY_EXTRACTION_PROMPT and "the assistant itself" in steward.MEMORY_EXTRACTION_PROMPT
+    assert len(client.calls) == 4, "his four model calls, and no extraction call after a turn"
+    assert not any("durable memory" in texts(i) for i in range(len(client.calls))), "automatic extraction is off"
     assert "The release codename is Juniper." in texts(2) and "Noted." in texts(2), "his history within a conversation"
-    assert "Juniper" in texts(4), "a new conversation starts with what he learned"
+    assert "Juniper" in texts(3), "a new conversation starts with what he saved"
     [index] = (tmp_path / "memory").rglob("MEMORY.md")
     assert "codename is Juniper" in index.read_text(encoding="utf-8")
 
 
 def test_the_memory_eval_recalls_in_a_new_conversation_what_the_first_one_saved() -> None:
     """Step 5 (5.3): evals.py memory runs two requests through his workflow (run_steward), each a new conversation, on
-    one throwaway memory. What the first request's extraction saved is in front of him in the second, memory_recalled
-    scores the recall, and his real memory folders are untouched."""
+    one throwaway memory. What the first request saved with write_memory is in front of him in the second (there is
+    no automatic extraction), memory_recalled scores the recall, and his real memory folders are untouched."""
     import evals
-
-    class Remembering(ScriptedChatClient):
-        """His replies from the script; each extraction call (MAF's "durable memory" prompt) from its own list."""
-
-        def __init__(self, replies: list[Any], extractions: list[str]) -> None:
-            super().__init__(replies)
-            self.extractions = list(extractions)
-
-        def _inner_get_response(self, *, messages: Sequence[Message], **kwargs: Any) -> Any:
-            if "durable memory" in " ".join(m.text or "" for m in messages):
-                self.replies.insert(0, self.extractions.pop(0) if self.extractions else '{"memories": []}')
-            return super()._inner_get_response(messages=messages, **kwargs)
 
     plan = '{"type": "approval", "questions": [{"message": "Note it."}], "steps": ["Note it"]}'
     done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "noted"}]})
     fact = f"The sample project's next release is codenamed {evals.MEMORY_FACT}."
-    client = Remembering(
-        [plan, done, "Noted.", plan, done, f"It is {evals.MEMORY_FACT}."],
-        ['{"memories": [{"topic": "releases", "memory": "%s"}]}' % fact],
-    )
+    save = Content.from_function_call(call_id="m1", name="write_memory", arguments={"topic": "releases", "memory": fact})
+    client = ScriptedChatClient([plan, save, done, "Noted.", plan, done, f"It is {evals.MEMORY_FACT}."])
     real = [steward._WORKING_DIR / name for name in ("agent-memory", "agent-file-memory", "storage")]
 
     def listing() -> dict[Path, list[Path]]:

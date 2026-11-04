@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- His memory holds only what he saves (Kyle, 2026-11-04: "Deliberate only"). Live, MAF's automatic extraction on
+  gpt-oss saved his own answers (order_total) and his memory eval's output (Kestrel-47 codenames) as facts and doubled
+  what he had saved himself with `write_memory`, whatever its prompt said. `steward_memory()` sets
+  `max_extractions=0`; the index, the topics in front of him, `write_memory`, transcripts and consolidation stay.
+  `MEMORY_EXTRACTION_PROMPT` is retired; his Charter (v4.2) says what to save. Six extracted topics moved to
+  `agent-file-memory/attic/2026-11-04-memory-extraction-junk` (kept). Restart required.
 - The host's state is no longer kept forever (Kyle, 2026-11-04: 14 days). At start, `expire_host_state` removes
   responses, workflow records and checkpoints older than `STEWARD_STATE_RETENTION_DAYS` (14), through the hosting
   SDK's store calls where it has them, and keeps anything an unanswered approval still needs; superseded checkpoints
