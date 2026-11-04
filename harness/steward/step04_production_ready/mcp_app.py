@@ -7,9 +7,12 @@ under uvicorn on the loop that holds Steward's MCP connections, as devui_app.py 
 
 As in the sample, the endpoint is unauthenticated and listens on loopback only.
 
-Approvals do not cross this boundary: mcp_from_run returns text, links and data, and omits an
-approval request. A tool that waits for approval (git_commit, file writes, the shell) does not run
-through this door; the Agent tab, where Kyle answers approvals, stays the way to work with him.
+Approvals cross it through SecondBrain (2026-11-04): mcp_from_run omits an approval request, so a tool that waits
+for one (git_commit, file writes, the shell) used to end the turn unanswered. Now each function_approval_request is
+asked on SecondBrain's approval_ask (its MCP server, the same URL and key as agent.py's), which raises Kyle's own card
+(the Agent tab, the Approvals shelf, Telegram) tagged "Manjuel / MCP" and waits up to 10 minutes (then No). His answer
+goes back to Steward as MAF's function_approval_response on the same session, as the harness tests answer a card
+(``to_function_approval_response``), and the turn continues. Without SecondBrain, the cards are left unanswered.
 
 Environment variables:
     OLLAMA_HOST, OLLAMA_MODEL, STEWARD_WORKSPACE, SECONDBRAIN_MCP_* — see agent.py
@@ -24,19 +27,23 @@ MANJUEL_MCP_STEWARD=http://127.0.0.1:43121/mcp in its .env.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import sys
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx2
 import uvicorn
-from agent_framework import FileSessionStore
+from agent_framework import AgentResponse, Content, FileSessionStore, Message
 from agent_framework_hosting import AgentState
 from agent_framework_hosting_mcp import AgentMCPTool
 from dotenv import load_dotenv
-from mcp import MCPError, types
+from mcp import Client, MCPError, types
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server import ServerRequestContext
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -60,12 +67,82 @@ HOST = "127.0.0.1"
 # which ComfyUI also takes
 PORT = 43121
 
+logger = logging.getLogger("steward.mcp_app")
 
-def build_mcp_app(agent: Any) -> Starlette:
-    """The sample's session-aware server, with Steward as its agent."""
+# SecondBrain answers a card No after 10 minutes (approval_ask); its call is read for that long, and a little more.
+CARD_WAIT_SECONDS = 660.0
+# Rounds of cards in one turn before the turn ends with any left unanswered (the loop terminates).
+MAX_CARD_ROUNDS = 10
+
+# One card to Kyle: (the function_approval_request, the MCP session_id) -> his answer, True for Allow.
+AskCard = Callable[[Content, str], Awaitable[bool]]
+
+
+def secondbrain_cards(client: Any) -> AskCard:
+    """Ask each card on SecondBrain's approval_ask over ``client`` (an MCP Client). Anything but an Allow is No."""
+
+    async def ask(card: Content, session_id: str) -> bool:
+        call = card.function_call
+        arguments = call.parse_arguments() if call is not None else None
+        try:
+            result = await client.call_tool(
+                "approval_ask",
+                {"tool": call.name if call is not None else "", "arguments": arguments or {}, "session_id": session_id},
+                read_timeout_seconds=CARD_WAIT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - SecondBrain down or the wait cut: the card is No, the turn goes on
+            logger.warning("approval_ask failed (%s): the card is answered No", type(exc).__name__)
+            return False
+        if result.is_error:
+            logger.warning("approval_ask refused: the card is answered No")
+            return False
+        try:
+            answer = json.loads(next(c.text for c in result.content if c.type == "text"))
+        except (StopIteration, ValueError):
+            return False
+        return isinstance(answer, dict) and answer.get("approved") is True
+
+    return ask
+
+
+def approval_cards(result: AgentResponse[Any]) -> list[Content]:
+    """The cards a run ended on: its function_approval_request contents."""
+    return [c for m in result.messages for c in m.contents if c.type == "function_approval_request"]
+
+
+async def run_with_cards(
+    agent_tool: AgentMCPTool[Any], name: str, arguments: Mapping[str, Any], ask_card: AskCard
+) -> types.CallToolResult:
+    """AgentMCPTool.call_tool's session run, with each card asked on ``ask_card`` and answered on the same session.
+
+    The run, the session and the conversion are AgentMCPTool's own (state, mcp_to_run, mcp_from_run); the answers go
+    back as function_approval_response contents, so the turn continues until it ends on no card (or MAX_CARD_ROUNDS).
+    """
+    target = await agent_tool.state.get_target()
+    tool_name = (await agent_tool.list_tools()).tools[0].name
+    if name != tool_name:
+        raise MCPError(types.INVALID_PARAMS, f"Unknown MCP tool: {name}")
+    run = agent_tool.mcp_to_run(arguments)
+    session_id = str(arguments["session_id"])
+    session = await agent_tool.state.get_or_create_session(session_id)
+    result = await target.run(run["messages"], options=run["options"], session=session, stream=False)
+    messages = list(result.messages)
+    for _ in range(MAX_CARD_ROUNDS):
+        cards = approval_cards(result)
+        if not cards:
+            break
+        answers = [card.to_function_approval_response(await ask_card(card, session_id)) for card in cards]
+        result = await target.run(Message(role="user", contents=answers), options=run["options"], session=session, stream=False)
+        messages.extend(result.messages)
+    await agent_tool.state.set_session(session_id, session)
+    return types.CallToolResult(content=agent_tool.mcp_from_run(AgentResponse(messages=messages)))
+
+
+def steward_mcp_tool(agent: Any) -> AgentMCPTool[Any]:
+    """The sample's AgentMCPTool over AgentState, with Steward as its agent."""
     # Step 5 (5.2): each session_id's conversation is kept on disk, so Manjuel's sessions survive a restart.
     state = AgentState(agent, session_store=FileSessionStore(MCP_SESSIONS_DIR))
-    agent_tool = AgentMCPTool(
+    return AgentMCPTool(
         state,
         argument_description="The request for the hosted agent.",
         parameters={
@@ -80,6 +157,11 @@ def build_mcp_app(agent: Any) -> Starlette:
         required_parameters={"session_id"},
         session_id_parameter="session_id",
     )
+
+
+def build_mcp_app(agent: Any, ask_card: AskCard | None = None) -> Starlette:
+    """The sample's session-aware server, with Steward as its agent; ``ask_card`` answers his cards (SecondBrain)."""
+    agent_tool = steward_mcp_tool(agent)
     session_locks: dict[str, asyncio.Lock] = {}
 
     async def list_tools(
@@ -99,7 +181,9 @@ def build_mcp_app(agent: Any) -> Starlette:
             raise MCPError(types.INVALID_PARAMS, "MCP tool argument 'session_id' must be a non-empty string.")
         lock = session_locks.setdefault(session_id, asyncio.Lock())
         async with lock:
-            return await agent_tool.call_tool(name, arguments)
+            if ask_card is None:
+                return await agent_tool.call_tool(name, arguments)
+            return await run_with_cards(agent_tool, name, arguments, ask_card)
 
     server = Server("steward", on_list_tools=list_tools, on_call_tool=call_tool)
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None, json_response=True, stateless=True)
@@ -126,8 +210,20 @@ async def main() -> None:
         agent = await build_steward_agent(
             stack, history_provider=steward_history_provider(), memory_store=steward_memory_store()
         )
+        # His cards go to SecondBrain's approval_ask, on a client of their own: a card waits up to 10 minutes, longer
+        # than agent.py's client reads (300 s). The same URL and key as agent.py's; the key is never printed.
+        ask_card: AskCard | None = None
+        url = os.environ.get("SECONDBRAIN_MCP_URL")
+        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        if url and key:
+            http = await stack.enter_async_context(
+                httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(30.0, read=CARD_WAIT_SECONDS))
+            )
+            ask_card = secondbrain_cards(await stack.enter_async_context(Client(streamable_http_client(url, http_client=http))))
+        else:
+            logger.warning("SECONDBRAIN_MCP_URL or SECONDBRAIN_MCP_KEY is not set: approval cards are left unanswered")
         async with agent:
-            app = build_mcp_app(agent)
+            app = build_mcp_app(agent, ask_card)
             await uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="info")).serve()
 
 

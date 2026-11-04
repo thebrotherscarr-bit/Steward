@@ -4703,3 +4703,95 @@ def test_check_and_repair_emit_progress_events_in_order(monkeypatch: pytest.Monk
     finally:
         wf._CHECK_PROGRESS.reset(token)
     assert said == ["checking: pytest -q b.py", "checking: pytest -q pkg"], said
+
+
+def _mcp_turn(replies: list[Any], answer: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[Any], list[str]]:
+    """One Steward turn through mcp_app's run_with_cards (Manjuel's maf face, Aurora's ask_steward), in execute mode,
+    with an approval-requiring probe tool and a fake ask_card in SecondBrain's place: (the MCP result, the cards asked,
+    what the probe ran)."""
+    import mcp_app
+    from agent_framework import AgentModeProvider, set_agent_mode, tool
+
+    monkeypatch.setattr(mcp_app, "MCP_SESSIONS_DIR", tmp_path / "mcp-sessions")
+    ran: list[str] = []
+    asked: list[Any] = []
+
+    @tool(name="probe_write", approval_mode="always_require")
+    def probe_write(text: str) -> str:
+        """Writes nothing: records that it ran."""
+        ran.append(text)
+        return f"wrote {text}"
+
+    async def ask_card(card: Any, session_id: str) -> bool:
+        asked.append((card.function_call.name, card.function_call.parse_arguments(), session_id))
+        return answer
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=ScriptedChatClient(replies), enable_shell=False, extra_tools=[probe_write])
+            async with agent:
+                agent_tool = mcp_app.steward_mcp_tool(agent)
+                session = await agent_tool.state.get_or_create_session("manjuel-1")
+                for modes in [p for p in agent.context_providers if isinstance(p, AgentModeProvider)]:
+                    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                await agent_tool.state.set_session("manjuel-1", session)
+                name = (await agent_tool.list_tools()).tools[0].name
+                return await mcp_app.run_with_cards(agent_tool, name, {"task": "Write it.", "session_id": "manjuel-1"}, ask_card)
+
+    return asyncio.run(_go()), asked, ran
+
+
+def test_a_card_under_the_mcp_host_is_asked_in_secondbrain_and_allow_runs_the_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """mcp_app (2026-11-04): a tool that waits for approval no longer ends Manjuel's turn unanswered. The card goes to
+    ask_card (SecondBrain's approval_ask), Allow goes back as MAF's function_approval_response, and the turn ends."""
+    call = Content.from_function_call(call_id="p1", name="probe_write", arguments={"text": "hello"})
+    result, asked, ran = _mcp_turn([call, "Wrote it."], True, tmp_path, monkeypatch)
+    assert asked == [("probe_write", {"text": "hello"}, "manjuel-1")], "one card, with its call and the session"
+    assert ran == ["hello"], "Allow ran the tool"
+    assert [c.text for c in result.content if c.type == "text"][-1] == "Wrote it.", "and the turn went on to its answer"
+
+
+def test_a_card_under_the_mcp_host_denied_runs_nothing_and_the_turn_still_ends(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    call = Content.from_function_call(call_id="p1", name="probe_write", arguments={"text": "hello"})
+    result, asked, ran = _mcp_turn([call, "Not written."], False, tmp_path, monkeypatch)
+    assert len(asked) == 1
+    assert ran == [], "Deny (or SecondBrain's 10-minute No) runs nothing"
+    assert [c.text for c in result.content if c.type == "text"][-1] == "Not written."
+
+
+def test_secondbrain_cards_asks_approval_ask_and_only_an_allow_is_yes() -> None:
+    """secondbrain_cards: the card's tool, arguments and session go to approval_ask, read for longer than its
+    10 minutes; approved true is Allow, and a refusal, a failure or anything else is No."""
+    import json as _json
+
+    import mcp_app
+    from mcp import types
+
+    sent: list[Any] = []
+
+    def client(reply: Any) -> Any:
+        class FakeClient:
+            async def call_tool(self, name: str, arguments: dict[str, Any], read_timeout_seconds: float | None = None) -> Any:
+                sent.append((name, arguments, read_timeout_seconds))
+                if isinstance(reply, Exception):
+                    raise reply
+                return reply
+
+        return FakeClient()
+
+    def answer(text: str, is_error: bool = False) -> Any:
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
+
+    card = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": "m"})
+    card = Content.from_function_approval_request(id="r1", function_call=card)
+
+    def ask(reply: Any) -> bool:
+        return asyncio.run(mcp_app.secondbrain_cards(client(reply))(card, "manjuel-1"))
+
+    assert ask(answer(_json.dumps({"id": "a", "approved": True, "answer": "allow"}))) is True
+    assert sent == [("approval_ask", {"tool": "git_commit", "arguments": {"message": "m"}, "session_id": "manjuel-1"}, mcp_app.CARD_WAIT_SECONDS)]
+    assert mcp_app.CARD_WAIT_SECONDS > 600, "read for longer than SecondBrain's 10-minute wait"
+    assert ask(answer(_json.dumps({"id": "a", "approved": False, "answer": "timeout"}))) is False
+    assert ask(answer("the Agent is not running here", is_error=True)) is False
+    assert ask(answer("not json")) is False
+    assert ask(ConnectionError("down")) is False

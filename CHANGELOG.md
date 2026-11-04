@@ -15,6 +15,15 @@ was never merged and has no entry.
 
 ### Added
 
+- Approvals cross the MCP door: a turn through `mcp_app.py` (Manjuel's `maf` face, Aurora's `ask_steward`) that
+  reaches a tool needing approval no longer ends with the card unanswered. Each `function_approval_request` is asked on
+  SecondBrain's `approval_ask` (its MCP server, `SECONDBRAIN_MCP_URL` and `SECONDBRAIN_MCP_KEY`, on a client of its own
+  read for 660 s), which raises the card in the Agent tab, the Approvals shelf and Telegram tagged "Manjuel / MCP" and
+  answers No after 10 minutes. The answer goes back on the same session as MAF's `function_approval_response`, and
+  the turn continues (`run_with_cards`, at most `MAX_CARD_ROUNDS` rounds). Without SecondBrain the cards are left
+  unanswered, as before. Tests: `test_a_card_under_the_mcp_host_is_asked_in_secondbrain_and_allow_runs_the_tool`,
+  `test_a_card_under_the_mcp_host_denied_runs_nothing_and_the_turn_still_ends`,
+  `test_secondbrain_cards_asks_approval_ask_and_only_an_allow_is_yes`.
 - Progress from CHECK and REPAIR: MAF custom workflow events (`ctx.add_event`, `StewardProgress`, type `progress`),
   in order: "checking: pytest -q <folder>" before each folder's tests (the check reports from its worker thread through
   `check_progress`), "check passed" or "check failed", and "repair attempt n/3". A caller streaming the workflow reads
