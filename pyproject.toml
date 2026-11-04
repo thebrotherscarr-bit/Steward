@@ -4,7 +4,9 @@ version = "0.7.0"
 description = "STEWARD: a Microsoft Agent Framework agent on local Ollama"
 requires-python = ">=3.11"
 # Every package the hosts import, pinned to the versions the harness suite passes on. The Microsoft Agent
-# Framework packages are upgraded together, in one step. The gate (.github/workflows/gate.yml) installs these.
+# Framework packages are upgraded together, in one step. Their own dependencies are pinned, with hashes, in
+# requirements.lock (pip-compile; see its header), which the gate (.github/workflows/gate.yml) installs. A pin
+# changed here is re-locked in the same change: test_harness.py's lock check fails until it is.
 dependencies = [
     "agent-framework==1.24.0",
     "agent-framework-core==1.24.0",
@@ -35,6 +37,10 @@ dependencies = [
 # model). Automatic memory is MAF core's own MemoryContextProvider (step 5), so it needs no extra.
 governance = [
     "presidio-analyzer==2.2.366",
+]
+# What the gate runs the tests with, pinned like the rest and locked with them (requirements.lock).
+test = [
+    "pytest==9.2.0",
 ]
 
 [build-system]
