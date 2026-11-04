@@ -3278,18 +3278,18 @@ def test_a_stale_runner_is_unloaded_once_when_the_malformed_call_retries_run_out
     assert len(chats) == 4, "the call, two retries, and one more after the unload"
     assert "unloading steward:1 for a fresh runner" in caplog.text, caplog.text
 
-    # A storm that goes on: the error propagates after one unload (the window is open again for this storm).
+    # A storm that goes on: the error propagates after one unload and the correction turn (the window is open again).
     monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
     client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(9)])
     with pytest.raises(Exception, match="error parsing tool call"):
         _ask(client)
-    assert len(unloads) == 1 and len(chats) == 4, (unloads, chats)
+    assert len(unloads) == 1 and len(chats) == 5, "the call, two retries, one after the unload, the correction turn"
 
-    # A second storm within the window: no unload, the error after the two retries, as before.
+    # A second storm within the window: no unload, the error after the two retries and the correction turn.
     client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(9)])
     with pytest.raises(Exception, match="error parsing tool call"):
         _ask(client)
-    assert unloads == [] and len(chats) == 3, (unloads, chats)
+    assert unloads == [] and len(chats) == 4, "the call, two retries and the correction turn"
     # Once the window has passed, a storm may unload again.
     monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", steward._RUNNER_UNLOADED_AT - steward._RUNNER_UNLOAD_WINDOW_SECONDS - 1)
     client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(3)])
@@ -4785,3 +4785,75 @@ def test_each_ollama_chat_call_records_its_timings_in_usage_and_on_its_span(monk
         client._parse_streaming_response_from_ollama(answer("steward:1", "k", True))
     spans = exporter.get_finished_spans()
     assert len(spans) == 2 and all({k: span.attributes.get(k) for k in expected} == expected for span in spans), spans
+
+
+def test_a_malformed_tool_call_in_execute_is_recovered_or_corrected_and_the_write_happens(monkeypatch: Any) -> None:
+    """Steps eval 2026-11-04 21:52: in EXECUTE, three "error parsing tool call" and the step ended with no call, so
+    inventory.py was never written. Ollama's raw text that holds a write's arguments (a raw line break inside the new
+    code, text after the object) is run as that call; when the raw text is garbage and the retries are spent, the
+    model gets the parse error as a correction turn and the call it writes then runs."""
+    import time
+
+    import ollama
+    from agent_framework import Agent, tool
+    from agent_framework.ollama import OllamaChatClient
+
+    writes: list[dict[str, Any]] = []
+
+    @tool(name="file_access_write", approval_mode="never_require")
+    def file_access_write(file_name: str, content: str) -> str:
+        """Write a file."""
+        writes.append({"file_name": file_name, "content": content})
+        return "written"
+
+    @tool(name="file_access_read", approval_mode="never_require")
+    def file_access_read(file_name: str, offset: int = 0) -> str:
+        """Read a file."""
+        return ""
+
+    def done() -> Any:
+        return ollama.ChatResponse(model="steward:1", message=ollama.Message(role="assistant", content="Done."), done=True)
+
+    def called(name: str, arguments: dict[str, Any]) -> Any:
+        call = ollama.Message.ToolCall(function=ollama.Message.ToolCall.Function(name=name, arguments=arguments))
+        return ollama.ChatResponse(model="steward:1", message=ollama.Message(role="assistant", content="", tool_calls=[call]), done=True)
+
+    def run(script: list[Any]) -> list[Any]:
+        sent: list[Any] = []
+
+        async def chat(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            step = script.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            return step
+
+        client = OllamaChatClient(model="steward:1", host="http://127.0.0.1:9")
+        monkeypatch.setattr(client.client, "chat", chat)
+        agent = Agent(client=steward._retry_malformed_tool_calls(client), tools=[file_access_write, file_access_read])
+        assert asyncio.run(agent.run("Fix the discount.")).text == "Done."
+        return sent
+
+    # The raw text holds the write: Go's parser refused the raw line break in the code and the text after the object.
+    raw = (
+        "error parsing tool call: raw='{\"file_name\": \"sample-project/inventory.py\", \"content\": \"def total(subtotal, "
+        "discount_percent):\n    return round(subtotal * (1 - discount_percent / 100), 2)\n\"}<|call|>', "
+        "err=invalid character '\\n' in string literal"
+    )
+    sent = run([ollama.ResponseError(raw, 500), done()])
+    assert writes == [{
+        "file_name": "sample-project/inventory.py",
+        "content": "def total(subtotal, discount_percent):\n    return round(subtotal * (1 - discount_percent / 100), 2)\n",
+    }], writes
+    assert len(sent) == 2, "recovered at once: no retry"
+
+    # Garbage raw text, retries spent, no unload left in the window: the parse error goes back as a correction turn.
+    writes.clear()
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", time.monotonic())
+    garbage = ollama.ResponseError("error parsing tool call: raw='{\"id\": 3???????}'", 500)
+    fixed = {"file_name": "sample-project/inventory.py", "content": "x = 1\n"}
+    sent = run([garbage, garbage, garbage, called("file_access_write", fixed), done()])
+    assert writes == [fixed], writes
+    correction = sent[3]["messages"][-1]
+    assert correction["role"] == "user" and "could not be read: error parsing tool call" in correction["content"], correction
+    assert all("could not be read" not in str(m) for m in sent[0]["messages"]), "only the correction turn carries it"
