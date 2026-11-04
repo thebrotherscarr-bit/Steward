@@ -417,7 +417,19 @@ def written_python_files(messages: Sequence[Message]) -> list[str]:
     A write that waited on the user's card is not in the response as a call: after the pause, the AgentExecutor's
     response starts from the user's answer (_agent_executor.py), and the call it approves rides on that answer
     (function_approval_response.function_call). So approved answers count, and denied ones do not.
+
+    A call whose tool result is in the messages counts only when the result says the write happened (MAF's own
+    words, _file_access.py: "File '...' written.", "Replaced ...", "File '...' deleted."): an approved card can still
+    be refused by his write middleware (whole_write_problem, the Unicode-punctuation check) or fail in the tool
+    ("already exists"), and nothing is written (audit 2026-11-04). A response with no tool results (MAF's
+    WorkflowAgent forwards assistant messages only) is read as before; the evals then ask the disk.
     """
+    results = {
+        content.call_id: str(content.result or "")
+        for message in messages
+        for content in message.contents or []
+        if content.type == "function_result" and content.call_id
+    }
     files: list[str] = []
     for message in messages:
         for content in message.contents or []:
@@ -429,10 +441,18 @@ def written_python_files(messages: Sequence[Message]) -> list[str]:
                 continue
             if call is None or call.name not in FileAccessProvider._WRITE_TOOL_NAMES:  # noqa: SLF001
                 continue
+            if call.call_id in results and not write_happened(results[call.call_id]):
+                continue
             name = str((call.parse_arguments() or {}).get("file_name") or "")
             if name.endswith(".py") and name not in files:
                 files.append(name)
     return files
+
+
+def write_happened(result: str) -> bool:
+    """Whether a MAF file-writing tool's result says it wrote (its success texts, _file_access.py), not a refusal."""
+    text = str(result or "")
+    return text.startswith("Replaced ") or (text.startswith("File '") and text.endswith(("' written.", "' deleted.")))
 
 
 # Set on the check's own pytest, so a workflow run inside those tests does not start the check again.
