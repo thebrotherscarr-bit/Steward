@@ -414,10 +414,18 @@ def _called(conversation: list[Any]) -> list[str]:
 
 async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, approve: set[str]) -> AgentResponse[Any]:
     """A run whose approval cards are answered: approved for the tools in ``approve``, denied otherwise, as the
-    console's Approve and Deny do (harness/console/observers/tool_approval.py)."""
+    console's Approve and Deny do (harness/console/observers/tool_approval.py).
+
+    The response holds the answers too, each as the user's message after the turn that raised its cards, as the
+    conversation has them. An approved write is in the run only there: the card is a function_approval_request, and
+    the call it approves rides on the answer (written_python_files counts approved answers, never bare cards); the
+    resumed run streams the write's outcome, not the call again. Live 2026-11-04 (evals.py small, the item_count ask):
+    EXECUTE wrote inventory.py on an approved card and the checks passed, yet check_covers_writes and
+    edit_keeps_file_whole found no write, because the answers were sent and never kept."""
     from agent_framework import Message  # noqa: PLC0415
 
     updates = [u async for u in agent.run(query, session=session, stream=True)]
+    messages = list(AgentResponse.from_updates(updates).messages)
     answered: set[str] = set()
     for _ in range(8):
         requests = [
@@ -428,8 +436,11 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
             break
         answered.update(request.function_call.call_id for request in requests)
         answers = [request.to_function_approval_response(approved=request.function_call.name in approve) for request in requests]
-        updates += [u async for u in agent.run(Message(role="user", contents=answers), session=session, stream=True)]
-    return AgentResponse.from_updates(updates)
+        answer = Message(role="user", contents=answers)
+        turn = [u async for u in agent.run(answer, session=session, stream=True)]
+        updates += turn
+        messages += [answer, *AgentResponse.from_updates(turn).messages]
+    return AgentResponse(messages=messages)
 
 
 # Piece 5 (Kyle's build order, 2026-11-01): the workflow's steps scored one by one on a single run. The bug is
