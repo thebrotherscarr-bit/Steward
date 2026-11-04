@@ -101,7 +101,7 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "evals", "github", "improve", "run-tests", "secondbrain-notes")
+SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "estate", "evals", "github", "improve", "run-tests", "secondbrain-notes")
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
