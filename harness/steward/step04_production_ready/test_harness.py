@@ -260,6 +260,12 @@ def test_a_unicode_dash_in_code_is_refused_with_its_place_and_nothing_is_written
     assert steward.code_punctuation_problem("a.py", f"x = f'{{a}} {dash}'\n") is None, "an f-string's text part"
     assert steward.code_punctuation_problem("a.py", f's = """{dash}') is None, "an edit made in parts, still in its string"
     assert steward.code_punctuation_problem("a.py", "x = 1 - 1\n") is None
+    # A whole-file write must be the whole file: a shortened stand-in is refused and nothing is written.
+    results, written = approved_write("test_harness_short_probe.py", '"""A tiny inventory module...')
+    assert not written and results[0].startswith("Refused: test_harness_short_probe.py would not be Python"), results
+    results, written = approved_write("test_harness_short_probe.py", '"""A tiny inventory module."""\n\nX = 1\n')
+    assert written, "a whole file that parses is written"
+    assert steward.whole_write_problem("a.md", "...") is None, "only .py is judged"
 
 
 INVENTORY ="harness/steward/working/sample-project/inventory.py"

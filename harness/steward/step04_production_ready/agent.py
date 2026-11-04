@@ -1894,7 +1894,29 @@ async def refuse_unicode_punctuation_in_code(
         if text is not None and (refusal := code_punctuation_problem(file_name, text)):
             context.result = refusal
             return
+        if name == FileAccessProvider.WRITE_TOOL_NAME and text is not None and (refusal := whole_write_problem(file_name, text)):
+            context.result = refusal
+            return
     await call_next()
+
+
+def whole_write_problem(file_name: str, content: str) -> str | None:
+    """The refusal for a whole-file write of a .py file whose text is not Python, or None.
+
+    2026-11-04 10:14: he overwrote the sample project's inventory.py with only its docstring's first words and "...", a shortened
+    stand-in for the file, and every eval after it ran on a file with no code. A whole write is the whole file, so it
+    must parse; an edit made in parts goes through file_access_replace, which this does not judge."""
+    if not str(file_name).lower().endswith(".py"):
+        return None
+    try:
+        ast.parse(content)
+    except SyntaxError as error:
+        return (
+            f"Refused: {file_name} would not be Python ({error.msg}, line {error.lineno}), so nothing was written. "
+            "file_access_write replaces the whole file: give its complete text, never a shortened one, "
+            "or change part of it with file_access_replace."
+        )
+    return None
 
 
 # </code_punctuation>

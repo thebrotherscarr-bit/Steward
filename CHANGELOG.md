@@ -15,6 +15,14 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A whole-file write of a `.py` file must parse, or it is refused and nothing is written (`whole_write_problem`, in
+  the write middleware beside the Unicode-punctuation check). On 2026-11-04 at 10:14 Steward overwrote the sample
+  project's `inventory.py` with a shortened stand-in (its docstring's first words and "..."). Edits made in parts
+  (`file_access_replace`) are not judged.
+- The evals put the sample project back to its committed text (`sample_project_as_committed`, `git checkout HEAD`)
+  before they snapshot it. Their resets restored what was on disk when they began, so the damaged file was every
+  later run's "original": the bug could not be planted, and the live eval of 2026-11-04 spent the discount ask
+  debugging the harness.
 - A tool call written as text whose keys fit several tools now runs as the one read-only tool among them, judged by
   MAF's own read-only approval rules (`READ_ONLY_RULES`, shared with the build's approval rules); a write is never
   chosen, and zero or several read-only fits stay text (live eval 2026-11-04: the discount ask's plan step wrote

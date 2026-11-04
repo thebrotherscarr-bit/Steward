@@ -236,6 +236,18 @@ async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agen
     return steward, response
 
 
+SAMPLE_PROJECT = "harness/steward/working/sample-project"
+
+
+def sample_project_as_committed() -> None:
+    """The sample project put back to its committed text before a run snapshots it. The runs' own resets put back
+    what was on disk when they began, so a damaged file outlived every run (2026-11-04: inventory.py, cut to a
+    stand-in at 10:14, was the "original" of each eval after it)."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    subprocess.run(["git", "checkout", "HEAD", "--", SAMPLE_PROJECT], cwd=_WORKING_DIR, check=True, capture_output=True)
+
+
 @contextmanager
 def discount_bug_planted() -> Any:
     """The discount bug, planted in the working copy for the run and put back after it, whatever happens.
@@ -550,6 +562,7 @@ async def steps_main() -> int:
             memory_store=isolated_memory_store(stack), eval_build=True,
         )
         async with agent:
+            sample_project_as_committed()
             with discount_bug_planted():
                 CASE_ERRORS.pop(STEPS_QUERY, None)
                 try:
@@ -782,6 +795,7 @@ async def run_small_asks(
 
     build.setdefault("auto_approve_skill_scripts", True)
     project = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project"
+    sample_project_as_committed()
     SMALL_ASK_ORIGINALS.clear()
     SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
     originals = {p: p.read_bytes() for p in project.iterdir() if p.is_file()}
