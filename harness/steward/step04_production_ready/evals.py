@@ -216,7 +216,9 @@ def isolated_memory_store(stack: AsyncExitStack) -> Any:
 async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any], AgentResponse[Any]]:
     """One query through Steward's workflow, as the Agent tab's service runs it (define once: build_steward), driven
     as an agent (Learn, "Using Workflows as Agents"), in a fresh build. The plan card and the tools in ``approve`` are
-    approved, every other card denied; EXECUTE's work is in the response (intermediate output)."""
+    approved, every other card denied; EXECUTE's work is in the response (intermediate output). Always an eval's build
+    (eval_build): no Atlas door and no note writes, so no card reaches the user's SecondBrain (live 2026-11-04)."""
+    build["eval_build"] = True
     async with AsyncExitStack() as stack:
         build.setdefault("file_memory_store", isolated_memory(stack))  # his real memory stays out of the eval
         build.setdefault("memory_store", isolated_memory_store(stack))
@@ -459,7 +461,7 @@ async def steps_main() -> int:
     async with AsyncExitStack() as stack:
         agent, workflow = await wf.build_steward(
             stack, auto_approve_skill_scripts=True, file_memory_store=isolated_memory(stack),
-            memory_store=isolated_memory_store(stack),
+            memory_store=isolated_memory_store(stack), eval_build=True,
         )
         async with agent:
             with discount_bug_planted():

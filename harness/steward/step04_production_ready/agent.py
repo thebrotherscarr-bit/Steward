@@ -44,12 +44,15 @@ import asyncio
 import copy
 import difflib
 import hashlib
+import io
 import json
 import logging
 import os
 import re
 import subprocess
 import sys
+import tokenize
+import unicodedata
 import uuid
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
@@ -1741,6 +1744,110 @@ class LineEndingFileStore(FileSystemAgentFileStore):
 # </file_store>
 
 
+# <code_punctuation>
+# Live 2026-11-04 (evals.py small, the item_count ask): gpt-oss wrote a .py file with U+2011 (a non-breaking hyphen)
+# where a minus belonged, the file failed with a SyntaxError, the check failed and the run ended asking questions. MAF's
+# place for it is function middleware that sets context.result and does not call call_next (Learn, agents/middleware,
+# termination; as refuse_grader_writes in improvement_loop_workflow.py): a write to a .py file whose resulting text holds
+# one of these characters outside a string or comment is refused with the character, its line and column and the ASCII
+# one to use, and nothing is written. His content is never rewritten for him. Other files are left alone.
+CODE_PUNCTUATION: dict[str, str] = {
+    **dict.fromkeys("‐‑‒–—―−", "-"),
+    **dict.fromkeys("‘’", "'"),
+    **dict.fromkeys("“”", '"'),
+    **dict.fromkeys("  ", " "),
+}
+CODE_PUNCTUATION_REFUSAL = (
+    "Refused: {file} line {line}, column {column} has {char!r} (U+{code:04X} {name}) outside a string or comment, and "
+    "Python cannot run it. Nothing was written. Use the ASCII character {ascii!r} instead, and write the change again."
+)
+# Tokens whose text Python never reads as code (tokenize, 3.12+: an f-string's literal parts are FSTRING_MIDDLE).
+_TEXT_TOKENS = frozenset(
+    getattr(tokenize, name) for name in ("STRING", "COMMENT", "FSTRING_MIDDLE", "TSTRING_MIDDLE") if hasattr(tokenize, name)
+)
+
+
+def code_punctuation_problem(file_name: str, content: str) -> str | None:
+    """The refusal for a .py file's resulting text with Unicode punctuation outside a string or comment, or None.
+
+    Python's tokenize reads such a character as a NAME token, so every token that is not a string or a comment is
+    searched; a text that stops tokenizing (an edit made in parts) is searched up to where it stops. Then ast.parse,
+    whose "invalid character" error names the position, catches one the tokens did not reach.
+    """
+    if not str(file_name).lower().endswith(".py") or not any(c in content for c in CODE_PUNCTUATION):
+        return None
+    found: tuple[int, int, str] | None = None
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(content).readline):
+            if token.type in _TEXT_TOKENS:
+                continue
+            at = next((i for i, c in enumerate(token.string) if c in CODE_PUNCTUATION), None)
+            if at is not None:
+                found = (token.start[0], token.start[1] + at + 1, token.string[at])
+                break
+    except (tokenize.TokenError, SyntaxError):
+        pass
+    if found is None:
+        try:
+            ast.parse(content)
+        except SyntaxError as error:
+            lines = content.splitlines()
+            if error.lineno and error.offset and error.lineno <= len(lines) and 0 < error.offset <= len(lines[error.lineno - 1]):
+                char = lines[error.lineno - 1][error.offset - 1]
+                if char in CODE_PUNCTUATION:
+                    found = (error.lineno, error.offset, char)
+    if found is None:
+        return None
+    line, column, char = found
+    return CODE_PUNCTUATION_REFUSAL.format(
+        file=file_name, line=line, column=column, char=char, code=ord(char),
+        name=unicodedata.name(char, "UNICODE CHARACTER"), ascii=CODE_PUNCTUATION[char],
+    )
+
+
+def _written_text(name: str, arguments: dict[str, Any]) -> str | None:
+    """The text a call to MAF's write tools would leave in its file, by MAF's own edit functions
+    (agent_framework/_harness/_file_access.py: file_access_replace :2387, file_access_replace_lines :2409), read with
+    "\\n" endings as LineEndingFileStore reads it; None for a delete, a missing file or an edit MAF would refuse."""
+    from agent_framework._harness._file_access import _apply_replace, _apply_replace_lines, _line_edits  # noqa: PLC0415
+
+    def lf(text: Any) -> str:
+        return str(text or "").replace("\r\n", "\n")
+
+    if name == FileAccessProvider.WRITE_TOOL_NAME:
+        return lf(arguments.get("content"))
+    if name not in (FileAccessProvider.REPLACE_TOOL_NAME, FileAccessProvider.REPLACE_LINES_TOOL_NAME):
+        return None
+    try:
+        path = _inside_workspace(str(arguments.get("file_name") or ""))
+        old = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        if name == FileAccessProvider.REPLACE_TOOL_NAME:
+            return _apply_replace(old, lf(arguments.get("old_string")), lf(arguments.get("new_string")), bool(arguments.get("replace_all")))[0]
+        return _apply_replace_lines(old, _line_edits(list(arguments.get("edits") or [])))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # MAF's tool answers it itself, with its reason, and writes nothing
+
+
+async def refuse_unicode_punctuation_in_code(
+    context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
+) -> None:
+    """Function middleware on his file writes (and the improvement round's coder's): a .py file is never left with
+    Unicode punctuation outside a string or comment (code_punctuation_problem); the refusal is his tool result."""
+    name = context.function.name
+    if name in FileAccessProvider._WRITE_TOOL_NAMES:  # MAF's own set of its write tools
+        arguments = context.arguments
+        arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+        file_name = str(arguments.get("file_name") or "")
+        text = _written_text(name, arguments) if file_name.lower().endswith(".py") else None
+        if text is not None and (refusal := code_punctuation_problem(file_name, text)):
+            context.result = refusal
+            return
+    await call_next()
+
+
+# </code_punctuation>
+
+
 # <secondbrain>
 # Stage 1 starts small: the notes, git reads and a held commit. Notes writes ask in
 # Steward's console; door writes are held by SecondBrain's own gate, so they are not asked twice.
@@ -1756,6 +1863,8 @@ _SECONDBRAIN_TOOLS = [
     "computer_task", "screen_look",
 ]  # hold_list is left out: SecondBrain answers it only to Kyle's glass
 _SECONDBRAIN_ASKS = ["write_note", "append_to_note", "skill_save"]
+# What an eval's build (eval_build) is given of them: reads only, no door, no writes, no clicks on his screen.
+_SECONDBRAIN_READS = ["search_notes", "read_note", "list_notes", "search_sessions", "web_search", "web_fetch"]
 
 
 async def _connect_secondbrain(stack: AsyncExitStack, tools: list[str] = _SECONDBRAIN_TOOLS) -> MCPStreamableHTTPTool | None:
@@ -2115,6 +2224,7 @@ async def build_steward_agent(
     default_options: dict[str, Any] | None = None,
     extra_tools: Sequence[Any] = (),
     memory_store: Any = None,
+    eval_build: bool = False,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -2137,6 +2247,10 @@ async def build_steward_agent(
         extra_tools: Tools a caller adds to his own (the improvement loop's hand_to_coder, step 6).
         memory_store: His automatic memory's store (step 5: MAF's MemoryContextProvider, beside his history).
             Hosts pass steward_memory_store(); evals pass a throwaway one; None leaves it off.
+        eval_build: True for an eval's Steward (evals.py passes it): SecondBrain's reads stay (notes, the Charter,
+            skills, the web), but the Atlas door (atlas_* and pr_checks) and the note writes are not offered, so an
+            eval never parks a card in the user's SecondBrain (live 2026-11-04). A build argument, not an
+            environment variable, so the live host cannot be left in it.
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -2243,8 +2357,9 @@ async def build_steward_agent(
         # more MCPStreamableHTTPTool on that client, with allowed_tools, as MAF's local-MCP page shows.
         # The door keeps its own authorization, as MAF says host tools must. Only the git tools and the
         # record are offered, the pieces of the branch-check-keep loop; steward_world_only keeps every
-        # call on his own world.
-        if secondbrain_client is not None:
+        # call on his own world. An eval's build has no door (eval_build): live 2026-11-04 an eval's commit through
+        # it parked a real hold card in the user's SecondBrain.
+        if secondbrain_client is not None and not eval_build:
             # His own door: trusted reads; its branch, commit, push and PR are FIDES sinks (labelled_mcp_tool).
             door = await labelled_mcp_tool(
                 stack,
@@ -2266,16 +2381,18 @@ async def build_steward_agent(
             # himself (reads, never a card), and his Charter, read through them and put in his
             # instructions before every turn (CharterProvider, design step 1).
             # What a note says is untrusted content to FIDES (labelled_mcp_tool); writing one is a sink.
+            # An eval's build reads his notes but never writes one (eval_build): MCPStreamableHTTPTool's allowed_tools.
+            note_tools = [t for t in _SECONDBRAIN_NOTES_TOOLS if not (eval_build and t in _SECONDBRAIN_NOTES_ASK)]
             notes = await labelled_mcp_tool(
                 stack,
                 MCPStreamableHTTPTool(
                     name="secondbrain_notes",
                     mcp_client=secondbrain_client,
                     tool_name_prefix="secondbrain",
-                    allowed_tools=list(_SECONDBRAIN_NOTES_TOOLS),
+                    allowed_tools=note_tools,
                     approval_mode={
-                        "always_require_approval": list(_SECONDBRAIN_NOTES_ASK),
-                        "never_require_approval": [t for t in _SECONDBRAIN_NOTES_TOOLS if t not in _SECONDBRAIN_NOTES_ASK],
+                        "always_require_approval": [t for t in note_tools if t in _SECONDBRAIN_NOTES_ASK],
+                        "never_require_approval": [t for t in note_tools if t not in _SECONDBRAIN_NOTES_ASK],
                     },
                     load_prompts=False,
                 ),
@@ -2355,7 +2472,8 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[
-                memory_owner, steward_world_only, *gate_middleware, repair_tool_names, recover_text_tool_calls, record_called_tools,
+                memory_owner, steward_world_only, *gate_middleware, refuse_unicode_punctuation_in_code,
+                repair_tool_names, recover_text_tool_calls, record_called_tools,
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if safety_observe_on() else []),
             ],
@@ -2384,7 +2502,7 @@ async def build_steward_agent(
         logger.info("Shell enabled (confined to %s).", _WORKING_DIR)
     else:
         logger.info("Shell disabled.")
-    secondbrain = await _connect_secondbrain(stack)
+    secondbrain = await _connect_secondbrain(stack, _SECONDBRAIN_READS if eval_build else _SECONDBRAIN_TOOLS)
     if secondbrain is not None:
         tools.append(secondbrain)
 
