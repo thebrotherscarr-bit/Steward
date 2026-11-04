@@ -1310,13 +1310,18 @@ def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, A
         return None
     if not isinstance(arguments, dict) or not arguments:
         return None
+    schemas = {offered.name: offered.parameters() or {} for offered in tools if isinstance(offered, FunctionTool)}
+    return _the_tool_it_fits(arguments, schemas)
+
+
+def _the_tool_it_fits(arguments: dict[str, Any], schemas: Mapping[str, Mapping[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    """(tool name, arguments) when the arguments fit exactly one tool's parameter schema (its required keys present, no
+    key it lacks), or fit several of which exactly one is read-only (is_read_only_tool), else None."""
     keys = set(arguments)
-    fits = set()
-    for offered in tools:
-        if isinstance(offered, FunctionTool):
-            schema = offered.parameters() or {}
-            if set(schema.get("required") or ()) <= keys <= set(schema.get("properties") or {}):
-                fits.add(offered.name)
+    fits = {
+        name for name, schema in schemas.items()
+        if set(schema.get("required") or ()) <= keys <= set(schema.get("properties") or {})
+    }
     if len(fits) > 1:
         fits = {name for name in fits if is_read_only_tool(name)}
     return (fits.pop(), arguments) if len(fits) == 1 else None
@@ -1921,6 +1926,50 @@ def _may_unload_runner() -> bool:
     return True
 
 
+# Steps eval 2026-11-04 21:52 (head 90dc8d4): in EXECUTE, Ollama raised "error parsing tool call" three times and the
+# step ended with no call (Calls: []), so the planted bug was never written. Two answers, both on the client:
+#   * The call is often all there: Ollama's error carries the model's text (raw='...', err=...; Go's JSON parser rejects
+#     a raw line break inside a string, which code in an edit carries, and text after the object). When that text
+#     decodes leniently (json strict=False, the first object only) to arguments that fit exactly one offered tool (the
+#     rule tool_call_in_text uses for a reply's text), or to {"name": tool, "arguments": {...}}, it is that call, given
+#     back as Ollama's own tool call so MAF's loop runs it (agent_framework_ollama/_chat_client.py:717-738).
+#   * When the retries (and the one unload) are spent, the model is asked once more with the parse error as a
+#     correction turn, so it writes the call again knowing what was wrong, before the error is the run's.
+_RAW_TOOL_CALL = re.compile(r"raw='(.*)'(?:, err=.*)?\Z", re.S)
+TOOL_CALL_CORRECTION = (
+    "Your last tool call could not be read: {error}. Call the tool again with valid JSON arguments: inside a string, "
+    "write a line break as \\n and escape a double quote as \\\"; write nothing after the closing brace. Do not answer "
+    "in text instead of the call."
+)
+
+
+def tool_call_in_raw(error: Exception, tools: Sequence[Any] | None) -> tuple[str, dict[str, Any]] | None:
+    """(tool name, arguments) from the raw text of Ollama's "error parsing tool call", when it holds one offered tool's
+    call; tools are the call's own as MAF sent them (FunctionTool.to_json_schema_spec dicts), else None."""
+    found = _RAW_TOOL_CALL.search(str(error))
+    if found is None or not tools:
+        return None
+    body = found.group(1).strip()
+    if fenced := _FENCED_JSON.match(body):
+        body = fenced.group(1)
+    try:
+        arguments, _ = json.JSONDecoder(strict=False).raw_decode(body)
+    except ValueError:
+        return None
+    if not isinstance(arguments, dict) or not arguments:
+        return None
+    schemas: dict[str, Mapping[str, Any]] = {}
+    for offered in tools:
+        spec = offered.to_json_schema_spec() if isinstance(offered, FunctionTool) else offered
+        function = spec.get("function") if isinstance(spec, Mapping) else None
+        if isinstance(function, Mapping) and function.get("name"):
+            schemas[function["name"]] = function.get("parameters") or {}
+    named = arguments.get("name")
+    if isinstance(named, str) and named in schemas and isinstance(arguments.get("arguments"), dict):
+        return named, arguments["arguments"]
+    return _the_tool_it_fits(arguments, schemas)
+
+
 def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
     """Retry a model turn whose tool call Ollama could not parse, instead of failing the run.
 
@@ -1930,6 +1979,7 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
     When those fail too, the runner may be stale: the model is unloaded and asked once more.
     """
     import httpx  # noqa: PLC0415 - ollama's AsyncClient is built on httpx (ollama/_client.py)
+    import ollama  # noqa: PLC0415
     from ollama import ResponseError
 
     chat = client.client.chat
@@ -1940,8 +1990,36 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
         logger.warning("A call to Ollama was cut right after the runner was unloaded (%s); asking once more.", type(exc).__name__)
         return await chat(**{**kwargs, "stream": False})
 
+    def _recovered(kwargs: dict[str, Any], error: Exception) -> Any:
+        """Ollama's answer carrying the call found in the error's raw text (tool_call_in_raw), or None."""
+        if (found := tool_call_in_raw(error, kwargs.get("tools"))) is None:
+            return None
+        name, arguments = found
+        logger.warning("Malformed tool call from the model; recovered %s from its text.", name)
+        call = ollama.Message.ToolCall(function=ollama.Message.ToolCall.Function(name=name, arguments=arguments))
+        return ollama.ChatResponse(
+            model=kwargs.get("model") or client.model, done=True, done_reason="stop",
+            message=ollama.Message(role="assistant", content="", tool_calls=[call]),
+        )
+
+    async def _corrected(kwargs: dict[str, Any], error: ResponseError) -> Any:
+        """The retries are spent: asked once more with the parse error as a correction turn; else the error is raised."""
+        logger.warning("Malformed tool call from the model; asking again with the parse error as a correction.")
+        said = (str(error).splitlines() or [type(error).__name__])[0][:600]
+        turn = {"role": "user", "content": TOOL_CALL_CORRECTION.format(error=said)}
+        try:
+            return await chat(**{**kwargs, "messages": [*(kwargs.get("messages") or []), turn], "stream": False})
+        except ResponseError as exc:
+            if "error parsing tool call" not in str(exc):
+                raise
+            if (recovered := _recovered(kwargs, exc)) is not None:
+                return recovered
+            raise error from exc
+
     async def _ask_again(kwargs: dict[str, Any], first: ResponseError) -> Any:
         error = first
+        if (recovered := _recovered(kwargs, error)) is not None:
+            return recovered
         for attempt in range(1, _TOOL_CALL_RETRIES + 1):
             logger.warning("Malformed tool call from the model; asking again (%d/%d).", attempt, _TOOL_CALL_RETRIES)
             try:
@@ -1950,8 +2028,10 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
                 if "error parsing tool call" not in str(exc):
                     raise
                 error = exc
+                if (recovered := _recovered(kwargs, error)) is not None:
+                    return recovered
         if not _may_unload_runner():
-            raise error
+            return await _corrected(kwargs, error)
         model = kwargs.get("model") or client.model  # MAF puts the model in the call's options (_chat_client.py:477-480)
         logger.warning(
             "Ollama's runner looks stale after repeated malformed tool calls; unloading %s for a fresh runner.", model
@@ -1965,6 +2045,10 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
             return await chat(**{**kwargs, "stream": False})
         except cut as exc:
             return await _ask_after_unload(kwargs, exc)
+        except ResponseError as exc:
+            if "error parsing tool call" not in str(exc):
+                raise
+            return _recovered(kwargs, exc) or await _corrected(kwargs, exc)
 
     async def chat_with_retry(*args: Any, **kwargs: Any) -> Any:
         if not kwargs.get("stream"):
