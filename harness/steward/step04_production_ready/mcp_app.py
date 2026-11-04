@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from agent_framework import FileSessionStore, InMemoryHistoryProvider
+from agent_framework import FileSessionStore
 from agent_framework_hosting import AgentState
 from agent_framework_hosting_mcp import AgentMCPTool
 from dotenv import load_dotenv
@@ -44,7 +44,13 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import _WORKING_DIR, build_steward_agent, steward_memory_store, warn_model_drift  # noqa: E402
+from agent import (  # noqa: E402
+    _WORKING_DIR,
+    build_steward_agent,
+    steward_history_provider,
+    steward_memory_store,
+    warn_model_drift,
+)
 
 MCP_SESSIONS_DIR = _WORKING_DIR / "storage" / "mcp-sessions"
 from halo_traces import setup_halo_tracing  # noqa: E402
@@ -116,9 +122,9 @@ async def main() -> None:
     await warn_model_drift()  # one warning line per model that drifted from the Estate lock; never fails the start
 
     async with AsyncExitStack() as stack:
-        # Each conversation's history lives in its session, as in the sample (and hosted.py).
+        # Each session_id's history is kept on disk by MAF's FileHistoryProvider (storage/history, 2026-11-04).
         agent = await build_steward_agent(
-            stack, history_provider=InMemoryHistoryProvider(), memory_store=steward_memory_store()
+            stack, history_provider=steward_history_provider(), memory_store=steward_memory_store()
         )
         async with agent:
             app = build_mcp_app(agent)

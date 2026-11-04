@@ -15,6 +15,13 @@ was never merged and has no entry.
 
 ### Added
 
+- History on disk for the console and the MCP door: MAF's `FileHistoryProvider`, one JSON Lines file per session under
+  the repo's gitignored `storage/history` (`steward_history_provider`), in place of `InMemoryHistoryProvider`, so a
+  session continued after a restart keeps its history. The console prints its session ID and `--session ID`
+  continues it. A session's file not written within the host-state window (`STEWARD_STATE_RETENTION_DAYS`, 14 days;
+  the rule moved from hosted.py to agent.py and is shared) is removed at start. The Responses host keeps its own
+  checkpoints and in-memory history as before. MCP sessions saved before this carry their old in-memory history in
+  their session file, which the new provider does not read. Test: `test_a_sessions_history_survives_rebuilding_the_agent`.
 - Model drift at start: the Responses host (hosted.py) and the MCP host (mcp_app.py) compare Ollama's installed
   models (`/api/tags`, through ollama's `AsyncClient.list`) with the Estate lock (`worlds/neiro/estate.lock.json`,
   read only) for the models it gives Steward (`used_by: steward`), and log one plain warning line per model whose
