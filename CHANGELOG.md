@@ -35,6 +35,18 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The small-ask evals pass and fail for the right reason (audit 2026-11-04, against the cookbook's answer-level
+  checks). A case whose fixture raises (`discount_bug_planted`) fails that case with the reason and the set goes on
+  and records its history (`fixture_entered`; the regression and steps sets too). `answer_on_topic` scores his own
+  last reply, not the workflow's `ask_commit`, `report` or `commit` outputs: the denied commit's sentence quoted
+  "item_count" and passed it for him. `written_python_files` counts a write only when its tool result, where present,
+  says it wrote; the small asks also ask the disk, since the workflow-as-agent response carries no tool results, so
+  an approved card the middleware or the tool refused is no write. `edit_keeps_file_whole` also fails a file that
+  lost a top-level function or class. Two result checks run the sample project after each ask, before the reset:
+  `discount_test_passes` (its `test_percent_discount` passes) and `item_count_works` (`item_count` returns the total
+  quantity, in a fresh Python); the baseline stays 10, now of 16. The evals run real commands on his PC, so the small
+  and steps sets approve a `run_shell` card only when its command is the sample project's pytest
+  (`card_approved`, `is_sample_project_pytest`) and deny every other shell command; the steps set approved them all.
 - The background CodeExplorer's own `read_file`, `search_code` and `list_files` never read, search or list a `.env`
   file (RULE 7), as the file store already kept them from the `file_access_*` tools; they had no such check and run
   without a card (audit 2026-11-04).

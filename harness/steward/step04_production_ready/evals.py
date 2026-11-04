@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -237,6 +238,31 @@ async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agen
 
 
 SAMPLE_PROJECT = "harness/steward/working/sample-project"
+# The one shell command an eval approves (the evals run real commands on his PC): pytest, or python -m pytest, with
+# only -q, -rA or -p no:cacheprovider, on the sample project or a test file (and test) in it. Nothing else: no second
+# command, no pipe, no redirect.
+_SAMPLE_PYTEST = re.compile(
+    r"(?:[\w.:/-]*python(?:3)?(?:\.exe)?\s+-m\s+)?pytest"
+    r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
+    r"\s+(?:\./)?" + re.escape(SAMPLE_PROJECT) + r"(?:/[\w-]+\.py(?:::[\w:]+)?)?/?"
+    r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
+)
+
+
+def is_sample_project_pytest(command: str) -> bool:
+    """Whether a shell command is only the sample project's pytest (_SAMPLE_PYTEST), backslashes read as slashes."""
+    return bool(_SAMPLE_PYTEST.fullmatch(str(command or "").strip().replace("\\", "/")))
+
+
+def card_approved(call: Any, approve: set[str]) -> bool:
+    """An eval's answer to a card, as the user would give it: Approve for the tools in ``approve``, and for a run_shell
+    card only when its command is the sample project's pytest; Deny for everything else (audit 2026-11-04: the
+    steps set approved every shell command)."""
+    if call is None:
+        return False
+    if call.name == "run_shell":
+        return is_sample_project_pytest(str((call.parse_arguments() or {}).get("command", "")))
+    return call.name in approve
 
 
 def sample_project_as_committed() -> None:
@@ -282,12 +308,24 @@ def exit_code(results: Iterable[EvalResults]) -> int:
 CASE_ERRORS: dict[str, str] = {}
 
 
-def raised(error: BaseException) -> str:
+def raised(error: BaseException, what: str = "the run") -> str:
     """A raising run's reason: the exception's type and first line, from inside the task group it came through."""
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
     first = next(iter(str(error).strip().splitlines()), "")
-    return f"the run raised {type(error).__name__}: {first}" if first else f"the run raised {type(error).__name__}"
+    return f"{what} raised {type(error).__name__}: {first}" if first else f"{what} raised {type(error).__name__}"
+
+
+def fixture_entered(stack: contextlib.ExitStack, query: str, fixture: Callable[[], Any]) -> bool:
+    """A case's fixture (discount_bug_planted) entered on ``stack``. One that raises fails that case only, with its
+    reason in CASE_ERRORS (run_completed), and returns False: the case is not run, and the set goes on and records its
+    history (audit 2026-11-04: a raising plant left the small set through run_small_asks, so nothing was scored)."""
+    try:
+        stack.enter_context(fixture())
+    except Exception as error:
+        CASE_ERRORS[query] = raised(error, "the case's fixture")
+        return False
+    return True
 
 
 async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any] | None, AgentResponse[Any]]:
@@ -394,8 +432,13 @@ async def main() -> int:
     )
     responses: list[AgentResponse[Any]] = []
     steward = None
-    with discount_bug_planted():
+    diagnosis = STEWARD_EVAL_QUERIES[2]  # the case the planted bug is for
+    with contextlib.ExitStack() as fixtures:
+        planted = fixture_entered(fixtures, diagnosis, discount_bug_planted)
         for query in STEWARD_EVAL_QUERIES:
+            if query == diagnosis and not planted:
+                responses.append(AgentResponse(messages=[]))  # failed by run_completed with the fixture's reason
+                continue
             ran, response = await run_case(query, set(), enable_shell=False, auto_approve_skill_scripts=True)
             steward = ran or steward
             responses.append(response)
@@ -447,7 +490,7 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
         if not requests:
             break
         answered.update(request.function_call.call_id for request in requests)
-        answers = [request.to_function_approval_response(approved=request.function_call.name in approve) for request in requests]
+        answers = [request.to_function_approval_response(approved=card_approved(request.function_call, approve)) for request in requests]
         answer = Message(role="user", contents=answers)
         turn = [u async for u in agent.run(answer, session=session, stream=True)]
         updates += turn
@@ -540,8 +583,7 @@ async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[
         responses = {}
         for card in pending:
             answered.add(card.request_id)
-            name = card.data.function_call.name if card.data.function_call is not None else ""
-            responses[card.request_id] = card.data.to_function_approval_response(name in approve)
+            responses[card.request_id] = card.data.to_function_approval_response(card_approved(card.data.function_call, approve))
         events += [e async for e in workflow.run(stream=True, responses=responses)]
     return events
 
@@ -555,7 +597,8 @@ async def steps_main() -> int:
     from agent_framework import ConversationSplit, EvalItem, FileAccessProvider, Message  # noqa: PLC0415
 
     module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
-    approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES, "run_shell"}  # noqa: SLF001
+    # The plan and the writes; a shell card only for the sample project's pytest (card_approved), every other denied.
+    approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES}  # noqa: SLF001
     async with AsyncExitStack() as stack:
         agent, workflow = await wf.build_steward(
             stack, auto_approve_skill_scripts=True, file_memory_store=isolated_memory(stack),
@@ -563,14 +606,17 @@ async def steps_main() -> int:
         )
         async with agent:
             sample_project_as_committed()
-            with discount_bug_planted():
-                CASE_ERRORS.pop(STEPS_QUERY, None)
-                try:
-                    events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
-                except Exception as error:  # the run raised: overall fails with it (run_completed); the bug is put back
-                    CASE_ERRORS[STEPS_QUERY] = raised(error)
-                    events = []
-                STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
+            CASE_ERRORS.pop(STEPS_QUERY, None)
+            events = []
+            with contextlib.ExitStack() as fixtures:
+                if fixture_entered(fixtures, STEPS_QUERY, discount_bug_planted):  # else overall fails with its reason
+                    try:
+                        events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
+                    except Exception as error:  # the run raised: overall fails with it (run_completed); the bug is put back
+                        CASE_ERRORS[STEPS_QUERY] = raised(error)
+                    STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
+                else:
+                    STEPS_FIXED[0] = False
     steps = step_conversations(events)
     outputs = [str(e.data) for e in events if e.type == "output"]
     user = Message(role="user", contents=[STEPS_QUERY])
@@ -616,9 +662,9 @@ SMALL_ASKS = [SMALL_ASK_NEW_CODE, SMALL_ASK_DISCOUNT, SMALL_ASK_README]
 SMALL_ASK_CHECKS: dict[str, set[str]] = {
     SMALL_ASK_NEW_CODE: {
         "plan_is_approval", "edit_keeps_file_whole", "check_covers_writes", "commit_by_tool", "commit_message_specific",
-        "no_nudge_in_reply", "answer_on_topic",
+        "no_nudge_in_reply", "answer_on_topic", "item_count_works",
     },
-    SMALL_ASK_DISCOUNT: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic"},
+    SMALL_ASK_DISCOUNT: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic", "discount_test_passes"},
     SMALL_ASK_README: {"plan_is_approval", "no_nudge_in_reply", "answer_on_topic"},
 }
 # What an on-topic answer and a specific commit message name, per ask.
@@ -628,9 +674,15 @@ SMALL_ASK_SUBJECT: dict[str, tuple[str, ...]] = {
     SMALL_ASK_README: ("readme", "test"),
 }
 VAGUE_COMMIT_MESSAGES = {"update", "updates", "changes", "change", "fix", "fixes", "wip", "checkpoint", "commit", "work"}
-# The files each run wrote, as they stood on disk when the run ended (read before the planted bug is put back).
+# The files each run wrote, as they stood on disk when the run ended (read before the planted bug is put back): only
+# writes that happened, the file changed on disk. An approved card can still be refused by his write middleware
+# (whole_write_problem, the Unicode-punctuation check) or fail in MAF's tool ("already exists"); the workflow-as-agent
+# response carries no tool results (MAF's WorkflowAgent forwards assistant messages only), so the disk says.
 SMALL_ASK_FILES: dict[str, dict[str, str]] = {}
 SMALL_ASK_ORIGINALS: dict[str, str] = {}
+# Each ask's result checks, measured on the sample project after its run and before the reset (deterministic, no
+# model): {query: {check name: (passed, reason)}}. The cookbook's answer-level checks: the artefact does the job.
+SMALL_ASK_RESULTS: dict[str, dict[str, tuple[bool, str]]] = {}
 
 
 def _not_this_case(name: str, query: str) -> dict[str, object] | None:
@@ -667,6 +719,8 @@ def check_covers_writes(query: str, response: str, conversation: list[Any]) -> d
     if skip := _not_this_case("check_covers_writes", query):
         return skip
     written = wf.written_python_files(conversation)
+    if query in SMALL_ASK_FILES:  # a run's writes that happened on disk (an approved card can still be refused)
+        written = [f for f in written if f in SMALL_ASK_FILES[query]]
     if not written:
         return {"passed": False, "reason": "No approved .py write in the run."}
     missed = [f for f in written if f"$ pytest -q {Path(f).parent.as_posix()}" not in (response or "").replace("\\", "/")]
@@ -675,7 +729,9 @@ def check_covers_writes(query: str, response: str, conversation: list[Any]) -> d
 
 @evaluator(name="edit_keeps_file_whole")
 def edit_keeps_file_whole(query: str) -> dict[str, object]:
-    """Failure 3, a broken edit (tabs): every .py file the run wrote still parses, and gained no tab indentation."""
+    """Failure 3, a broken edit (tabs): every .py file the run wrote (and that changed on disk) still parses, gained no
+    tab indentation, and still has every top-level function and class it had (audit 2026-11-04: a file cut to a stub
+    that parses passed)."""
     import ast  # noqa: PLC0415
 
     if skip := _not_this_case("edit_keeps_file_whole", query):
@@ -685,13 +741,27 @@ def edit_keeps_file_whole(query: str) -> dict[str, object]:
         return {"passed": False, "reason": "The run wrote no .py file."}
     for name, text in files.items():
         try:
-            ast.parse(text)
+            tree = ast.parse(text)
         except SyntaxError as error:
             return {"passed": False, "reason": f"{name} no longer parses: {error}"}
         before = SMALL_ASK_ORIGINALS.get(name, "")
         if "\n\t" in text and "\n\t" not in before:
             return {"passed": False, "reason": f"{name} gained tab indentation."}
-    return {"passed": True, "reason": f"{sorted(files)} parse, indentation kept."}
+        if lost := sorted(_top_level_names(before) - _top_level_names(tree)):
+            return {"passed": False, "reason": f"{name} lost its {lost}."}
+    return {"passed": True, "reason": f"{sorted(files)} parse, indentation and top-level definitions kept."}
+
+
+def _top_level_names(source: Any) -> set[str]:
+    """The names of a module's top-level functions and classes (source text or a parsed tree); none when it does not parse."""
+    import ast  # noqa: PLC0415
+
+    try:
+        tree = ast.parse(source) if isinstance(source, str) else source
+    except SyntaxError:
+        return set()
+    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    return {node.name for node in tree.body if isinstance(node, kinds)}
 
 
 @evaluator(name="commit_by_tool")
@@ -742,12 +812,104 @@ def no_nudge_in_reply(query: str, conversation: list[Any]) -> dict[str, object]:
 
 @evaluator(name="answer_on_topic")
 def answer_on_topic(query: str, conversation: list[Any]) -> dict[str, object]:
-    """Failure 7, an off-topic final answer: his last reply names what was asked."""
+    """Failure 7, an off-topic final answer: his own last reply names what was asked. The workflow's own outputs
+    (ask_commit's "Checks passed", report, and commit's COMMIT_NOT_APPROVED, which quotes the commit message) are the
+    harness's, not his: audit 2026-11-04, the denied commit's sentence named item_count and passed this check for him."""
     if skip := _not_this_case("answer_on_topic", query):
         return skip
-    last = _last_said(conversation).lower()
+    last = _stewards_last_reply(conversation).lower()
     ok = any(term in last for term in SMALL_ASK_SUBJECT[query])
     return {"passed": ok, "reason": "On topic." if ok else f"Last reply misses {SMALL_ASK_SUBJECT[query]}: {last[:160]!r}"}
+
+
+def _stewards_last_reply(conversation: list[Any]) -> str:
+    """His own last reply: the last assistant text not written by the workflow's harness steps (MAF's WorkflowAgent
+    names each output's executor as its author_name) and not the harness's COMMIT_NOT_APPROVED sentence."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    harness_steps = {wf.COMMIT_STEP, wf.REPORT_STEP, "ask_commit"}
+    not_approved = wf.COMMIT_NOT_APPROVED.split("{message}")
+    for message in reversed(conversation or []):
+        text = (getattr(message, "text", "") or "").strip()
+        if getattr(message, "role", None) != "assistant" or not text or getattr(message, "author_name", None) in harness_steps:
+            continue
+        if text.startswith(not_approved[0]) and text.endswith(not_approved[1]):
+            continue
+        return text
+    return ""
+
+
+# Result checks (audit 2026-11-04, the cookbook's answer-level checks): the process checks above can all pass on a run
+# whose work does not do the job. These run the sample project as it stands after the ask, before the reset.
+ITEM_COUNT_PROBE = "from inventory import Item, item_count\nprint(item_count([Item('a', 1.0, 2), Item('b', 2.0, 3)]))\n"
+ITEM_COUNT_EXPECTED = "5"
+
+
+def discount_test_result() -> tuple[bool, str]:
+    """The sample project's tests (pytest, as the workflow's check runs them): passed only when test_percent_discount
+    itself is among the passes."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+    from steward_workflow import _CHECK_RUNNING  # noqa: PLC0415
+
+    command = [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", SAMPLE_PROJECT]
+    try:
+        done = subprocess.run(
+            command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            env={**os.environ, _CHECK_RUNNING: "1"},
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"The sample project's tests did not run: {error}"
+    ok = any(
+        line.startswith("PASSED ") and line.split()[1].endswith("::test_percent_discount") for line in done.stdout.splitlines()
+    )
+    tail = (done.stdout + done.stderr).strip().splitlines()[-1:] or [""]
+    return ok, ("test_percent_discount passes." if ok else f"test_percent_discount does not pass (exit {done.returncode}): {tail[0][:160]}")
+
+
+def item_count_result() -> tuple[bool, str]:
+    """inventory.item_count, imported in a fresh Python, returns the total quantity of two Items (2 + 3)."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", ITEM_COUNT_PROBE], cwd=_WORKING_DIR / SAMPLE_PROJECT, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"item_count was not run: {error}"
+    got = done.stdout.strip()
+    if done.returncode == 0 and got == ITEM_COUNT_EXPECTED:
+        return True, f"item_count returns the total quantity ({got})."
+    said = (done.stderr.strip().splitlines() or [got])[-1]
+    return False, f"item_count of quantities 2 and 3 gave {got or 'nothing'}, not {ITEM_COUNT_EXPECTED}: {said[:160]}"
+
+
+# Each result check's measurement, by the ask it belongs to (run_small_asks runs it after the ask's run).
+SMALL_ASK_RESULT_CHECKS: dict[str, dict[str, Callable[[], tuple[bool, str]]]] = {
+    SMALL_ASK_NEW_CODE: {"item_count_works": item_count_result},
+    SMALL_ASK_DISCOUNT: {"discount_test_passes": discount_test_result},
+}
+
+
+def _result_check(name: str, query: str) -> dict[str, object]:
+    if skip := _not_this_case(name, query):
+        return skip
+    measured = SMALL_ASK_RESULTS.get(query, {}).get(name)
+    if measured is None:
+        return {"passed": False, "reason": "Not measured: the ask did not run."}
+    return {"passed": measured[0], "reason": measured[1]}
+
+
+@evaluator(name="item_count_works")
+def item_count_works(query: str) -> dict[str, object]:
+    """The item_count ask's result: the function it added returns the total quantity."""
+    return _result_check("item_count_works", query)
+
+
+@evaluator(name="discount_test_passes")
+def discount_test_passes(query: str) -> dict[str, object]:
+    """The discount ask's result: test_percent_discount passes on the sample project as the run left it."""
+    return _result_check("discount_test_passes", query)
 
 
 # The eval gate (step 6, 6.2): the improvement loop keeps a change only if the small-ask checks do not drop below
@@ -777,7 +939,7 @@ def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BA
 
 SMALL_ASK_EVALUATORS = (
     plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
-    no_nudge_in_reply, answer_on_topic, run_completed,
+    no_nudge_in_reply, answer_on_topic, item_count_works, discount_test_passes, run_completed,
 )
 
 
@@ -799,7 +961,10 @@ async def run_small_asks(
     SMALL_ASK_ORIGINALS.clear()
     SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
     originals = {p: p.read_bytes() for p in project.iterdir() if p.is_file()}
-    approve = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001 - writes approved; git_commit denied
+    # Writes approved, and a shell card only for the sample project's pytest (card_approved), as the steps set and the
+    # user approve them; every other shell command and git_commit denied.
+    approve = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001
+    SMALL_ASK_RESULTS.clear()
     responses: list[AgentResponse[Any]] = []
     steward = None
     def reset() -> None:
@@ -813,16 +978,22 @@ async def run_small_asks(
     try:
         for query in asks:
             # Only the discount ask has the bug planted: in the others a failing test would send the run to repair.
-            with (around or contextlib.nullcontext)(query), (
-                discount_bug_planted() if query == SMALL_ASK_DISCOUNT else contextlib.nullcontext()
-            ):
+            with (around or contextlib.nullcontext)(query), contextlib.ExitStack() as fixtures:
+                if query == SMALL_ASK_DISCOUNT and not fixture_entered(fixtures, query, discount_bug_planted):
+                    responses.append(AgentResponse(messages=[]))  # the case fails with the fixture's reason; the set goes on
+                    SMALL_ASK_FILES[query] = {}
+                    continue
+                before = {p.relative_to(_WORKING_DIR).as_posix(): p.read_bytes() for p in project.iterdir() if p.is_file()}
                 ran, response = await run_case(query, approve, **build)  # a raising run is a failed case; reset follows
                 steward = ran or steward
                 responses.append(response)
-                written = wf.written_python_files(response.messages)
-                SMALL_ASK_FILES[query] = {
-                    name: (_WORKING_DIR / name).read_text(encoding="utf-8") for name in written if (_WORKING_DIR / name).exists()
-                }
+                # Only writes that happened: the file is on disk and changed (or new) since the run began.
+                written = [
+                    name for name in wf.written_python_files(response.messages)
+                    if (_WORKING_DIR / name).is_file() and (_WORKING_DIR / name).read_bytes() != before.get(name)
+                ]
+                SMALL_ASK_FILES[query] = {name: (_WORKING_DIR / name).read_text(encoding="utf-8") for name in written}
+                SMALL_ASK_RESULTS[query] = {name: measure() for name, measure in SMALL_ASK_RESULT_CHECKS.get(query, {}).items()}
             reset()  # each ask starts from the committed sample project
     finally:
         reset()  # the reset before any save
