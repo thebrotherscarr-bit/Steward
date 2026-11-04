@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import difflib
 import json
 import logging
 import os
@@ -304,23 +305,73 @@ async def _only_his_own_words(context: AgentContext, call_next: Callable[[], Awa
     user updates are dropped with ResponseStream.flat_map (zero or more updates per update), and his next pass gets a
     new message_id, since a changed message_id "marks a new logical message" for the host (_responses.py,
     _OutputItemTracker.handle). The run's final response is the loop's own, unchanged.
+
+    Live 2026-11-04 (Agent tab, "What is the estate status right now?"): his first pass gave the table but left the
+    plan's todos open, so MAF's todos_remaining loop nudged him (todos_remaining_message, "Continue working through
+    them now ... only stop once every todo item is complete"); his next pass marked them done and gave the table
+    again, under "All remaining todo items have been finished". So after a nudge his words are held until his pass
+    calls a tool, is nudged again, or ends, and a passage that repeats what the tab already shows is not shown again
+    (repeats_what_was_shown). His tool calls, and every word of his first pass, stream as before. The stream is
+    consumed as MAF's own loop consumes an inner one (_loop.py, _process_streaming: "async for update in inner",
+    then get_final_response), so its final response is still the loop's.
     """
     await call_next()
     inner = context.result
     if not context.stream or not isinstance(inner, ResponseStream):
         return
-    message = {"id": uuid.uuid4().hex}
 
-    def his_own(update: AgentResponseUpdate) -> list[AgentResponseUpdate]:
-        if update.role == "user":
-            message["id"] = uuid.uuid4().hex  # a nudge ends his pass: the next one is a new message
-            return []
-        if update.message_id is None:
-            update = copy.copy(update)  # as AgentExecutor copies an update before changing it (_agent_executor.py)
-            update.message_id = message["id"]
-        return [update]
+    async def his_own() -> AsyncIterator[AgentResponseUpdate]:
+        message_id = uuid.uuid4().hex
+        nudged = False
+        shown: list[str] = []  # his words the tab already shows
+        held: list[AgentResponseUpdate] = []  # his words since the last nudge or tool call, not yet shown
 
-    context.result = inner.flat_map(his_own, finalizer=lambda _: inner.get_final_response())
+        def release() -> list[AgentResponseUpdate]:
+            words = "".join(u.text or "" for u in held)
+            out = [] if repeats_what_was_shown("".join(shown), words) else list(held)
+            shown.extend(u.text or "" for u in out)
+            held.clear()
+            return out
+
+        async for update in inner:
+            if update.role == "user":
+                for kept in release():
+                    yield kept
+                message_id = uuid.uuid4().hex  # a nudge ends his pass: the next one is a new message
+                nudged = True
+                continue
+            if update.message_id is None:
+                update = copy.copy(update)  # as AgentExecutor copies an update before changing it (_agent_executor.py)
+                update.message_id = message_id
+            types = {c.type for c in update.contents or []}
+            if nudged and "text" in types:
+                held.append(update)
+                continue
+            if types & {"function_call", "function_approval_request"}:
+                for kept in release():
+                    yield kept
+            if "text" in types:
+                shown.append(update.text or "")
+            yield update
+        for kept in release():
+            yield kept
+
+    context.result = ResponseStream(his_own(), finalizer=lambda _: inner.get_final_response())
+
+
+# A passage after a nudge is a repeat when at least this share of it is runs of at least this many characters
+# already shown (whitespace collapsed). Live 2026-11-04: the repeated table was most of the second passage.
+_REPEAT_SHARE = 0.5
+_REPEAT_MIN_RUN = 20
+
+
+def repeats_what_was_shown(shown: str, words: str) -> bool:
+    """Whether ``words`` (his passage after a loop nudge) mostly repeats ``shown`` (what the tab already shows)."""
+    new, old = " ".join(words.split()), " ".join(shown.split())
+    if not new or not old:
+        return False
+    blocks = difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks if b.size >= _REPEAT_MIN_RUN) >= _REPEAT_SHARE * len(new)
 
 
 async def steward_turn(request: HostedResponseRequest) -> WorkflowTurn[Any]:

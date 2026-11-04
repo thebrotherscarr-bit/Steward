@@ -4456,3 +4456,48 @@ def test_sensitive_telemetry_is_off_by_default(tmp_path: Path, monkeypatch: pyte
     halo_traces.setup_halo_tracing(tmp_path / "b.jsonl").shutdown()
     assert [c["enable_sensitive_data"] for c in configured] == [False, True]
     assert "enable_sensitive_data=True" in inspect.getsource(evals), "the evals are dev runs and keep it on"
+
+
+def test_an_answer_given_before_the_todo_nudge_is_not_given_again(monkeypatch: Any) -> None:
+    """Live 2026-11-04 (Agent tab, session-20261104-1341-e237): "What is the estate status right now?" was planned and
+    approved; his first pass gave the table but left the plan's todos open, MAF's open-todo reminder re-ran him, and he
+    marked them done and gave the same table again ("All remaining todo items have been finished ... No further work
+    remains."). The reminder now says his words are already shown, and the tab shows the answer once."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    table = (
+        "| Service | Label | Up/Down |\n|---------|-------|---------|\n| steward | Steward's service | **up** |\n"
+        "| steward-mcp | Steward's MCP | **up** |\n| door | The door | **up** |\n| glass | The Atlas glass | **up** |\n"
+        "| notes-kernel | The notes kernel | **down** |\n| ollama | Ollama | **up** |"
+    )
+    answer = f"Here's the current status of all estate services:\n\n{table}\n\nAll services are running except notes-kernel."
+    again = f"All remaining todo items have been finished.\nThe estate status table has been produced and confirmed:\n\n{table}\n\nNo further work remains."
+    plan = '{"type": "approval", "questions": [{"message": "Read the estate status."}], "steps": ["Query estate_status", "List each service"]}'
+    done = Content.from_function_call(
+        call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "read"}, {"id": 2, "reason": "listed"}]}
+    )
+    replies: list[Any] = [plan, answer, done, again]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        turn = http.post("/responses", json={"input": "What is the estate status right now?", "store": True}).json()
+        [card] = [o for o in turn["output"] if o["type"] == "mcp_approval_request"]
+        approve = {"type": "mcp_approval_response", "approval_request_id": card["id"], "approve": True}
+        turn = http.post("/responses", json={"previous_response_id": turn["id"], "store": True, "input": [approve]}).json()
+    state.cleanup()
+    assert turn["status"] == "completed", turn.get("error")
+    nudge = " ".join(m.text or "" for m in calls[2]["messages"])
+    assert "open todo item(s)" in nudge and steward.TODOS_ALREADY_SHOWN in nudge, "the reminder says his answer is shown"
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == [answer], texts
+    assert not hosted.repeats_what_was_shown(answer, "Juniper."), "new words after a nudge are still shown"

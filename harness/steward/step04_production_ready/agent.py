@@ -1652,6 +1652,13 @@ PLAN_TODOS_NUDGE = (
 # Regression run 9: the cookbook's evidence-coverage check before finishing. When execute-mode work would end
 # without a tool its request needs, the loop asks once, naming it (unmet_requirements).
 REQUIRED_TOOLS_NUDGE = "Before you finish: this request needs a tool you have not used yet. Do this now, then finish:"
+# Live 2026-11-04: his answer was complete but the plan's todos were open, so MAF's open-todo reminder
+# (todos_remaining_message, "Continue working through them now") re-ran him, and he gave the same answer again. The
+# reminder now says his words are already shown (the Agent tab also holds back a repeat: hosted.repeats_what_was_shown).
+TODOS_ALREADY_SHOWN = (
+    "Your replies so far are already shown to the user. If that work is done, mark those todos complete with "
+    "todos_complete; do not repeat your answer, and say only what is new."
+)
 
 
 def denied_by_user(messages: Any) -> bool:
@@ -1758,7 +1765,8 @@ def plan_reply_loop(
             return f"{REQUIRED_TOOLS_NUDGE}\n{lines}"
         if feedback == "background":
             return background_tasks_running_message(session=session, **kwargs)
-        return await todos_remaining_message(feedback=feedback, session=session, **kwargs)
+        reminder = await todos_remaining_message(feedback=feedback, session=session, **kwargs)
+        return f"{reminder}\n\n{TODOS_ALREADY_SHOWN}" if reminder else reminder
 
     return should_continue, next_message
 

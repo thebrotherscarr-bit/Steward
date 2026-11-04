@@ -35,6 +35,14 @@ was never merged and has no entry.
 
 ### Fixed
 
+- An answer given twice after the open-todo nudge (live 2026-11-04, Agent tab, "What is the estate status right
+  now?"). His first pass gave the table but left the plan's todos open, so MAF's `todos_remaining` loop re-ran him
+  with `todos_remaining_message` ("Continue working through them now ... only stop once every todo item is
+  complete"); he marked them done and gave the table again. The reminder now ends with `TODOS_ALREADY_SHOWN` (his
+  words are already shown; do not repeat the answer), and the Agent tab's `_only_his_own_words` holds his words
+  after a nudge until he calls a tool, is nudged again or ends, and does not show a passage that mostly repeats
+  what it already shows (`repeats_what_was_shown`). His tool calls and his first pass stream as before; the
+  `no_nudge_in_reply` eval also watches the new text. Test: `test_an_answer_given_before_the_todo_nudge_is_not_given_again`.
 - Security audit, 2026-11-04 (each with a test that goes red when the fix is unplugged):
   - SecondBrain's web tools are untrusted content to FIDES: `secondbrain_web_tools` connects them through
     `labelled_mcp_tool` (`IntegrityLabel.UNTRUSTED`), as his notes and the Estate are, and WebResearchAgent records

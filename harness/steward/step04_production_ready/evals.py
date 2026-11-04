@@ -797,13 +797,13 @@ def commit_message_specific(query: str, conversation: list[Any]) -> dict[str, ob
 def no_nudge_in_reply(query: str, conversation: list[Any]) -> dict[str, object]:
     """Failure 6, the loop's nudge in his reply: no assistant text repeats a harness message meant for him."""
     import steward_workflow as wf  # noqa: PLC0415
-    from agent import PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE  # noqa: PLC0415
+    from agent import PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN  # noqa: PLC0415
 
     if skip := _not_this_case("no_nudge_in_reply", query):
         return skip
     said = _assistant_text(conversation)
     harness_texts = [
-        PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, wf.PLAN_IS_APPROVAL, wf.PLAN_AGAIN, wf.COMMIT_NOW,
+        PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN, wf.PLAN_IS_APPROVAL, wf.PLAN_AGAIN, wf.COMMIT_NOW,
         "open todo item(s) that must be addressed before you can finish",  # MAF's todos_remaining_message
     ]
     echoed = [text[:60] for text in harness_texts if text.split("{")[0][:60] in said]
