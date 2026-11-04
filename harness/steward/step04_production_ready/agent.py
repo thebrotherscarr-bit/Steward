@@ -1131,6 +1131,25 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
 HINTS_KEY = "steward_request_hints"
 CALLED_KEY = "steward_called_tools"
 NUDGED_KEY = "steward_required_nudged"
+# A harness-written turn that carries a request (the workflow's execute_message, its repair turn) names the request
+# in the message's additional_properties (MAF Message, _types.py), and only that is matched: the rest is the harness's
+# own text and his plan. Live 2026-11-04 (evals.py small, run A): the discount ask's plan said "divide the discount
+# percent by 100", the number hint matched "percent", and the loop's evidence check sent him to count the harness
+# folder's lines in CodeAct; his last reply answered that ("**42**"), not the ask. A repair turn names "" (nothing new).
+REQUEST_KEY = "steward_request"
+
+
+def asked_request(messages: Sequence[Any]) -> str:
+    """The request the run's last user turn asks: its REQUEST_KEY when a harness turn names one, else its text."""
+    for message in reversed(messages or []):
+        if message.role != "user":
+            continue
+        named = (getattr(message, "additional_properties", None) or {}).get(REQUEST_KEY)
+        if isinstance(named, str):
+            return named
+        if (message.text or "").strip():
+            return message.text
+    return ""
 
 
 def unmet_requirements(session: Any) -> list[list[str]]:
@@ -1148,8 +1167,8 @@ class RequestHints(ContextProvider):
         super().__init__("request-hints")
 
     async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        asked = next((m.text for m in reversed(context.input_messages or []) if m.role == "user" and (m.text or "").strip()), "")
-        matched = [[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
+        asked = asked_request(context.input_messages or [])
+        matched =[[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
         if session is None:
             hints = matched
         else:
@@ -1424,6 +1443,27 @@ async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], 
         context.result = held_back_when_it_could_be_a_call(context.result, tools, response_format)
     elif context.result is not None:
         recovered_tool_call(context.result, tools, response_format)
+
+
+# Bar run A (2026-11-04 22:05Z, head 06657a1, the item_count ask): his last reply was MAF's "Function invocation limit
+# reached before a final answer could be produced." MAF's documented way when a limit trips (FunctionInvocationConfiguration,
+# _tools.py:1879-1893: "the loop stops invoking tools and forces the model to produce a text response") is one more call
+# with tool_choice "none" (_apply_batch_limit_decision, _tools.py:4850-4877), which OllamaChatClient sends without tools
+# (agent_framework_ollama/_chat_client.py:483). Nothing tells the model so: on that call (traces 21:58:08Z) he wrote
+# todos_complete again, MAF dropped the call it could not run and put its fallback text in (_tools.py:2938-2951). So
+# that call carries one line saying the tools are off and the answer is due now, as a call-local message (a new list on
+# the context, ChatContext's own messages: _middleware.py:1827-1838); his history and transcript never hold it.
+TOOLS_OFF_ANSWER_NOW = (
+    "Your tools are off for the rest of this request: no more tool calls can run. Answer the request now, in plain "
+    "text, from what you have done: what is done, and what is left."
+)
+
+
+async def answer_when_tools_are_off(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Chat middleware: the call MAF makes with tool_choice "none" (a limit tripped) asks him for his answer in text."""
+    if (context.options or {}).get("tool_choice") == "none":
+        context.messages = [*context.messages, Message(role="user", contents=[Content.from_text(TOOLS_OFF_ANSWER_NOW)])]
+    await call_next()
 
 
 # Session state set when the harness returns him to plan mode because every todo is done; read once by plan_reply_loop.
@@ -3091,7 +3131,8 @@ async def build_steward_agent(
             context_providers=part3_providers,
             middleware=[
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files, refuse_unicode_punctuation_in_code,
-                repair_tool_names, recover_text_tool_calls, record_called_tools, withhold_untrusted_errors(untrusted_sources),
+                repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,
+                withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if safety_observe_on() else []),
             ],

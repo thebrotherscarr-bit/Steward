@@ -75,6 +75,24 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The README eval ask asked for a line the README already had (bar run B, 2026-11-04 22:09Z, head 06657a1: "No plan
+  card", he said the README already holds "Run the tests:" / "python -m unittest -v", committed since c17cd62). For
+  that ask only, `readme_run_tests_removed` takes the how-to block out of the working copy, its line endings kept, and
+  puts it back after, as `discount_bug_planted` plants the bug; the committed README never changes. Test:
+  `test_the_readme_ask_runs_with_the_readmes_how_to_taken_out_and_put_back_after`.
+- A run whose tool-call limit tripped ended on MAF's "Function invocation limit reached before a final answer could
+  be produced." (bar run A, 22:05Z, the item_count ask). MAF's way is one more call with `tool_choice` "none"
+  (`_tools.py:4850-4877`; Ollama then sends no tools), but nothing told him: on that call he wrote `todos_complete`
+  again, and MAF dropped it for its fallback text (`_tools.py:2938-2951`). Chat middleware `answer_when_tools_are_off`
+  adds one call-local line to that call only (`TOOLS_OFF_ANSWER_NOW`: the tools are off, answer now in text), so the
+  reply is his; `no_nudge_in_reply` counts the line as a harness message. Test:
+  `test_when_the_tool_call_limit_trips_the_last_call_asks_for_his_answer_and_his_answer_is_the_reply`.
+- The discount ask's last reply answered a question never asked ("the total number of code lines in the `harness`
+  directory is **42**", bar run A). The traces (21:5xZ) show the cause: the execute turn carries the approved plan
+  ("divide the discount percent by 100"), `RequestHints` matched "percent" in it, and the evidence check sent him to
+  count lines in CodeAct. Persistent history was not it (eval builds pass no history provider). A harness turn now
+  names its request (`REQUEST_KEY` on `execute_message`; "" on a repair turn) and the hints match that alone
+  (`asked_request`). Test: `test_an_approved_plans_wording_never_matches_a_request_hint_only_the_request_does`.
 - A step ended with no call after malformed tool calls (steps eval 2026-11-04 21:52, head 90dc8d4: three "error parsing
   tool call" in EXECUTE, "No write to inventory.py. Calls: []"). Ollama's error carries the model's raw text; when it
   decodes leniently (a raw line break inside a string, text after the object) to arguments that fit exactly one offered
