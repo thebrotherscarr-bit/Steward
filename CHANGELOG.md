@@ -74,6 +74,10 @@ was never merged and has no entry.
 
 ### Added
 
+- `pr_checks`: he waits through the door's `git_pr` list for a pull request to open (on the owner's Approve) and for
+  its checks to pass or fail, asking every 30 s for up to 20 minutes, no card; the github skill calls it before
+  reporting (Kyle, 2026-11-04: "make the doors push and PR results visible"). A push's own outcome is not readable by
+  a client yet: the door needs a read-only `hold_status`.
 - `search_code`: he searches the workspace's tracked .py and .md files by meaning (MAF's `InMemoryCollection` and
   `create_vector_search_tool`; embeddinggemma-2:270m on the CPU, `num_gpu` 0, Kyle's ruling of 2026-11-02). Chunks are
   top-level defs and classes, and Markdown headings. The index is built on the first search; each chunk's vector is

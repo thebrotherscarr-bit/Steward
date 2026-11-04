@@ -1911,6 +1911,66 @@ def test_door_calls_stay_on_stewards_world() -> None:
     assert gate("git_commit", {"message": "x"}) == (None, True), "Steward's own tools are untouched"
 
 
+def test_pr_checks_waits_through_the_door_for_the_open_and_the_checks(monkeypatch: Any) -> None:
+    """The door's PR results, visible: pr_checks is on his live tool list with no card, reads only the door's git_pr
+    list on his world, and waits until his Approve has opened the pull request and its checks have finished."""
+    import json
+
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("secondbrain")
+    asked: list[dict[str, str]] = []
+    # Before his Approve, no pull request; then pending; then passed (gitctl.cjs prList's shape).
+    states = [[], [{"number": 7, "line": "door-outcomes", "checks": "pending"}], [{"number": 7, "line": "door-outcomes", "checks": "passed"}]]
+
+    @server.tool(structured_output=False)  # text content only, as the door answers (SecondBrain atlas.cjs:194)
+    def git_pr(action: str = "", project: str = "", number: str = "", line: str = "", wait: str = "", into: str = "") -> str:
+        asked.append({"action": action, "project": project})
+        return json.dumps({"pull_requests": states.pop(0) if len(states) > 1 else states[0]})
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    monkeypatch.setattr(steward, "PR_CHECKS_POLL_SECONDS", 0.01)
+    assert steward.PR_CHECKS_WAIT_SECONDS < steward.TOOL_CALLS["max_duration_seconds"], "the wait fits one pass"
+    monkeypatch.setattr(steward, "PR_CHECKS_WAIT_SECONDS", 10)  # unplugged, it times out in seconds, not 20 minutes
+    call = Content.from_function_call(call_id="p1", name="pr_checks", arguments={"line": "door-outcomes"})
+    client, _, response = run_steward([call, "The checks passed."], "Open the pull request.", mode="execute")
+    assert steward.PR_CHECKS_TOOL in offered_tools(client.calls[0]) and "atlas_git_pr" in offered_tools(client.calls[0])
+    assert not approval_requests(response), "a read asks no card"
+    [result] = [json.loads(r) for r in function_results(client.calls[1])]
+    assert (result["status"], result["pull_request"]["number"]) == ("passed", 7), result
+    assert asked == [{"action": "list", "project": "steward"}] * 3, "the door's read, on his own world, until settled"
+
+
+def test_pr_checks_reports_a_failure_a_closed_pull_request_and_times_out(monkeypatch: Any) -> None:
+    """pr_checks' other endings, on a stub door: failed checks, a pull request no longer open, and a bounded wait."""
+    import json
+
+    class Door:
+        def __init__(self, *states: list[dict[str, Any]]) -> None:
+            self.states = list(states)
+
+        async def call_tool(self, name: str, **arguments: Any) -> str:
+            assert (name, arguments) == ("git_pr", {"action": "list", "project": "steward"})
+            return json.dumps({"pull_requests": self.states.pop(0) if len(self.states) > 1 else self.states[0]})
+
+    def ask(door: Any, **arguments: Any) -> dict[str, Any]:
+        return json.loads(asyncio.run(steward.pr_checks_tool(door).invoke(arguments=arguments, skip_parsing=True)))
+
+    monkeypatch.setattr(steward, "PR_CHECKS_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(steward, "PR_CHECKS_WAIT_SECONDS", 5)  # a broken ending fails in seconds
+    pending = {"number": 7, "line": "x", "checks": "pending"}
+    assert ask(Door([pending], [{**pending, "checks": "failed"}]), number=7)["status"] == "failed"
+    assert ask(Door([pending], []), line="x") == {"status": "closed", "waited_seconds": 0, "pull_request": pending}
+    monkeypatch.setattr(steward, "PR_CHECKS_WAIT_SECONDS", 0.05)
+    timed = ask(Door([pending]), line="x")
+    assert (timed["status"], timed["pull_request"]) == ("timed_out", pending), timed
+    assert ask(Door([]), line="x")["note"].startswith("not open yet"), "a pull request his Approve has not opened"
+    refused = asyncio.run(steward.pr_checks_tool(Door([])).invoke(arguments={}, skip_parsing=True))
+    assert "name the pull request" in refused
+
+
 def test_devui_shows_stewards_runs_and_traces() -> None:
     """ADR-0001 item 7: DevUI, run as devui_app.py runs it, serves Steward and streams his run's trace; beside him his
     workflow, which DevUI runs to its plan card (human in the loop)."""

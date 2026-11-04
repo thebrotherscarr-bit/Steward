@@ -804,6 +804,80 @@ async def steward_world_only(
     await call_next()
 
 
+# A pull request's outcome, seen through the door's one read of it (2026-11-04, Kyle: "make the doors push and PR
+# results visible"). A door write parks a hold and answers "HELD: ... parked as hold_<ms>_<n>_<tool>" at once
+# (SecondBrain electron/door/registry.cjs heldAnswer); what the hold did is told only to his glass: hold_list and
+# hold_answer refuse a client (toolHoldList, toolHoldAnswer), and an answered hold leaves only a line in the world's
+# state/holds.jsonl, which no door tool serves. So a push's own outcome cannot be read here yet. A pull request can:
+# git_pr's "list" is a read the door runs at once for a client (tools.json reads ["list"], registry.cjs writesFor) and
+# answers {"pull_requests": [{number, title, line, into, url, checks}]} for the OPEN ones, checks being one word:
+# none, pending, passed or failed (gitctl.cjs prList, prChecks). pr_checks asks it until his Approve has opened the
+# pull request and its checks have settled, as the door's own merge waits on them (gitctl.cjs prMerge, every 30 s).
+# A tool waiting holds no model (MAF calls the model only between tool calls), and the wait stays under TOOL_CALLS'
+# 1800 s pass budget, which MAF checks after a call ends and never cuts one short (_tools.py:1889-1899).
+PR_CHECKS_TOOL = "pr_checks"
+PR_CHECKS_WAIT_SECONDS = 20 * 60
+PR_CHECKS_POLL_SECONDS = 30.0  # the door's own merge asks gh every 30 s (gitctl.cjs gh.poll)
+_PR_SETTLED = frozenset({"passed", "failed"})
+
+
+async def _door_text(door: Any, name: str, **arguments: Any) -> str:
+    """One door call's text (MCPTool.call_tool returns MAF Contents); a refusal raised by MCP comes back as its text."""
+    try:
+        result = await door.call_tool(name, **arguments)
+    except Exception as exc:  # noqa: BLE001 - the door's own refusal, reported as it is
+        return f"Error: {exc}"
+    return result if isinstance(result, str) else "\n".join(getattr(c, "text", "") or "" for c in result)
+
+
+def pr_checks_tool(door: Any) -> FunctionTool:
+    """Steward's pr_checks over the connected door (its MCP tool): a read, so it asks no card."""
+
+    @tool(name=PR_CHECKS_TOOL, approval_mode="never_require")
+    async def pr_checks(
+        line: Annotated[str, Field(description="The line of work (branch) the pull request is from, e.g. 'fix-discount'.")] = "",
+        number: Annotated[int, Field(description="The pull request's number, when you know it; 0 to find it by line.")] = 0,
+    ) -> str:
+        """Wait for a pull request on your repository to be opened and for its checks to finish, then return the result.
+
+        Read-only: it never approves, opens or merges anything. Call it after atlas_git_pr action="open" (it waits for
+        the user's Approve to open it) and before you report. It returns JSON: status "passed" or "failed" (the checks
+        finished), "closed" (no longer open: merged or closed), or "timed_out" with the last state seen. The door gives
+        the checks as one word for the whole pull request, not one result per check.
+        """
+        if not line.strip() and number <= 0:
+            return "Error: name the pull request's line of work (line) or its number."
+        clock = asyncio.get_running_loop()
+        started = clock.time()
+        seen: dict[str, Any] | None = None
+        while True:
+            text = await _door_text(door, "git_pr", action="list", project=_STEWARD_WORLD)
+            try:
+                listed = json.loads(text).get("pull_requests") or []
+            except (ValueError, AttributeError):
+                return f"The door did not list the pull requests, so their checks are not known: {text}"
+            found = next(
+                (p for p in listed if (number > 0 and p.get("number") == number) or (number <= 0 and p.get("line") == line.strip())),
+                None,
+            )
+            waited = round(clock.time() - started)
+            if found is not None:
+                seen = found
+                if found.get("checks") in _PR_SETTLED:
+                    return json.dumps({"status": found["checks"], "waited_seconds": waited, "pull_request": found})
+            elif seen is not None:
+                return json.dumps({"status": "closed", "waited_seconds": waited, "pull_request": seen})
+            left = PR_CHECKS_WAIT_SECONDS - (clock.time() - started)
+            if left <= 0:
+                return json.dumps({
+                    "status": "timed_out", "waited_seconds": waited, "pull_request": seen,
+                    "note": "not open yet: its open may still wait for the user's Approve" if seen is None else "checks still running",
+                })
+            await asyncio.sleep(min(PR_CHECKS_POLL_SECONDS, left))
+
+    return pr_checks
+
+
 # </atlas>
 
 
@@ -1932,7 +2006,7 @@ SAFETY_LOG_DIR = _WORKING_DIR / "halo_traces"  # gitignored, beside HALO's trace
 FIDES_LOG_NAME = "fides.jsonl"
 # The untrusted sources and the reads over MCP: FIDES's data fetchers (allow_untrusted_tools).
 _UNTRUSTED_NOTE_READS = frozenset(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes"))
-_DOOR_READS = frozenset(f"atlas_{name}" for name in ("git", "git_diff", "records"))
+_DOOR_READS = frozenset({*(f"atlas_{name}" for name in ("git", "git_diff", "records")), PR_CHECKS_TOOL})
 
 
 def safety_observe_on() -> bool:
@@ -2165,20 +2239,20 @@ async def build_steward_agent(
         # call on his own world.
         if secondbrain_client is not None:
             # His own door: trusted reads; its branch, commit, push and PR are FIDES sinks (labelled_mcp_tool).
-            part3_tools.append(
-                await labelled_mcp_tool(
-                    stack,
-                    MCPStreamableHTTPTool(
-                        name="atlas",
-                        mcp_client=secondbrain_client,
-                        tool_name_prefix="atlas",
-                        allowed_tools=list(_ATLAS_GIT_TOOLS),
-                        approval_mode="never_require",
-                        load_prompts=False,
-                    ),
-                    IntegrityLabel.TRUSTED,
-                )
+            door = await labelled_mcp_tool(
+                stack,
+                MCPStreamableHTTPTool(
+                    name="atlas",
+                    mcp_client=secondbrain_client,
+                    tool_name_prefix="atlas",
+                    allowed_tools=list(_ATLAS_GIT_TOOLS),
+                    approval_mode="never_require",
+                    load_prompts=False,
+                ),
+                IntegrityLabel.TRUSTED,
             )
+            # And pr_checks over it, one per build like the door itself: a pull request's checks, waited for.
+            part3_tools.extend([door, pr_checks_tool(door)])
         part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())]
         if secondbrain_client is not None:
             # plan-steward-context-memory-reads, piece 2: his notes, to look up the plans and rulings

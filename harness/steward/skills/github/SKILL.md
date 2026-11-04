@@ -19,8 +19,9 @@ through a pull request whose checks have passed, and the merge is the user's.
    says what changed (never "update" or "changes"). Do not use `atlas_git_commit` for your own work.
 4. **Send.** Only when the user asks to send: `atlas_git_push` with `project="steward"`. It is held for the
    user's Approve. Say that it is waiting.
-5. **Pull request.** After the send is approved: `atlas_git_pr` with `project="steward"`, `action="open"`. Then
-   `atlas_git_pr` with `action="list"` to read its checks (pending, passed or failed) and report them as given.
+5. **Pull request.** After the send is approved: `atlas_git_pr` with `project="steward"`, `action="open"`. Then,
+   before you report, call `pr_checks` with your `line`: it waits for the user's Approve and for the checks, and
+   returns passed, failed, closed or timed_out. Report that as given. A push's own result is not visible to you.
 6. **Merge.** Only when the user says to merge, and only when its checks have passed: `atlas_git_pr` with
    `project="steward"`, `action="merge"` and the pull request's `number`. Otherwise the merge is the user's click.
 
