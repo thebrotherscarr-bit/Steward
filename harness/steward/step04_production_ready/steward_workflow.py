@@ -63,6 +63,7 @@ import sys
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -85,6 +86,7 @@ from agent_framework import (
     Workflow,
     WorkflowBuilder,
     WorkflowContext,
+    WorkflowEvent,
     agent_middleware,
     handler,
     response_handler,
@@ -433,6 +435,32 @@ class CheckReport:
 # A check: given EXECUTE's messages, (passed, output), or None when there is nothing to check.
 Checks = Callable[[Sequence[Message]], "tuple[bool, str] | None"]
 
+# The progress event's type: not one MAF reserves for itself (_workflow_context.py, add_event refuses "output",
+# "intermediate", "started", "status" and "failed" from an executor), and not one a host forwards as output.
+PROGRESS = "progress"
+
+
+class StewardProgress(WorkflowEvent[str]):
+    """A progress line from CHECK or REPAIR ("checking: pytest -q tests", "check passed", "repair attempt 2/3"), a
+    custom event emitted with ctx.add_event, as MAF's Workflow documents: "Can emit custom events via ctx.add_event()
+    ... Only workflow-level events (outputs, custom events) and status events are observable to callers"
+    (_workflows/_workflow.py). The Responses host passes on only output and request_info events, so it shows nothing
+    there yet; a caller streaming the workflow (the console, the evals) reads ``event.data``."""
+
+    def __init__(self, text: str, *, executor_id: str) -> None:
+        super().__init__(PROGRESS, text, executor_id=executor_id)  # type: ignore[arg-type]  # a custom type
+
+
+# How a check, run in a worker thread (asyncio.to_thread copies the context), reports what it is about to run.
+_CHECK_PROGRESS: ContextVar[Callable[[str], None] | None] = ContextVar("steward_check_progress", default=None)
+
+
+def check_progress(text: str) -> None:
+    """Report a check's step to the running CHECK, if any (a check run outside the workflow reports nothing)."""
+    report = _CHECK_PROGRESS.get()
+    if report is not None:
+        report(text)
+
 
 def written_python_files(messages: Sequence[Message]) -> list[str]:
     """The .py files EXECUTE's calls to MAF's file-writing tools named, in order, once each.
@@ -528,6 +556,7 @@ def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None
     passed = True
     for target in targets:
         command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target]
+        check_progress(f"checking: pytest -q {target}")
         done = subprocess.run(
             command, cwd=workspace, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
             env={**os.environ, _CHECK_RUNNING: "1"},
@@ -617,8 +646,19 @@ class Check(Executor):
     async def check(self, response: AgentExecutorResponse, ctx: WorkflowContext[CheckReport]) -> None:
         attempt = int(ctx.get_state(_ATTEMPT_KEY, 0) or 0) + 1
         ctx.set_state(_ATTEMPT_KEY, attempt)
-        result = await asyncio.to_thread(self._checks, list(response.full_conversation or response.agent_response.messages))
+        loop = asyncio.get_running_loop()
+
+        def report(text: str) -> None:  # from the checks' thread: added on the loop, in order, before the check goes on
+            asyncio.run_coroutine_threadsafe(ctx.add_event(StewardProgress(text, executor_id=self.id)), loop).result()
+
+        token = _CHECK_PROGRESS.set(report)
+        try:
+            result = await asyncio.to_thread(self._checks, list(response.full_conversation or response.agent_response.messages))
+        finally:
+            _CHECK_PROGRESS.reset(token)
         passed, output = result if result is not None else (True, "")
+        if output:
+            await ctx.add_event(StewardProgress("check passed" if passed else "check failed", executor_id=self.id))
         await ctx.send_message(CheckReport(attempt, passed, output, _last_text(response)))
 
 
@@ -792,6 +832,7 @@ class Repair(Executor):
             f"what you changed.\n\nCheck output:\n{report.output}"
         )
         message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [REPAIR_TODO]})
+        await ctx.add_event(StewardProgress(f"repair attempt {report.attempt + 1}/{MAX_ATTEMPTS}", executor_id=self.id))
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
 

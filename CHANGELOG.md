@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Added
 
+- Progress from CHECK and REPAIR: MAF custom workflow events (`ctx.add_event`, `StewardProgress`, type `progress`),
+  in order: "checking: pytest -q <folder>" before each folder's tests (the check reports from its worker thread through
+  `check_progress`), "check passed" or "check failed", and "repair attempt n/3". A caller streaming the workflow reads
+  them; the Responses host passes on only output and request_info events, so the Agent tab does not show them yet.
+  Test: `test_check_and_repair_emit_progress_events_in_order`.
 - History on disk for the console and the MCP door: MAF's `FileHistoryProvider`, one JSON Lines file per session under
   the repo's gitignored `storage/history` (`steward_history_provider`), in place of `InMemoryHistoryProvider`, so a
   session continued after a restart keeps its history. The console prints its session ID and `--session ID`
