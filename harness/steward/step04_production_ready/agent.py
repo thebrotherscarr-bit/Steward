@@ -11,12 +11,15 @@ Changes from the guide for local Ollama:
     * Skills and the script runner are read from the parent ``steward/`` folder instead of local
       copies (the copies only exist in the guide for Foundry's ZIP deployment).
 
-Steward's team (each a background agent on its own local model):
-    * Steward (orchestrator) — OLLAMA_MODEL, e.g. gpt-oss:20b: talks to the user, plans, uses tools.
-    * CodeExplorer — the orchestrator's model: explores modules read-only.
-    * Coder        — STEWARD_CODER_MODEL (qwen2.5-coder:14b): the improvement loop's fixer (step 6).
-    * Reasoner     — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
-    * Explainer    — STEWARD_CONVERSATION_MODEL (gemma4:26b): explanations, docs and summaries.
+Steward's team on the live build (part 4, every host): Steward himself (the orchestrator, OLLAMA_MODEL, e.g.
+gpt-oss:20b: talks to the user, plans, uses tools) and two background agents on his model and client:
+    * CodeExplorer     — explores one module read-only.
+    * WebResearchAgent — searches the web with SecondBrain's web tools (only when SecondBrain is connected).
+The older path (part > 4, used by no host) also builds these, each on its own model:
+    * Coder     — STEWARD_CODER_MODEL (qwen2.5-coder:14b); the improvement loop's coder (step 6) is its own agent on
+                  that model, in improvement_loop_workflow.py.
+    * Reasoner  — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
+    * Explainer — STEWARD_CONVERSATION_MODEL (gemma4:26b): explanations, docs and summaries.
 
 Environment variables:
     OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
@@ -60,7 +63,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Annotated, Any
 
 from agent_framework import (
@@ -368,19 +371,100 @@ def get_repo_status() -> dict[str, object]:
 
 
 # <git_commit>
+# Audit 2026-11-04: git_commit ran `git add --all -- .`, so a commit took every change in the workspace, his or not.
+# It now commits only the files his run wrote with MAF's file tools (FileAccessProvider._WRITE_TOOL_NAMES), as
+# record_written_files keeps them in the run's session (its state is what MAF checkpoints, so a write made before a
+# card's pause is still there after it). git_commit reads them through MAF's context injection (a parameter typed
+# FunctionInvocationContext, agent_framework/_tools.py:779-786 and :1186-1187). `git commit --only -- <paths>` commits
+# just those paths, whatever else is staged. A file a shell command changed is not his write and is left as it is.
+WRITTEN_FILES_KEY = "steward_written_files"
+
+
+def write_happened(result: Any) -> bool:
+    """Whether a MAF file-writing tool's result says it wrote (its success texts, _file_access.py:2286, :2340, :2393,
+    :2415), not a refusal. The result is a str or MAF's parsed list of Content."""
+    if isinstance(result, list):
+        result = "\n".join(str(getattr(c, "text", "") or "") for c in result)
+    text = str(result or "")
+    return text.startswith("Replaced ") or (text.startswith("File '") and text.endswith(("' written.", "' deleted.")))
+
+
+def written_files(session: Any) -> list[str]:
+    """The workspace-relative files his file tools wrote in this session (record_written_files), in order."""
+    if session is None:
+        return []
+    return list(session.state.get(WRITTEN_FILES_KEY) or [])
+
+
+async def record_written_files(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware: each file a MAF write tool wrote is kept in the session (WRITTEN_FILES_KEY), for git_commit.
+
+    Outer to his write refusals (refuse_unicode_punctuation_in_code), so a refused write, whose result is the refusal,
+    is not kept."""
+    await call_next()
+    if context.function.name not in FileAccessProvider._WRITE_TOOL_NAMES or not write_happened(context.result):
+        return
+    session = context.session or _RUN_SESSION.get()
+    arguments = context.arguments
+    arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+    try:
+        path = _inside_workspace(str(arguments.get("file_name") or "")).relative_to(_WORKING_DIR).as_posix()
+    except ValueError:
+        return
+    if session is not None and path != ".":
+        kept = session.state.setdefault(WRITTEN_FILES_KEY, [])
+        if path not in kept:
+            kept.append(path)
+
+
+NOTHING_TO_COMMIT = "Nothing was committed: no file written with the file tools in this run has a change to commit."
+
+
 # A FIDES sink, declared as Learn's FIDES page declares write_file ("Annotating sink tools": accepts_untrusted False).
 @tool(approval_mode="always_require", additional_properties={"accepts_untrusted": False})
 def git_commit(
     message: Annotated[str, Field(min_length=1, description="Imperative commit message, e.g. 'Fix total rounding'.")],
+    ctx: FunctionInvocationContext | None = None,
 ) -> str:
-    """Stage every change under the workspace and commit it; the user approves before it runs."""
-    added = _git("add", "--all", "--", ".")
+    """Commit the files you wrote in this run with the file tools, and nothing else; the user approves before it runs."""
+    session = (ctx.session if ctx is not None else None) or _RUN_SESSION.get()
+    written = written_files(session)
+    changed = set(
+        _git("ls-files", "-z", "--modified", "--deleted", "--others", "--exclude-standard", "--", ".").stdout.split("\0")
+    )
+    paths = [p for p in written if p in changed and not _is_env_file(Path(p))]
+    if not paths:
+        return NOTHING_TO_COMMIT
+    added = _git("add", "--all", "--", *paths)
     if added.returncode != 0:
         return f"git add failed: {added.stderr.strip()}"
-    committed = _git("commit", "-m", message)
+    committed = _git("commit", "-m", message, "--only", "--", *paths)
     if committed.returncode != 0:
         return f"git commit failed: {(committed.stdout + committed.stderr).strip()}"
     return f"Committed {_git('rev-parse', '--short', 'HEAD').stdout.strip()}: {message}"
+
+
+async def invoke_through_middleware(agent: Any, function: FunctionTool, arguments: dict[str, Any], session: Any) -> Any:
+    """Run one approved call outside the model's loop as MAF's loop runs it (_tools.py:2329-2392, _auto_invoke_function):
+    a FunctionInvocationContext with the session, through the client's and the agent's function middleware
+    (FunctionMiddlewarePipeline, in the order AgentMiddlewareLayer.run and _get_function_middleware_pipeline give them,
+    _middleware.py:2013-2020 and _tools.py:5709), then FunctionTool.invoke. Returns the result as text."""
+    from agent_framework._middleware import FunctionMiddlewarePipeline, categorize_middleware  # noqa: PLC0415
+
+    middleware = [*(getattr(agent.client, "function_middleware", None) or []), *categorize_middleware(agent.middleware)["function"]]
+    context = FunctionInvocationContext(function=function, arguments=dict(arguments), session=session)
+    outside = _RUN_SESSION.set(session)
+    try:
+        result = await FunctionMiddlewarePipeline(*middleware).execute(
+            context, lambda c: function.invoke(arguments=c.arguments, context=c)
+        )
+    except MiddlewareTermination:
+        result = context.result
+    finally:
+        _RUN_SESSION.reset(outside)
+    if isinstance(result, list):
+        return "\n".join(str(getattr(c, "text", "") or "") for c in result)
+    return str(result if result is not None else "")
 
 
 # </git_commit>
@@ -1700,8 +1784,8 @@ _shell_text_copies()
 def _own_python_env() -> dict[str, str] | None:
     """His shell's environment with his own virtual environment active, as any developer's terminal for this repo
     is: `python`, `pip` and `pytest` resolve to the Python Steward runs on (sys.prefix), not the system one (live
-    2026-11-02: he ran `python .../evals.py` and the system Python had no agent_framework). MAF's LocalShellTool
-    merges `env` over the inherited environment and starts the shell with it. None when he runs outside a venv.
+    2026-11-02: he ran `python .../evals.py` and the system Python had no agent_framework). None when he runs outside
+    a venv. shell_env puts it over the variables his shell is given.
     """
     if sys.prefix == sys.base_prefix:
         return None
@@ -1709,10 +1793,54 @@ def _own_python_env() -> dict[str, str] | None:
     return {"VIRTUAL_ENV": sys.prefix, "PATH": str(scripts) + os.pathsep + os.environ.get("PATH", "")}
 
 
+# Audit 2026-11-04: his shell inherited this process's environment after load_dotenv(), so every command could read
+# SECONDBRAIN_MCP_KEY (RULE 7). MAF's LocalShellTool takes clean_env=True: "do not inherit os.environ; only the
+# variables supplied in env are visible to commands" (agent_framework_tools/shell/_tool.py:124-125, :194-200), and the
+# persistent shell starts with exactly that env (_session.py:180-185). So the shell gets only these names: what Windows,
+# Git Bash, git, Python and pytest need to run, and his own Python first (_own_python_env). A name .env sets is never
+# passed, nor one that reads as a secret, whatever the list says; a Python script he runs that needs .env reads it itself.
+SHELL_ENV_NAMES = frozenset({
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "OS", "TEMP", "TMP", "TMPDIR",
+    "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "USERNAME", "USER", "LOGNAME", "USERDOMAIN", "COMPUTERNAME",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
+    "NUMBER_OF_PROCESSORS", "LANG", "LANGUAGE", "TERM", "SHELL", "TZ", "VIRTUAL_ENV",
+})
+SHELL_ENV_PREFIXES = ("PYTHON", "LC_")
+_SECRET_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH", re.I)
+
+
+def dotenv_names() -> set[str]:
+    """The names the workspace's .env sets (the file load_dotenv() read), upper-cased; never their values."""
+    from dotenv import dotenv_values, find_dotenv  # noqa: PLC0415
+
+    found = find_dotenv()
+    return {name.upper() for name in dotenv_values(found)} if found else set()
+
+
+def shell_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The only variables his shell's commands see (MAF's clean_env): SHELL_ENV_NAMES and the SHELL_ENV_PREFIXES ones
+    from this process, with his own Python first, never a name .env sets or a secret-looking one."""
+    environ = os.environ if environ is None else environ
+    withheld = dotenv_names()
+    kept = {
+        name: value
+        for name, value in environ.items()
+        if (name.upper() in SHELL_ENV_NAMES or name.upper().startswith(SHELL_ENV_PREFIXES))
+        and name.upper() not in withheld
+        and not _SECRET_NAME.search(name)
+    }
+    if own := _own_python_env():
+        kept.update(own)
+    return kept
+
+
 def _build_shell() -> LocalShellTool:
-    """Build a shell confined to the workspace, with his own Python first; every command is surfaced for approval."""
+    """Build a shell confined to the workspace, with his own Python first and none of this process's keys (shell_env);
+    every command is surfaced for approval."""
     return LocalShellTool(
-        env=_own_python_env(),
+        env=shell_env(),
+        clean_env=True,
         # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override. Elsewhere (the gate's
         # Linux runner) MAF's own default, which resolves to /bin/bash (agent_framework_tools/shell/_resolve.py).
         shell=[r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else None,
@@ -1754,12 +1882,46 @@ OLLAMA_OPTIONS: dict[str, Any] = {"num_ctx": _STEWARD_CONTEXT, "keep_alive": "30
 # at a time in the model's order (his writes and cards stay in order); a failing tool's error text goes back to
 # the model, a local channel; and a pass stops calling tools after 40 calls or 30 minutes and answers in text.
 # Earned 2026-11-03: round 1's fixer called todos_complete for a finished todo every 18 seconds for 13 minutes.
+# include_detailed_errors (audit 2026-11-04): MAF's text is "Exception text may contain sensitive information regardless
+# of its source, so enable this only for a trusted channel" (_tools.py:1909-1911). It is one switch per client
+# (FunctionInvocationConfiguration; read at _tools.py:1999 and :2042), with no per-tool option. Off, his own tools'
+# failures and his mangled arguments would come back as only "Error: Function failed." / "Error: Argument parsing
+# failed." (:2014-2016, :2041-2043), which is what he repairs from. So it stays on, and the one untrusted source of
+# exception text, an MCP server's error (MCPStreamableHTTPTool raises its isError text, _mcp.py:3471-3483), is withheld
+# by function middleware before MAF formats it (withhold_untrusted_errors).
 TOOL_CALLS: dict[str, Any] = {
     "allow_concurrent_invocation": False,
     "include_detailed_errors": True,
     "max_function_calls": 40,
     "max_duration_seconds": 1800.0,
 }
+UNTRUSTED_ERROR = (
+    "{name} failed. Its error text is not shown: it comes from SecondBrain's MCP server, an untrusted source "
+    "(notes, logs and the web). Try again with other arguments, or go on without it."
+)
+
+
+def withhold_untrusted_errors(sources: Sequence[Any]) -> Callable[..., Awaitable[None]]:
+    """Function middleware: a call to one of the sources' MCP functions that raises is re-raised with UNTRUSTED_ERROR
+    only, so MAF's detailed error ("Error: Function failed. Exception: ...") carries none of the server's text. Every
+    other tool, and every result that is not an error, is left as it is. MAF's control signals pass unchanged."""
+    from agent_framework import MiddlewareFailure, UserInputRequiredException  # noqa: PLC0415
+    from agent_framework.exceptions import ToolExecutionException  # noqa: PLC0415
+
+    async def withhold_untrusted_errors_(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        name = context.function.name
+        if not any(f.name == name for source in sources for f in (getattr(source, "functions", None) or [])):
+            await call_next()
+            return
+        try:
+            await call_next()
+        except (MiddlewareTermination, MiddlewareFailure, UserInputRequiredException):
+            raise
+        except Exception as exc:  # noqa: BLE001 - the server's text stays out of what he is shown
+            logger.warning("%s failed (%s); its error text was withheld from the model.", name, type(exc).__name__)
+            raise ToolExecutionException(UNTRUSTED_ERROR.format(name=name)) from None
+
+    return withhold_untrusted_errors_
 # </tool_call_limits>
 
 
@@ -2280,9 +2442,11 @@ def _build_governance_middleware() -> list[ChatMiddleware]:
 #   * CodeAct: the page's warning is that FIDES does not see host-tool calls inside generated code. His Monty provider
 #     is given no host tools (MontyCodeActProvider(tools=None), agent_framework_monty/_provider.py:42) and mounts harness/
 #     read-only, so every sink stays a direct tool, the page's arrangement; nothing in Monty refuses FIDES beside it.
-#   * Not labelled, because MAF has no option for it yet (#7455 B1): harness-made tools. Web pages reach him through
-#     WebResearchAgent's background results (background_agents_get_task_results, _harness/_background_agents.py:585),
-#     and SecondBrain's skill notes through load_skill and read_skill_resource (SkillsProvider).
+#   * SecondBrain's web tools are labelled untrusted at their source too (secondbrain_web_tools, audit 2026-11-04), on
+#     WebResearchAgent, which records with its own fides_observer; web_search and web_fetch are its data fetchers.
+#   * Not labelled, because MAF has no option for it yet (#7455 B1): harness-made tools. What WebResearchAgent found
+#     reaches Steward through its background results (background_agents_get_task_results,
+#     _harness/_background_agents.py:585), and SecondBrain's skill notes through load_skill and read_skill_resource.
 # Agent Hooks (Learn, agents/agent-hooks) are not wired: their bundle buffers every streamed run in evaluate_only too
 # (_agent_hooks.py:1332 and :1462 set stream_buffer_updates whatever the mode), so the Agent tab would stop streaming;
 # the test test_agent_hooks_still_hold_back_a_streamed_reply measures it.
@@ -2293,6 +2457,7 @@ FIDES_LOG_NAME = "fides.jsonl"
 _UNTRUSTED_NOTE_READS = frozenset(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes"))
 _DOOR_READS = frozenset({*(f"atlas_{name}" for name in ("git", "git_diff", "records")), PR_CHECKS_TOOL})
 _ESTATE_READ_TOOLS = frozenset(f"secondbrain_{name}" for name in ESTATE_READS)  # the Estate's reads fetch data too
+_WEB_READS = frozenset(f"secondbrain_{name}" for name in ("web_search", "web_fetch"))  # WebResearchAgent's fetchers
 
 
 def safety_observe_on() -> bool:
@@ -2310,7 +2475,7 @@ def fides_observer() -> list[Any]:
     """
     labels = LabelTrackingFunctionMiddleware(default_integrity=IntegrityLabel.TRUSTED, auto_hide_untrusted=False)
     policy = PolicyEnforcementFunctionMiddleware(
-        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS | _ESTATE_READ_TOOLS), block_on_violation=False, approval_on_violation=False
+        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS | _ESTATE_READ_TOOLS | _WEB_READS), block_on_violation=False, approval_on_violation=False
     )
 
     async def record_would_block(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
@@ -2498,13 +2663,21 @@ def _secondbrain_web_tools(client: Client) -> MCPStreamableHTTPTool:
     )
 
 
+async def secondbrain_web_tools(stack: AsyncExitStack, client: Client) -> MCPStreamableHTTPTool:
+    """SecondBrain's web tools, connected: a web page is untrusted content to FIDES, labelled at its source as his notes
+    are (labelled_mcp_tool, IntegrityLabel.UNTRUSTED; audit 2026-11-04: they were connected unlabelled)."""
+    return await labelled_mcp_tool(stack, _secondbrain_web_tools(client), IntegrityLabel.UNTRUSTED)
+
+
 def _build_web_research_agent(client: OllamaChatClient, web_tools: MCPStreamableHTTPTool) -> Agent[Any]:
-    """The guide's lean, web-search-only research agent (claw_step04 _build_research_agent)."""
+    """The guide's lean, web-search-only research agent (claw_step04 _build_research_agent). Its own middleware: the
+    web server's error text withheld (withhold_untrusted_errors), and FIDES recording as on Steward (fides_observer)."""
     return Agent(
         client=client,
         name="WebResearchAgent",
         description="Searches the web for recent news and documentation about a single library, tool or topic.",
         tools=[web_tools],
+        middleware=[withhold_untrusted_errors([web_tools]), *(fides_observer() if safety_observe_on() else [])],
         instructions=(
             "You research a single library, tool or topic. Use the web search tool to find the most recent, "
             "relevant news and documentation, then return a short, factual summary (3-4 bullet points) "
@@ -2587,7 +2760,7 @@ async def build_steward_agent(
             # 3 and 4): from Part 3 the web tools are the WebResearchAgent's alone, so Steward delegates
             # web research instead of searching himself. MAF's fix at the lowest layer, tool selection.
             if part <= 2:
-                tools.append(await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client)))
+                tools.append(await secondbrain_web_tools(stack, secondbrain_client))
         if part == 1:
             return create_harness_agent(
                 client=client or OllamaChatClient(),
@@ -2610,7 +2783,8 @@ async def build_steward_agent(
                 file_access_store=FileSystemAgentFileStore(str(_WORKING_DIR)),
                 auto_approval_rules=[FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule],
                 context_providers=context_providers or None,
-                middleware=[memory_owner] if memory_store is not None else None,
+                # record_written_files: his git_commit commits only the files his file tools wrote (<git_commit>).
+                middleware=[record_written_files, *([memory_owner] if memory_store is not None else [])],
                 mode_provider=AgentModeProvider(default_mode="execute"),
                 max_context_window_tokens=65_536,
                 max_output_tokens=8_192,
@@ -2643,7 +2817,7 @@ async def build_steward_agent(
             # The guide's background research agent and its managed (Foundry Toolbox) skills, on this PC:
             # the research agent searches with SecondBrain's web tools, and SecondBrain's skill notes are
             # read with MCPSkillsSource over the same client, beside the file skills (claw_step04).
-            web_tools = await stack.enter_async_context(_secondbrain_web_tools(secondbrain_client))
+            web_tools = await secondbrain_web_tools(stack, secondbrain_client)
             background_agents.append(_build_web_research_agent(part3_client, web_tools))
             skill_sources.append(MCPSkillsSource(client=secondbrain_client))
         skills_source = skill_sources[0] if len(skill_sources) == 1 else AggregatingSkillsSource(skill_sources)
@@ -2682,6 +2856,8 @@ async def build_steward_agent(
             # And pr_checks over it, one per build like the door itself: a pull request's checks, waited for.
             part3_tools.extend([door, pr_checks_tool(door)])
         part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())]
+        # The MCP tools whose content is untrusted (his notes, the Estate): their error text is withheld from him.
+        untrusted_sources: list[Any] = []
         if secondbrain_client is not None:
             # plan-steward-context-memory-reads, piece 2: his notes, to look up the plans and rulings
             # himself (reads, never a card), and his Charter, read through them and put in his
@@ -2705,25 +2881,26 @@ async def build_steward_agent(
                 IntegrityLabel.UNTRUSTED,
             )
             part3_tools.append(notes)
+            untrusted_sources.append(notes)
             part3_providers.append(CharterProvider(notes))
             # The Estate (2026-11-04, Kyle: Steward is the agent of the Estate): SecondBrain's estate tools on the same
             # client, MAF's allowed_tools and per-tool approval_mode (estate_approval): the reads never ask, the writes
             # always ask the user's card. An eval's build gets the reads only. A server's log is untrusted to FIDES.
             estate_tools = list(ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS))
-            part3_tools.append(
-                await labelled_mcp_tool(
-                    stack,
-                    MCPStreamableHTTPTool(
-                        name="secondbrain_estate",
-                        mcp_client=secondbrain_client,
-                        tool_name_prefix="secondbrain",
-                        allowed_tools=estate_tools,
-                        approval_mode=estate_approval(estate_tools),
-                        load_prompts=False,
-                    ),
-                    IntegrityLabel.UNTRUSTED,
-                )
+            estate = await labelled_mcp_tool(
+                stack,
+                MCPStreamableHTTPTool(
+                    name="secondbrain_estate",
+                    mcp_client=secondbrain_client,
+                    tool_name_prefix="secondbrain",
+                    allowed_tools=estate_tools,
+                    approval_mode=estate_approval(estate_tools),
+                    load_prompts=False,
+                ),
+                IntegrityLabel.UNTRUSTED,
             )
+            part3_tools.append(estate)
+            untrusted_sources.append(estate)
         # plan-steward-context-memory-reads, piece 3: MAF's file memory with one explicit scope, so what
         # he saves in one session is in front of him in the next ("Pass an explicit scope to group
         # memories differently ... across sessions"); the factory's per-session one is switched off.
@@ -2794,8 +2971,8 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[
-                memory_owner, estate_door_gate, *gate_middleware, refuse_unicode_punctuation_in_code,
-                repair_tool_names, recover_text_tool_calls, record_called_tools,
+                memory_owner, estate_door_gate, *gate_middleware, record_written_files, refuse_unicode_punctuation_in_code,
+                repair_tool_names, recover_text_tool_calls, record_called_tools, withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if safety_observe_on() else []),
             ],
@@ -2882,7 +3059,7 @@ async def build_steward_agent(
             *([CharterProvider(secondbrain)] if secondbrain is not None else []),
             *([steward_memory(memory_store)] if memory_store is not None else []),
         ],
-        middleware=[memory_owner] if memory_store is not None else None,
+        middleware=[record_written_files, *([memory_owner] if memory_store is not None else [])],
         mode_provider=AgentModeProvider(default_mode="execute"),
         max_context_window_tokens=_STEWARD_CONTEXT,
         max_output_tokens=8_192,
