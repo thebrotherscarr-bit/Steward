@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Added
 
+- Model drift at start: the Responses host (hosted.py) and the MCP host (mcp_app.py) compare Ollama's installed
+  models (`/api/tags`, through ollama's `AsyncClient.list`) with the Estate lock (`worlds/neiro/estate.lock.json`,
+  read only) for the models it gives Steward (`used_by: steward`), and log one plain warning line per model whose
+  digest differs or that is not installed (`warn_model_drift`). The start never fails on it: a missing lock or
+  Ollama down is one info line. Test: `test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_start`.
 - Steward runs the Estate (Neiro), on Kyle's ruling of 2026-11-04. SecondBrain's Estate tools are on his live build
   as one more `MCPStreamableHTTPTool` (`secondbrain_estate`) with MAF's per-tool `approval_mode`: `estate_status`,
   `estate_logs` and `approvals_history` never ask; `service_control`, `ollama_unload` and `app_update` (one name for

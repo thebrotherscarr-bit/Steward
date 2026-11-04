@@ -4553,3 +4553,44 @@ def test_a_non_streaming_answer_after_the_todo_nudge_is_given_once() -> None:
     # New words after a nudge are still given.
     client, _, response = run_steward([todo, answer, done, "Juniper."], "What is the estate status?", mode="execute")
     assert response.text == answer + "Juniper.", response.text
+
+
+def test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_start(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """At a host's start the installed models' digests are compared with the Estate lock (worlds/neiro/estate.lock.json)
+    for the models it gives Steward: one warning per drift; a missing lock or Ollama down is one info line."""
+    import inspect
+    import json
+    import logging
+
+    import hosted
+    import mcp_app
+
+    lock = tmp_path / "estate.lock.json"
+    lock.write_text(json.dumps({"models": [
+        {"name": "gpt-oss:20b", "digest": "f38aa0c53da5aaaa", "used_by": ["steward"]},
+        {"name": "steward:1", "digest": "14345b14ac4cbbbb", "used_by": ["steward"]},
+        {"name": "qwen2.5-coder:14b", "digest": "9ec8897f747ecccc", "used_by": ["steward"]},
+        {"name": "nomic-embed-text-v2-moe:latest", "digest": "ff9c2f10ef5edddd", "used_by": ["manjuel:embed"]},
+    ]}), encoding="utf-8")
+
+    async def installed() -> dict[str, str]:  # Ollama's /api/tags, faked: one drifted, one missing, one as locked
+        return {"gpt-oss:20b": "0000000000000000", "steward:1": "14345b14ac4cbbbb", "nomic-embed-text-v2-moe:latest": "x"}
+
+    async def ollama_down() -> dict[str, str]:
+        raise ConnectionError("All connection attempts failed")
+
+    with caplog.at_level(logging.INFO, logger=steward.logger.name):
+        lines = asyncio.run(steward.warn_model_drift(lock, installed))
+        assert len(lines) == 2 and "gpt-oss:20b" in lines[0] and "qwen2.5-coder:14b" in lines[1], lines
+        assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == lines
+        caplog.clear()
+        assert asyncio.run(steward.warn_model_drift(tmp_path / "missing.json", installed)) == []
+        assert asyncio.run(steward.warn_model_drift(lock, ollama_down)) == []
+        infos = [r.getMessage() for r in caplog.records]
+        assert len(infos) == 2 and all(r.levelno == logging.INFO for r in caplog.records), infos
+    assert steward.ESTATE_LOCK.parts[-3:] == ("worlds", "neiro", "estate.lock.json")
+    assert steward.ESTATE_LOCK.parents[2] == steward._STEWARD_DIR.parents[3], "the lock is beside the Steward repo"
+    for host in (hosted, mcp_app):
+        assert "await warn_model_drift()" in inspect.getsource(host.main), f"{host.__name__} checks at start"

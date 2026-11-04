@@ -44,7 +44,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import _WORKING_DIR, build_steward_agent, steward_memory_store  # noqa: E402
+from agent import _WORKING_DIR, build_steward_agent, steward_memory_store, warn_model_drift  # noqa: E402
 
 MCP_SESSIONS_DIR = _WORKING_DIR / "storage" / "mcp-sessions"
 from halo_traces import setup_halo_tracing  # noqa: E402
@@ -113,6 +113,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # Every span goes to halo_traces/traces.jsonl, as hosted.py does.
     setup_halo_tracing()
+    await warn_model_drift()  # one warning line per model that drifted from the Estate lock; never fails the start
 
     async with AsyncExitStack() as stack:
         # Each conversation's history lives in its session, as in the sample (and hosted.py).

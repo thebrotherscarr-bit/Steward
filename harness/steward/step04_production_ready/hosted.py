@@ -72,7 +72,7 @@ from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent, repeats_what_was_shown, steward_memory_store  # noqa: E402
+from agent import build_steward_agent, repeats_what_was_shown, steward_memory_store, warn_model_drift  # noqa: E402
 from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import HALO_TRACE_PATH, setup_halo_tracing  # noqa: E402
 
@@ -695,6 +695,7 @@ async def main() -> None:
     # After steward_server, which names the state root; before the host serves, so no turn is in flight.
     removed = await expire_host_state()
     logger.info("Host state older than %d days removed: %s.", state_retention_days(), removed)
+    await warn_model_drift()  # one warning line per model that drifted from the Estate lock; never fails the start
     logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol, MAF workflow).", port)
     await server.run_async(host="127.0.0.1", port=port)
 
