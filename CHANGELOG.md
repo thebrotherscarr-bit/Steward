@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- Two read skills for the Estate's own record. `eval-history` (`scripts/eval_history.py`) compares the last runs of
+  a set in `storage/evals/history.jsonl`: each run's counts, commit and model, its failed checks, and which checks
+  flipped between the last two. `telemetry` (`scripts/telemetry.py`) summarises the newest spans of
+  `halo_traces/traces.jsonl` (runs, model calls by model, tool calls by tool, errors), reading only the file's tail
+  (`--kb`, 1024 by default, at most 4096), never the whole file. Both are reads and run through the skills' script
+  runner. Test: `test_the_eval_history_and_telemetry_skills_compare_runs_and_read_only_the_traces_tail`.
 - Ollama's timings on every chat call: `load_duration`, `prompt_eval_duration`, `eval_count` and `eval_duration`
   (nanoseconds; tokens for the count), which MAF's `OllamaChatClient` drops, are added to the call's usage as
   `ollama.<field>` (MAF's `UsageDetails` is open for provider fields, `_types.py:553-557`) and set on its chat span
