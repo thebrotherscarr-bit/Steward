@@ -15,6 +15,8 @@ Steward must call) beside a check of the answer. A case stays here once it passe
 Beside that default set: ``small`` (step 4's small asks, with ``--gate`` the improvement loop's gate), ``steps``
 (each workflow step scored on its own) and ``memory`` (step 5: a note saved in one request is recalled in the next).
 
+Every set exits 1 when any case fails (``small --gate``: when the checks drop below the baseline), 0 otherwise.
+
 Run:
     python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory]
 """
@@ -26,7 +28,7 @@ import json
 import sys
 import tempfile
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, contextmanager
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,7 @@ from agent_framework import (
     Agent,
     AgentResponse,
     ConversationSplit,
+    EvalResults,
     ExpectedToolCall,
     LocalEvaluator,
     evaluate_agent,
@@ -243,8 +246,14 @@ def discount_bug_planted() -> Any:
         module.write_bytes(original)
 
 
-async def main() -> None:
-    """Run the local Steward evals."""
+def exit_code(results: Iterable[EvalResults]) -> int:
+    """A set's exit code: 0 when every result passed, 1 when any case failed or errored, or nothing was scored (MAF's
+    EvalResults.all_passed, agent_framework/_evaluation.py:457, the check its raise_for_status makes for CI)."""
+    return 0 if all(result.all_passed for result in results) else 1
+
+
+async def main() -> int:
+    """Run the local Steward evals; the exit code is exit_code's."""
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     local = LocalEvaluator(
@@ -278,6 +287,7 @@ async def main() -> None:
         for score in item.scores:
             if score.passed is False:
                 print(f"      {score.name}: {(score.sample or {}).get('reason', '')}")
+    return exit_code(results)
 
 
 def _called(conversation: list[Any]) -> list[str]:
@@ -395,8 +405,8 @@ async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[
     return events
 
 
-async def steps_main() -> None:
-    """One run of the workflow on the planted bug, each step scored by its own evaluator."""
+async def steps_main() -> int:
+    """One run of the workflow on the planted bug, each step scored by its own evaluator; the exit code is exit_code's."""
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     import steward_workflow as wf  # noqa: PLC0415
@@ -427,13 +437,14 @@ async def steps_main() -> None:
         wf.EXECUTE_STEP: await LocalEvaluator(execute_step).evaluate(items(steps.get(wf.EXECUTE_STEP, [])), eval_name="execute"),
         "overall": await LocalEvaluator(steps_overall).evaluate(report, eval_name="overall"),
     }
-    passed = all(r.total and r.passed == r.total for r in scored.values())
-    print(f"Workflow steps: {'PASS' if passed else 'FAIL'}")
+    code = exit_code(scored.values())
+    print(f"Workflow steps: {'PASS' if code == 0 else 'FAIL'}")
     for step, result in scored.items():
         print(f"  {step}: {result.passed}/{result.total}")
         for item in result.items:
             for score in item.scores:
                 print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
+    return code
 
 
 # Step 4: evals as small single asks (the cookbook's evaluation flywheel: today's failures labelled, grouped, and
@@ -680,7 +691,8 @@ async def score_small_asks(steward: Any, asks: list[str], responses: list[AgentR
 
 
 async def small_main(use_gate: bool = False) -> int:
-    """Step 4's small asks, one run each, scored with their checks; with use_gate, the exit code is the gate's."""
+    """Step 4's small asks, one run each, scored with their checks; with use_gate, the exit code is the gate's, without
+    it exit_code's."""
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     steward, responses = await run_small_asks(SMALL_ASKS)
@@ -693,7 +705,7 @@ async def small_main(use_gate: bool = False) -> int:
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
     passed, total = applicable_checks(result.items)
     print(f"Small-ask checks: {passed}/{total}")
-    return gate(passed, total) if use_gate else 0
+    return gate(passed, total) if use_gate else exit_code([result])
 
 
 # Step 5, piece 5.3: a note saved in one request is recalled in the next. Two requests through his workflow
@@ -729,8 +741,8 @@ async def memory_runs(**build: Any) -> tuple[Agent[Any] | None, list[AgentRespon
     return steward, responses
 
 
-async def memory_main() -> None:
-    """Step 5's memory case, one run of each request, scored with memory_recalled."""
+async def memory_main() -> int:
+    """Step 5's memory case, one run of each request, scored with memory_recalled; the exit code is exit_code's."""
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     steward, responses = await memory_runs(auto_approve_skill_scripts=True)
@@ -746,6 +758,7 @@ async def memory_main() -> None:
         print(f"  [{item.status}] {(item.input_text or '')[:70]}")
         for score in item.scores:
             print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+    return exit_code(results)
 
 
 if __name__ == "__main__":
@@ -754,4 +767,4 @@ if __name__ == "__main__":
     runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
     if sys.argv[1:2] == ["small"]:
         sys.exit(asyncio.run(small_main(use_gate="--gate" in sys.argv)))
-    asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main())
+    sys.exit(asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main()))

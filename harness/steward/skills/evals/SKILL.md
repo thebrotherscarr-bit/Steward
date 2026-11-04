@@ -22,7 +22,8 @@ When the user asks you to run your evals:
    `.venv/Scripts/python.exe -W ignore harness/steward/step04_production_ready/evals.py <set>`
    (leave `<set>` out for the regression set). It takes several minutes; wait for it to finish.
 3. Report the pass count line and every line printed under each case, exactly as printed. Do not summarise
-   the failures away or explain them before you have reported them.
+   the failures away or explain them before you have reported them. The run exits with code 1 when any case
+   failed and 0 when all passed; an exit code of 1 is the result, not a broken run.
 4. Run a set once per request. As soon as the run has finished, mark its todo complete, then report. If you are
    reminded of an open todo whose run has already finished, mark it complete; never run the set again for it.
    Never run it again to get a better result either: a result that changes between runs is a fault in the
