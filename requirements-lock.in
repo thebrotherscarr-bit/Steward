@@ -1,0 +1,8 @@
+# Locked with pyproject.toml into requirements.lock (pip-compile on Windows; the command is in its header).
+# The build backend, as pyproject.toml's [build-system] names it, for the gate's pip install --no-build-isolation .
+setuptools>=68
+# Windows-only dependencies (pytest's and tqdm's colorama, mcp's pywin32), named here with their markers so the
+# lock keeps them and Linux (the gate) skips them. pip-compile drops a dependency whose marker is false where it
+# runs, so the Linux-only uvloop (uvicorn[standard]) is not in the lock: the gate installs with --no-deps.
+colorama ; sys_platform == "win32"
+pywin32 ; sys_platform == "win32"

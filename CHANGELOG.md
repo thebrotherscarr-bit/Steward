@@ -115,6 +115,10 @@ was never merged and has no entry.
 
 ### Added
 
+- CI: everything the gate runs on is pinned. `requirements.lock` (pip-compile, hashed, 218 packages) holds
+  pyproject's pins, the new `test` extra (pytest 9.2.0) and every dependency beneath them; the gate runs on
+  ubuntu-26.04 with Python 3.14.9 and pip 26.3, installs with `--require-hashes`, and pins its actions by commit
+  SHA. A test fails on a pin that was not re-locked, an action not pinned by SHA, or a `-latest` runner.
 - The `estate` skill: the map of Kyle's estate, Neiro (Manjuel, SecondBrain/Jesster, Atlas/Aurora, Ollama and
   Steward): what each part is, how it connects to him (Responses on 43120, MCP on 43121, SecondBrain's MCP on 43110,
   the door on 43111), who starts what, his own records, and his reach (his repository only, for now). The Charter

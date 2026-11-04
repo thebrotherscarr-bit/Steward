@@ -3843,3 +3843,29 @@ def test_the_diagnosis_drops_background_mcp_spans_and_keeps_every_span_of_an_ask
     [verdict] = [s for s in written if s.get("attributes", {}).get("optimizer.signal_source") == "eval_checks"]
     assert verdict["name"] == "eval_checks.verdict"
     assert verdict["attributes"]["feedback.summary"] == "No plan card."
+
+
+def test_every_pin_in_pyproject_is_locked_and_every_action_is_pinned_to_a_commit() -> None:
+    """2026-11-04, everything the gate runs on is pinned: each == pin in pyproject.toml's dependencies and test extra is
+    in requirements.lock at the same version (a pin bumped without re-locking fails here); each workflow action is a
+    full commit SHA with its release as a comment, and no job runs on a floating -latest image."""
+    import re
+    import tomllib
+
+    def canonical(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    root = steward._WORKING_DIR
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    lock = (root / "requirements.lock").read_text(encoding="utf-8")
+    locked = {canonical(name): version for name, version in re.findall(r"(?m)^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)", lock)}
+    for pin in [*project["dependencies"], *project["optional-dependencies"]["test"]]:
+        name, version = pin.split("==")
+        assert locked.get(canonical(name)) == version, f"{pin} is not in requirements.lock at that version: re-lock"
+    for workflow in (root / ".github" / "workflows").glob("*.yml"):
+        text = workflow.read_text(encoding="utf-8")
+        uses = re.findall(r"(?m)^\s*-?\s*uses:\s*(.+)$", text)
+        assert uses, workflow.name
+        for use in uses:
+            assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*", use.strip()), f"{workflow.name}: {use}"
+        assert "-latest" not in " ".join(re.findall(r"(?m)^\s*runs-on:\s*(.+)$", text)), workflow.name
