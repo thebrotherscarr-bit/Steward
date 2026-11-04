@@ -27,6 +27,9 @@ the command line) takes the handoff's first top priority (round_task, step 6, 6.
   the coder model, opened at 13,466 tokens before reading any code and read about 50 tokens a second.
   The coder is a workflow step, not an agent-as-tool, because MAF does not carry a child agent's approvals to
   its caller (Agent.as_tool: "Use a workflow when approval is interactive").
+* A round never changes what grades it (GRADERS: evals.py, eval_baselines.json, diagnosis_feedback.json,
+  .github/workflows/; test_harness.py takes only new tests at its end). edit_problem refuses such a hand-off, and
+  refuse_grader_writes, MAF function middleware on the coder and the diagnoser, refuses such a write.
 
 Run from worlds/steward:
     .venv\\Scripts\\python harness\\steward\\step04_production_ready\\improvement_loop_workflow.py "<task>"
@@ -36,12 +39,13 @@ Run from worlds/steward:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import copy
 import json
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,16 +61,20 @@ from agent_framework import (
     Executor,
     FileAccessProvider,
     FileCheckpointStorage,
+    FunctionInvocationContext,
     Message,
     Workflow,
     WorkflowBuilder,
     WorkflowContext,
+    function_middleware,
     handler,
     register_checkpoint_type,
     response_handler,
     set_agent_mode,
     tool,
 )
+from agent_framework._harness._file_access import _apply_replace, _apply_replace_lines, _line_edits
+from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent as steward  # noqa: E402
@@ -96,6 +104,108 @@ CODER_INSTRUCTIONS = (
     "file_access_read_lines only if you must. Keep the file's indentation and style. Change nothing else. Then "
     "stop and say, one line per edit, what you changed."
 )
+
+# What grades a round is never changed in one (audit, 2026-11-03: the improve skill only asked). Paths are relative to
+# the workspace; one ending in "/" is a folder.
+GRADERS = (
+    "harness/steward/step04_production_ready/evals.py",
+    "harness/steward/step04_production_ready/eval_baselines.json",
+    "harness/steward/step04_production_ready/diagnosis_feedback.json",
+    ".github/workflows/",
+)
+# The gate's own tests take a round's new test (the improve skill's step 4) and nothing else: new test functions added
+# after the file's last line. An existing test, changed or shadowed by a same-named one, would grade the round too.
+GATE_TESTS = "harness/steward/step04_production_ready/test_harness.py"
+GRADER_REFUSAL = (
+    "Refused: {file} grades the improvement round, so a round never changes it. Fix the harness itself; the gate's "
+    "checks judge the change."
+)
+GATE_TESTS_REFUSAL = (
+    "Refused: {file} holds the gate's own tests. A round only adds new test functions (def test_..., no decorator, a "
+    "name not already in the file) after its last line; it never changes or removes what is committed."
+)
+
+
+def _workspace_path(name: str) -> Path:
+    return (steward._WORKING_DIR.resolve() / str(name).replace("\\", "/")).resolve()  # noqa: SLF001
+
+
+def grader_named(name: str) -> str | None:
+    """The grader a workspace path is (or is inside), or None."""
+    path = _workspace_path(name)
+    for grader in GRADERS:
+        target = _workspace_path(grader)
+        if path == target or (grader.endswith("/") and path.is_relative_to(target)):
+            return grader
+    return None
+
+
+def adds_only_new_tests(old: str, new: str) -> bool:
+    """Whether new is old with only new, undecorated test functions after its last line (read by ast)."""
+    if not new.startswith(old if not old or old.endswith("\n") else old + "\n"):
+        return False
+    try:
+        before, after = ast.parse(old), ast.parse(new)
+    except SyntaxError:
+        return False
+    names = {getattr(statement, "name", None) for statement in before.body}
+    added = after.body[len(before.body):]
+    return bool(added) and all(
+        isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and s.name.startswith("test_") and s.name not in names and not s.decorator_list
+        for s in added
+    )
+
+
+def grader_write_problem(name: str, arguments: Mapping[str, Any]) -> str | None:
+    """Why a call to one of MAF's write tools may not run in a round, or None (any other call, any other file)."""
+    if name not in FileAccessProvider._WRITE_TOOL_NAMES:  # noqa: SLF001 - MAF's own set of its write tools
+        return None
+    file = str(arguments.get("file_name") or "")
+    if grader_named(file):
+        return GRADER_REFUSAL.format(file=file)
+    if _workspace_path(file) != _workspace_path(GATE_TESTS):
+        return None
+    old = _workspace_path(GATE_TESTS).read_text(encoding="utf-8")  # universal newlines: "\n", as Steward's store reads
+
+    def lf(text: Any) -> str:
+        return str(text or "").replace("\r\n", "\n")
+
+    try:  # the file the call would leave, by MAF's own edit functions (agent_framework/_harness/_file_access.py)
+        if name == FileAccessProvider.REPLACE_TOOL_NAME:
+            new, _ = _apply_replace(old, lf(arguments.get("old_string")), lf(arguments.get("new_string")), bool(arguments.get("replace_all")))
+        elif name == FileAccessProvider.REPLACE_LINES_TOOL_NAME:
+            new = _apply_replace_lines(old, _line_edits(list(arguments.get("edits") or [])))
+        elif name == FileAccessProvider.WRITE_TOOL_NAME:
+            new = lf(arguments.get("content"))
+        else:
+            return GATE_TESTS_REFUSAL.format(file=file)  # a delete
+    except (ValueError, KeyError, TypeError):
+        return None  # MAF's tool refuses it itself, with its reason, and writes nothing
+    # Against the committed file, so the round can still repair the test it added.
+    return None if adds_only_new_tests(gate_tests_at_head(), new) else GATE_TESTS_REFUSAL.format(file=file)
+
+
+def gate_tests_at_head() -> str:
+    """The gate's tests as committed ("\\n" endings), or as on disk outside a repository."""
+    shown = subprocess.run(
+        ["git", "show", f"HEAD:{GATE_TESTS}"], cwd=steward._WORKING_DIR, capture_output=True,  # noqa: SLF001
+        text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    text = shown.stdout if shown.returncode == 0 else _workspace_path(GATE_TESTS).read_text(encoding="utf-8")
+    return text.replace("\r\n", "\n")
+
+
+@function_middleware
+async def refuse_grader_writes(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """MAF function middleware on the round's coder and diagnoser: a write to a grader is answered with the reason and
+    never runs. Learn concepts/agents/middleware/termination: set context.result and do not call call_next."""
+    arguments = context.arguments
+    arguments = arguments.model_dump() if isinstance(arguments, BaseModel) else dict(arguments or {})
+    if refusal := grader_write_problem(context.function.name, arguments):
+        context.result = refusal
+        return
+    await call_next()
 
 
 @tool(name=HAND_TO_CODER)
@@ -135,13 +245,19 @@ def build_coder(client: Any = None) -> Agent[Any]:
         instructions=CODER_INSTRUCTIONS,
         context_providers=[files],
         default_options={**steward.OLLAMA_OPTIONS, "num_ctx": FIXER_CONTEXT},
+        # The graders' gate. It refuses after the card, as the write would run: no rule skips the card for it, so
+        # without the gate a grader's write is only ever a card, never written unasked.
+        middleware=[refuse_grader_writes],
     )
 
 
 async def build_diagnoser(stack: AsyncExitStack, client: Any = None, **build: Any) -> Any:
-    """The diagnoser: Steward's own harness on his own model, with hand_to_coder beside his tools."""
+    """The diagnoser: Steward's own harness on his own model, with hand_to_coder beside his tools, and the graders'
+    gate on his file tools (only here: outside a round he edits tests as ever)."""
     # A copy per build: MAF's workflow host refuses a tool object shared between requests (as git_commit).
-    return await steward.build_steward_agent(stack, client=client, extra_tools=[copy.copy(hand_to_coder)], **build)
+    agent = await steward.build_steward_agent(stack, client=client, extra_tools=[copy.copy(hand_to_coder)], **build)
+    agent.middleware = [refuse_grader_writes, *(agent.middleware or [])]
+    return agent
 
 
 @dataclass
@@ -172,12 +288,20 @@ def _lines(edit: Edit) -> list[str]:
 
 
 def edit_problem(edit: Edit) -> str | None:
-    """Why an edit cannot go to the coder, or None: a file in the workspace, real lines, a short span."""
+    """Why an edit cannot go to the coder, or None: a file in the workspace and no grader, real lines, a short span."""
     root = steward._WORKING_DIR.resolve()  # noqa: SLF001
     path = (root / edit.file).resolve()
     if not edit.file or not path.is_relative_to(root) or not path.is_file():
         return f"{edit.file!r} is not a file in the workspace."
+    if grader_named(edit.file):
+        return GRADER_REFUSAL.format(file=edit.file)
     count = len(_lines(edit))
+    added_from = len(gate_tests_at_head().splitlines()) + 1 if path == _workspace_path(GATE_TESTS) else 0
+    if added_from and edit.end_line != count and edit.start_line < added_from:  # neither the last line nor a new test
+        return (
+            f"{edit.file} lines {edit.start_line}-{edit.end_line}: the gate's own tests only take a new test after the "
+            f"file's last line; hand line {count} and say 'add after it'."
+        )
     if not 1 <= edit.start_line <= edit.end_line <= count:
         return f"{edit.file} lines {edit.start_line}-{edit.end_line}: the file has {count} lines."
     if edit.end_line - edit.start_line + 1 > EDIT_SPAN_MAX:

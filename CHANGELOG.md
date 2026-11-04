@@ -57,6 +57,11 @@ was never merged and has no entry.
 
 ### Added
 
+- An improvement round cannot change what grades it. `edit_problem` refuses a hand-off to `evals.py`,
+  `eval_baselines.json`, `diagnosis_feedback.json` or `.github/workflows/`, and `refuse_grader_writes` (MAF function
+  middleware on the coder and the diagnoser) refuses a write there; `test_harness.py` takes only new test functions at
+  its end, so a round's proving test still lands. The workflow's CHECK fails a code change where pytest collects no
+  tests (exit 5: "No tests ran for the changed files in ..."); a docs-only change is still not checked.
 - His workflow routes before it plans (live 2026-11-03: a plain question came back as an approval card, "No further
   action needed"). A classifier step, `route`, makes one structured-output call (`Route`, answer or task) and MAF's
   switch-case edge group sends a question to `answer`, which replies in words with reads only, and a task, or an
