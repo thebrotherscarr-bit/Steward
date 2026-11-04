@@ -4657,3 +4657,49 @@ def test_a_sessions_history_survives_rebuilding_the_agent(tmp_path: Path, monkey
     assert hosted.state_retention_days is steward.state_retention_days, "one retention rule for the host and history"
     for host in (console_app, mcp_app):
         assert "history_provider=steward_history_provider()" in inspect.getsource(host.main), host.__name__
+
+
+def test_check_and_repair_emit_progress_events_in_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """CHECK and REPAIR emit MAF custom workflow events (ctx.add_event, StewardProgress), in order: what the check runs,
+    whether it passed, and the repair's attempt. pytest's own check reports each folder it runs."""
+    import subprocess
+    from types import SimpleNamespace
+
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    client = ScriptedChatClient([plan, done, "First.", done, "Fixed.", '{"message": "Fix x in the module"}'])
+    results = [(False, "1 failed"), (True, "1 passed")]
+
+    def checks(_messages: Any) -> tuple[bool, str]:
+        wf.check_progress("checking: pytest -q tests")
+        return results.pop(0)
+
+    async def _go() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=checks, changes=lambda: ["x.py"])
+                events = [e async for e in workflow.run("Fix x.", stream=True)]
+                card = next(e for e in events if e.type == "request_info")
+                answer = {card.request_id: card.data.to_function_approval_response(True)}
+                events += [e async for e in workflow.run(stream=True, responses=answer)]
+        assert all(isinstance(e, wf.StewardProgress) for e in events if e.type == wf.PROGRESS)
+        return [f"{e.executor_id}: {e.data}" for e in events if e.type == wf.PROGRESS]
+
+    assert asyncio.run(_go()) == [
+        "check: checking: pytest -q tests", "check: check failed", "repair: repair attempt 2/3",
+        "check: checking: pytest -q tests", "check: check passed",
+    ]
+    # The real check names each folder before it runs pytest there.
+    said: list[str] = []
+    monkeypatch.setattr(wf, "changed_python_files", lambda _w: ["pkg/a.py", "b.py"])
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="1 passed", stderr=""))
+    monkeypatch.delenv(wf._CHECK_RUNNING, raising=False)
+    token = wf._CHECK_PROGRESS.set(said.append)
+    try:
+        wf.python_tests_for_changes([], tmp_path)
+    finally:
+        wf._CHECK_PROGRESS.reset(token)
+    assert said == ["checking: pytest -q b.py", "checking: pytest -q pkg"], said
