@@ -53,6 +53,7 @@ from agent_framework import (
     AgentContext,
     AgentModeProvider,
     AggregatingSkillsSource,
+    CachingSkillsSource,
     ChatContext,
     ChatMiddleware,
     ChatResponse,
@@ -1626,7 +1627,12 @@ async def build_steward_agent(
         # turns at SecondBrain's 20 approval rounds, so LineEndingFileStore keeps .env out and MAF's
         # read-only rule approves the reads in every run; writes still ask. Only an unattended run (evals)
         # also auto-approves skill scripts, as MAF's claw evals do.
-        auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule]
+        # Step 4, 4.5: reading a skill (load_skill, read_skill_resource) never asks a card, by MAF's own rule;
+        # run_skill_script runs code and keeps its card unless the run is unattended.
+        auto_approval_rules: list[Any] = [
+            FileAccessProvider.read_only_tools_auto_approval_rule,
+            SkillsProvider.read_only_tools_auto_approval_rule,
+        ]
         if part4 and auto_approve_skill_scripts:
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         # Kyle, 2026-10-31 ("just change the line"): every session starts in plan mode, MAF's own default
@@ -1652,7 +1658,11 @@ async def build_steward_agent(
             history_provider=history_provider,
             file_access_store=LineEndingFileStore(str(_WORKING_DIR)) if not part4 or enable_file_access else None,
             disable_file_memory=True,  # his scoped FileMemoryProvider is in context_providers
-            skills_provider=SkillsProvider(DeduplicatingSkillsSource(skills_source), disable_load_skill_approval=part4),
+            # Step 4, 4.5: MAF's CachingSkillsSource under the dedup, as SkillsProvider.from_paths composes it, so the
+            # skills are discovered once per build, not every turn. A caller's source is never cached by MAF itself.
+            skills_provider=SkillsProvider(
+                DeduplicatingSkillsSource(CachingSkillsSource(skills_source)), disable_load_skill_approval=part4
+            ),
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
