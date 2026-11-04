@@ -34,6 +34,17 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 5, piece 5.3: the memory eval case, `evals.py memory`. Two requests run through his workflow (`run_steward`),
+  each a new conversation, sharing one throwaway automatic memory (`isolated_memory_store`; file memory is not
+  shared, so a recall proves MAF's MemoryContextProvider carried it):
+  the first states a fact about the sample project that cannot be guessed (its release codename) and asks him to
+  remember it, the second asks for it, and `memory_recalled` passes when the answer carries it. The old `plan`,
+  `roundtrip` and `walkthrough` sets retire (their mains, queries, evaluators and helpers only they used); `steps`
+  keeps its own query and `STEPS_MUST_NAME`. Their two tests moved: the plan that does not name the work now fails
+  the steps set's `plan_step` (`test_a_plan_that_does_not_name_the_work_fails_the_plan_step_eval`), and the denied
+  commit card runs on a small ask, scored by `commit_by_tool` and `commit_message_specific`
+  (`test_the_small_asks_deny_a_commit_card_and_nothing_is_committed`). New:
+  `test_the_memory_eval_recalls_in_a_new_conversation_what_the_first_one_saved`.
 - Step 5, pieces 5.1 and 5.2: memory across conversations, MAF's way. MAF's `MemoryContextProvider` sits beside his
   history (not in its place: as the history provider it drops the conversation's own messages, tested 2026-11-03).
   After each turn one call on his own model extracts at most five durable facts into topic files under a `MEMORY.md`
