@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from agent_framework import InMemoryHistoryProvider
+from agent_framework import FileSessionStore, InMemoryHistoryProvider
 from agent_framework_hosting import AgentState
 from agent_framework_hosting_mcp import AgentMCPTool
 from dotenv import load_dotenv
@@ -44,7 +44,9 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent  # noqa: E402
+from agent import _WORKING_DIR, build_steward_agent, steward_memory_store  # noqa: E402
+
+MCP_SESSIONS_DIR = _WORKING_DIR / "storage" / "mcp-sessions"
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -55,7 +57,8 @@ PORT = 43121
 
 def build_mcp_app(agent: Any) -> Starlette:
     """The sample's session-aware server, with Steward as its agent."""
-    state = AgentState(agent)
+    # Step 5 (5.2): each session_id's conversation is kept on disk, so Manjuel's sessions survive a restart.
+    state = AgentState(agent, session_store=FileSessionStore(MCP_SESSIONS_DIR))
     agent_tool = AgentMCPTool(
         state,
         argument_description="The request for the hosted agent.",
@@ -113,7 +116,9 @@ async def main() -> None:
 
     async with AsyncExitStack() as stack:
         # Each conversation's history lives in its session, as in the sample (and hosted.py).
-        agent = await build_steward_agent(stack, history_provider=InMemoryHistoryProvider())
+        agent = await build_steward_agent(
+            stack, history_provider=InMemoryHistoryProvider(), memory_store=steward_memory_store()
+        )
         async with agent:
             app = build_mcp_app(agent)
             await uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="info")).serve()

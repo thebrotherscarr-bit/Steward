@@ -68,6 +68,8 @@ from agent_framework import (
     MCPSkillsSource,
     FunctionInvocationContext,
     MCPStreamableHTTPTool,
+    MemoryContextProvider,
+    MemoryFileStore,
     Message,
     MiddlewareTermination,
     ResponseStream,
@@ -1243,40 +1245,30 @@ async def _connect_secondbrain(stack: AsyncExitStack, tools: list[str] = _SECOND
 
 
 # <automatic_memory>
-_MEMORY_DIR = Path.cwd() / "agent-memory"
-_MEMORY_SCOPE = "kyle"
+# Step 5 (5.1, 5.2): MAF's MemoryContextProvider beside his conversation history. After each turn one call on his own
+# model extracts at most five durable facts into topic files under a MEMORY.md index; before each turn the index and
+# the three best-matching topics are put in front of him; transcripts are kept and topics consolidated over time. One
+# owner, "steward", so what he learns in one conversation is there in the next. A host passes the store (memory_store);
+# evals pass a throwaway one. It replaces the unused Mem0 path (2026-11-03: a second store and an embedder for what
+# MAF's own provider does; its store is in agent-file-memory/attic/2026-11-03-old-session-memory/mem0-store).
+MEMORY_DIR = _WORKING_DIR / "agent-memory"
+MEMORY_OWNER_KEY = "steward_memory_owner"
+MEMORY_OWNER = "steward"
 
 
-async def _maybe_enable_local_memory() -> Any:
-    """Enable automatic memory (the guide's Foundry memory, run locally with Mem0 on Ollama).
-
-    One fixed user scope, so extracted facts are recalled across sessions. Returns None (and says
-    so) when Ollama or the store cannot be reached, so Steward still starts.
-    """
-    try:
-        from agent_framework_mem0 import Mem0ContextProvider
-        from mem0 import AsyncMemory
-
-        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        _MEMORY_DIR.mkdir(exist_ok=True)
-        memory = AsyncMemory.from_config({
-            "llm": {"provider": "ollama", "config": {"model": os.environ.get("OLLAMA_MODEL", "gpt-oss:20b"), "ollama_base_url": host}},
-            "embedder": {"provider": "ollama", "config": {"model": "nomic-embed-text-v2-moe", "ollama_base_url": host, "embedding_dims": 768}},
-            "vector_store": {"provider": "qdrant", "config": {"path": str(_MEMORY_DIR / "qdrant"), "collection_name": "steward", "embedding_model_dims": 768, "on_disk": True}},
-            "history_db_path": str(_MEMORY_DIR / "history.db"),
-            # As the guide's Foundry store (user_profile_enabled=True, chat_summary_enabled=False):
-            # keep durable facts about the user, not a log of what the assistant did.
-            "custom_instructions": (
-                "Extract only durable facts about the user: their preferences, conventions, tools, "
-                "projects, goals and ways of working. Do not store what the assistant did, explained, "
-                "planned or committed, and do not store one-off requests."
-            ),
-        })
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Automatic memory disabled: %s: %s", type(exc).__name__, exc)
+def steward_memory_store(base: str | Path | None = None) -> MemoryFileStore | None:
+    """His memory store: MAF's MemoryFileStore under MEMORY_DIR (or base), owned by MEMORY_OWNER. The default store
+    is off when STEWARD_AUTOMATIC_MEMORY is "off" (the harness tests set it); a base given here is always used."""
+    if base is None and os.environ.get("STEWARD_AUTOMATIC_MEMORY", "").lower() == "off":
         return None
-    logger.info("Automatic memory enabled (local Mem0, %s).", _MEMORY_DIR)
-    return Mem0ContextProvider(mem0_client=memory, user_id=_MEMORY_SCOPE, search_user_id=_MEMORY_SCOPE)
+    return MemoryFileStore(base or MEMORY_DIR, owner_state_key=MEMORY_OWNER_KEY)
+
+
+async def memory_owner(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Every session he runs in belongs to his one memory owner (MemoryFileStore reads it from the session's state)."""
+    if context.session is not None:
+        context.session.state.setdefault(MEMORY_OWNER_KEY, MEMORY_OWNER)
+    await call_next()
 
 
 # </automatic_memory>
@@ -1442,6 +1434,7 @@ async def build_steward_agent(
     plan_reply_check: Callable[[str], Any] | None = None,
     default_options: dict[str, Any] | None = None,
     extra_tools: Sequence[Any] = (),
+    memory_store: Any = None,
 ) -> Agent[Any]:
     """Build the production-ready Steward harness agent.
 
@@ -1462,6 +1455,8 @@ async def build_steward_agent(
         default_options: Chat options sent with every model call (MAF's create_harness_agent default_options),
             such as Ollama's num_ctx for the window the model is loaded with.
         extra_tools: Tools a caller adds to his own (the improvement loop's hand_to_coder, step 6).
+        memory_store: His automatic memory's store (step 5: MAF's MemoryContextProvider, beside his history).
+            Hosts pass steward_memory_store(); evals pass a throwaway one; None leaves it off.
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -1505,11 +1500,7 @@ async def build_steward_agent(
                 disable_web_search=True,
             )
         if part == 2:
-            context_providers: list[Any] = []
-            local_memory = await _maybe_enable_local_memory()
-            if local_memory is not None:
-                await stack.enter_async_context(local_memory)
-                context_providers.append(local_memory)
+            context_providers: list[Any] = [MemoryContextProvider(store=memory_store)] if memory_store is not None else []
             return create_harness_agent(
                 client=client or OllamaChatClient(),
                 name="Steward",
@@ -1519,6 +1510,7 @@ async def build_steward_agent(
                 file_access_store=FileSystemAgentFileStore(str(_WORKING_DIR)),
                 auto_approval_rules=[FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule],
                 context_providers=context_providers or None,
+                middleware=[memory_owner] if memory_store is not None else None,
                 mode_provider=AgentModeProvider(default_mode="execute"),
                 max_context_window_tokens=65_536,
                 max_output_tokens=8_192,
@@ -1606,8 +1598,12 @@ async def build_steward_agent(
         # he saves in one session is in front of him in the next ("Pass an explicit scope to group
         # memories differently ... across sessions"); the factory's per-session one is switched off.
         part3_providers.append(
-            FileMemoryProvider(file_memory_store or FileSystemAgentFileStore(Path.cwd() / "agent-file-memory"), scope=_FILE_MEMORY_SCOPE)
+            FileMemoryProvider(file_memory_store or FileSystemAgentFileStore(_WORKING_DIR / "agent-file-memory"), scope=_FILE_MEMORY_SCOPE)
         )
+        # Step 5: file memory holds what he deliberately keeps; automatic memory, the facts that should just stick
+        # (the guide's Part 2 pairs the two).
+        if memory_store is not None:
+            part3_providers.append(MemoryContextProvider(store=memory_store))
         if not part4 or enable_shell:
             shell = await stack.enter_async_context(_build_shell())
             # Kyle, 2026-10-29: MAF's run_shell text never names the shell, so it is named here
@@ -1666,7 +1662,7 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
-            middleware=[steward_world_only, *gate_middleware, repair_tool_names, record_called_tools],
+            middleware=[memory_owner, steward_world_only, *gate_middleware, repair_tool_names, record_called_tools],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
             # The compaction budget is the window he asks Ollama for (OLLAMA_OPTIONS), so the two cannot drift.
@@ -1721,10 +1717,6 @@ async def build_steward_agent(
         auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         logger.info("Skill script approval disabled (unattended run).")
 
-    local_memory = await _maybe_enable_local_memory()
-    if local_memory is not None:
-        await stack.enter_async_context(local_memory)
-
     # <create_agent>
     return create_harness_agent(
         client=client,
@@ -1746,8 +1738,9 @@ async def build_steward_agent(
         context_providers=[
             MontyCodeActProvider(approval_mode="never_require"),
             *([CharterProvider(secondbrain)] if secondbrain is not None else []),
-            *([local_memory] if local_memory is not None else []),
+            *([MemoryContextProvider(store=memory_store)] if memory_store is not None else []),
         ],
+        middleware=[memory_owner] if memory_store is not None else None,
         mode_provider=AgentModeProvider(default_mode="execute"),
         max_context_window_tokens=_STEWARD_CONTEXT,
         max_output_tokens=8_192,

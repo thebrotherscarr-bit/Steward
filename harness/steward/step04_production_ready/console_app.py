@@ -26,7 +26,7 @@ from opentelemetry.trace.span import format_trace_id
 _HARNESS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_HARNESS_DIR))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent  # noqa: E402
+from agent import build_steward_agent, steward_memory_store  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 from console import build_observers_with_planning, run_agent_async  # noqa: E402
 
@@ -48,7 +48,7 @@ async def main() -> None:
     with get_tracer().start_as_current_span("Steward Console Session", kind=trace.SpanKind.CLIENT) as current_span:
         print(f"Trace ID: {format_trace_id(current_span.get_span_context().trace_id)}")
         async with AsyncExitStack() as stack:
-            agent = await build_steward_agent(stack)
+            agent = await build_steward_agent(stack, memory_store=steward_memory_store())
             async with agent:
                 await run_agent_async(
                     agent,

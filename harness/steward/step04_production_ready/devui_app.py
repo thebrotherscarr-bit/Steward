@@ -35,7 +35,7 @@ from agent_framework_devui._server import DevServer
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent  # noqa: E402
+from agent import build_steward_agent, steward_memory_store  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -56,7 +56,7 @@ async def main() -> None:
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
 
     async with AsyncExitStack() as stack:
-        agent = await stack.enter_async_context(await build_steward_agent(stack))
+        agent = await stack.enter_async_context(await build_steward_agent(stack, memory_store=steward_memory_store()))
         auth_token = os.getenv("DEVUI_AUTH_TOKEN") or secrets.token_urlsafe(32)
         server = build_dev_server(agent, auth_token)
 
