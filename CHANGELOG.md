@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A misspelled tool name is repaired on streamed calls too (live 2026-11-03: `totos_complete`, "not found"). Streamed,
+  the context's stream hooks were lost, so `repair_tool_names` now wraps the stream (`names_repaired_as_they_pass`) as
+  `recover_text_tool_calls` does; nothing is held back. The test suite no longer writes `halo_traces/` (an autouse
+  fixture sends traces, metrics and logs to each test's temp folder).
 - A tool call written as plain text runs as that call. gpt-oss sometimes ended a turn with a tool's arguments as its
   reply (live 2026-11-03: `{"directory":"steward/working","glob_pattern":""}`), so nothing ran. `recover_text_tool_calls`
   (chat middleware, inside MAF's tool loop) turns one JSON object that fits exactly one offered tool into that call;
