@@ -4501,3 +4501,34 @@ def test_an_answer_given_before_the_todo_nudge_is_not_given_again(monkeypatch: A
     texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
     assert texts == [answer], texts
     assert not hosted.repeats_what_was_shown(answer, "Juniper."), "new words after a nudge are still shown"
+
+
+def test_a_request_naming_only_read_only_tools_is_answered_even_when_the_router_says_task() -> None:
+    """Live 2026-11-04 13:41: "What is the estate status right now? Read it with estate_status and list each service
+    with up or down." was routed to PLAN (a plan card and todos). A request that names one of the Estate's reads and
+    asks for no change goes to ANSWER whatever the router's model says; a change still goes to PLAN."""
+    import steward_workflow as wf
+
+    live = "What is the estate status right now? Read it with estate_status and list each service with up or down."
+    plan = '{"type": "approval", "questions": [{"message": "Do it."}], "steps": ["Do it"]}'
+    assert "estate_status" in wf.ROUTE_PROMPT, "the router's instruction shows a read as an answer"
+
+    def run(request: str, replies: list[Any]) -> tuple[ScriptedChatClient, list[Any]]:
+        client = ScriptedChatClient(replies, routes=['{"kind": "task"}'])
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent).run(request, stream=True)]
+
+        return client, asyncio.run(_go())
+
+    client, events = run(live, ["glass: up"])
+    assert not [e for e in events if e.type == "request_info"], "a read asks no approve_plan card"
+    assert [c["options"].get("response_format") for c in client.calls] == [None], "ANSWER is asked for no plan"
+    assert said(events) == ["glass: up"], said(events)
+
+    for request in ("Restart the glass", "Fix the bug in inventory.py", "Read estate_status, then restart the glass"):
+        client, events = run(request, [plan])
+        assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], request
