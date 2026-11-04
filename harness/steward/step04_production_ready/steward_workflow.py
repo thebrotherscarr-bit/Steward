@@ -46,11 +46,12 @@ Run one request through it on Ollama (PLAN only reads; it stops at the approval)
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import sys
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,6 +88,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for th
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 # A fixed name: the host checks a reply's rebuilt graph against the stored one by name and signature.
 WORKFLOW_NAME = "steward"
@@ -269,14 +272,7 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
 
     @agent_middleware
     async def approved_plan_turn_(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
-        steps = next(
-            (
-                m.additional_properties[APPROVED_PLAN_KEY]
-                for m in context.messages or []
-                if APPROVED_PLAN_KEY in (getattr(m, "additional_properties", None) or {})
-            ),
-            None,
-        )
+        steps = approved_steps(context.messages)
         if steps and context.session is not None:
             set_agent_mode(
                 context.session, "execute", source_id=mode_provider.source_id, available_modes=mode_provider.available_modes
@@ -288,6 +284,100 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
         await call_next()
 
     return approved_plan_turn_
+
+
+def approved_steps(messages: Sequence[Message] | None) -> list[str] | None:
+    """The approved plan's steps carried on a message of this run (execute_message, Repair, AskCommit), or None."""
+    return next(
+        (
+            m.additional_properties[APPROVED_PLAN_KEY]
+            for m in messages or []
+            if APPROVED_PLAN_KEY in (getattr(m, "additional_properties", None) or {})
+        ),
+        None,
+    )
+
+
+# Per-step model options (2026-11-04), so each step's reasoning effort and sampling can be measured on its own:
+# STEWARD_<STEP>_THINK, STEWARD_<STEP>_TEMPERATURE and STEWARD_<STEP>_SEED, read once when the graph is built. A step
+# with none set sends exactly the options it sent before. REPAIR runs on EXECUTE's executor and session (Repair sends
+# to EXECUTE_STEP), so it is told apart by the REPAIR_TODO its message carries.
+STEP_OPTION_STEPS = (ROUTE_STEP, PLAN_STEP, ANSWER_STEP, EXECUTE_STEP, REPAIR_STEP)
+_THINK_VALUES: dict[str, str | bool] = {"low": "low", "medium": "medium", "high": "high", "true": True, "false": False}
+# Which step an AgentExecutor's session belongs to, and whether EXECUTE's session is on a repair: session state, so
+# both are in the workflow's checkpoint across a card's pause (AgentExecutor.on_checkpoint_save, agent_session).
+STEP_KEY = "steward_step"
+_REPAIRING_KEY = "steward_repairing"
+
+
+def step_options_from_env(environ: Mapping[str, str] | None = None) -> dict[str, dict[str, Any]]:
+    """Each step's option overrides from the environment; a step with none set is absent. A bad value raises.
+
+    think is Ollama's own top-level chat argument: MAF's OllamaChatClient passes a key that is not a model option to
+    AsyncClient.chat unchanged (agent_framework_ollama/_chat_client.py, _prepare_options lines 454-464, then
+    **options_dict at 387 and 413), and ollama's chat takes bool or "low" | "medium" | "high" (ollama/_client.py 815),
+    as improvement_loop.structured already sends it. temperature and seed are ChatOptions MAF puts in Ollama's nested
+    `options` (OLLAMA_MODEL_OPTIONS, _chat_client.py 248 and 252); temperature is held to MAF's own range
+    (agent_framework/_types.py validate_chat_options: 0.0 to 2.0).
+    """
+    environ = os.environ if environ is None else environ
+    steps: dict[str, dict[str, Any]] = {}
+    for step in STEP_OPTION_STEPS:
+        prefix = f"STEWARD_{step.upper()}_"
+        options: dict[str, Any] = {}
+        if raw := environ.get(f"{prefix}THINK", "").strip():
+            if raw.lower() not in _THINK_VALUES:
+                raise ValueError(f"{prefix}THINK={raw!r}: use low, medium, high, true or false")
+            options["think"] = _THINK_VALUES[raw.lower()]
+        if raw := environ.get(f"{prefix}TEMPERATURE", "").strip():
+            try:
+                temperature = float(raw)
+            except ValueError:
+                temperature = -1.0
+            if not 0.0 <= temperature <= 2.0:
+                raise ValueError(f"{prefix}TEMPERATURE={raw!r}: use a number from 0.0 to 2.0")
+            options["temperature"] = temperature
+        if raw := environ.get(f"{prefix}SEED", "").strip():
+            try:
+                options["seed"] = int(raw)
+            except ValueError:
+                raise ValueError(f"{prefix}SEED={raw!r}: use a whole number") from None
+        if options:
+            steps[step] = options
+    return steps
+
+
+def step_options_turn(step_options: Mapping[str, Mapping[str, Any]]) -> Callable[..., Awaitable[None]]:
+    """Agent middleware: this run's options get its step's overrides, as plan_mode_turns sets response_format.
+
+    context.options is the run's options (agent_framework/_middleware.py 2122, AgentMiddlewareLayer._middleware_handler),
+    which Agent.run merges over the agent's default_options (agent_framework/_agents.py 1552), so one agent and one
+    client serve every step. The step is the run's session's STEP_KEY; EXECUTE's session is on REPAIR from a message
+    carrying REPAIR_TODO until a message carries another approved plan, so a repair's resumed run after a card is too.
+    """
+
+    @agent_middleware
+    async def step_options_turn_(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        session = context.session
+        step = session.state.get(STEP_KEY) if session is not None else None
+        if session is not None and step == EXECUTE_STEP:
+            steps = approved_steps(context.messages)
+            if steps is not None:
+                session.state[_REPAIRING_KEY] = list(steps) == [REPAIR_TODO]
+            if session.state.get(_REPAIRING_KEY):
+                step = REPAIR_STEP
+        if overrides := step_options.get(str(step)):
+            context.options = {**(context.options or {}), **overrides}
+        await call_next()
+
+    return step_options_turn_
+
+
+def step_session(agent: Agent[Any], step: str) -> Any:
+    """A new session of the agent's, marked as this step's (STEP_KEY), for the step's AgentExecutor."""
+    session = agent.create_session()
+    session.state[STEP_KEY] = step
+    return session
 
 
 @dataclass
@@ -544,22 +634,28 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
 
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
+    step_options = step_options_from_env()  # a bad value stops the build here, before any call
     agent.middleware = [
         approved_plan_turn(modes, todos),
         plan_mode_turns(modes, response_format=StewardPlan),
+        # Only when a step has overrides: unset, every call's options are what they were before.
+        *([step_options_turn(step_options)] if step_options else []),
         *(agent.middleware or []),
     ]
     # His own window and keep-alive on the router's call, so Ollama answers it with the model as loaded.
-    route = Router(agent.client, {k: v for k, v in (agent.default_options or {}).items() if k in OLLAMA_OPTIONS})
+    base = {k: v for k, v in (agent.default_options or {}).items() if k in OLLAMA_OPTIONS}
+    for step, overrides in step_options.items():
+        logger.info("Steward step %s: model options %s", step, {**base, **overrides})
+    route = Router(agent.client, {**base, **step_options.get(ROUTE_STEP, {})})
     # The answer step's own session says it answers in words: plan_mode_turns asks it for no StewardPlan. The session,
     # with its state, is in the workflow's checkpoint (AgentExecutor.on_checkpoint_save).
-    answer_session = agent.create_session()
+    answer_session = step_session(agent, ANSWER_STEP)
     answer_session.state[IN_WORDS_KEY] = True
     answer = AgentExecutor(agent, session=answer_session, id=ANSWER_STEP)
-    plan = AgentExecutor(agent, id=PLAN_STEP)
+    plan = AgentExecutor(agent, session=step_session(agent, PLAN_STEP), id=PLAN_STEP)
     read_plan = ReadPlan()
     ask_approval = AskApproval()
-    execute = AgentExecutor(agent, id=EXECUTE_STEP)
+    execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
     check = Check(checks)
     repair = Repair()
     ask_commit = AskCommit()

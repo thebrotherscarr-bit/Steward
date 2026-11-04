@@ -1186,6 +1186,141 @@ def test_a_question_is_answered_in_words_and_a_task_or_an_unclear_route_is_plann
         assert client.calls[0]["options"].get("response_format") is wf.StewardPlan, route
 
 
+STEP_OPTION_NAMES = [f"STEWARD_{s.upper()}_{o}" for s in ("route", "plan", "answer", "execute", "repair") for o in ("THINK", "TEMPERATURE", "SEED")]
+
+
+def _run_every_step(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> tuple[ScriptedChatClient, ScriptedChatClient]:
+    """The whole graph on the scripted client with only ``env``'s step options set (his .env may set others): a task
+    routed, planned, approved, executed, failed once, repaired, passed and committed; then a question answered."""
+    import steward_workflow as wf
+
+    for name in STEP_OPTION_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    task = ScriptedChatClient([plan, done, "First.", done, "Fixed.", done, "Committed."])
+    question = ScriptedChatClient([ANSWERED], routes=['{"kind": "answer"}'])
+    results = [(False, "1 failed"), (True, "1 passed")]
+
+    async def _go() -> None:
+        for client in (task, question):
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent, checks=lambda _messages: results.pop(0))
+                    events = [e async for e in workflow.run("Fix x." if client is task else QUESTION, stream=True)]
+                    if client is task:
+                        card = next(e for e in events if e.type == "request_info")
+                        answer = {card.request_id: card.data.to_function_approval_response(True)}
+                        assert said([e async for e in workflow.run(stream=True, responses=answer)])[-1] == "Committed."
+
+    asyncio.run(_go())
+    # plan; execute's two calls; the repair's two (on EXECUTE's executor); the commit's two
+    assert len(task.calls) == 7 and len(question.calls) == 1, (len(task.calls), len(question.calls))
+    return task, question
+
+
+def _sent(call: dict[str, Any]) -> dict[str, Any]:
+    """A call's options as values: the tools by name, the rest as they are."""
+    return {k: sorted(offered_tools(call)) if k == "tools" else v for k, v in call["options"].items()}
+
+
+def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and_unset_change_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-11-04: to measure whether gpt-oss does better with another reasoning effort or temperature per step,
+    STEWARD_<STEP>_THINK / _TEMPERATURE / _SEED reach that step's call and no other (the run's options, which Agent.run
+    merges over his defaults; the router's own options), and with none set every call is as it was."""
+    import steward_workflow as wf
+
+    task, question = _run_every_step(monkeypatch, {})
+    base = {"max_tokens": 8192, "tool_choice": "auto", "num_ctx": steward.OLLAMA_OPTIONS["num_ctx"], "keep_alive": "30m"}
+    [routed] = task.route_calls
+    assert routed["options"] == {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.Route}, routed
+    unset = [{k: v for k, v in c["options"].items() if k not in ("tools", "instructions")} for c in task.calls + question.calls]
+    assert unset == [{**base, "response_format": wf.StewardPlan}, *[base] * 7], "with nothing set, today's options"
+
+    env = {
+        "STEWARD_ROUTE_THINK": "false", "STEWARD_ROUTE_TEMPERATURE": "0",
+        "STEWARD_PLAN_THINK": "high",
+        "STEWARD_ANSWER_THINK": "medium", "STEWARD_ANSWER_SEED": "11",
+        "STEWARD_EXECUTE_THINK": "low", "STEWARD_EXECUTE_TEMPERATURE": "0.3", "STEWARD_EXECUTE_SEED": "7",
+        "STEWARD_REPAIR_THINK": "TRUE",
+    }  # fmt: skip
+    set_task, set_question = _run_every_step(monkeypatch, env)
+    added = {"think": None, "temperature": None, "seed": None}
+    wanted = [
+        {"think": "high"},  # plan
+        {"think": "low", "temperature": 0.3, "seed": 7},  # execute
+        {"think": "low", "temperature": 0.3, "seed": 7},
+        {"think": True},  # repair, on EXECUTE's executor and session
+        {"think": True},
+        {},  # commit: no step options
+        {},
+        {"think": "medium", "seed": 11},  # answer
+    ]
+    calls = set_task.calls + set_question.calls
+    assert [{k: c["options"][k] for k in added if k in c["options"]} for c in calls] == wanted
+    for before, after, extra in zip(task.calls + question.calls, calls, wanted, strict=True):
+        assert _sent(after) == {**_sent(before), **extra}, "a step's options change only their own keys"
+    [routed] = set_task.route_calls
+    assert routed["options"] == {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.Route, "think": False, "temperature": 0.0}
+
+
+def test_a_bad_step_option_stops_the_build_and_each_step_with_overrides_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    import steward_workflow as wf
+
+    for name in STEP_OPTION_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+    def build() -> None:
+        async def _go() -> None:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=ScriptedChatClient(), enable_shell=False)
+                async with agent:
+                    wf.build_steward_workflow(agent)
+
+        asyncio.run(_go())
+
+    for name, value in (("STEWARD_PLAN_THINK", "extreme"), ("STEWARD_EXECUTE_TEMPERATURE", "hot"), ("STEWARD_EXECUTE_TEMPERATURE", "2.5"), ("STEWARD_ROUTE_SEED", "1.5")):
+        monkeypatch.setenv(name, value)
+        with pytest.raises(ValueError, match=name):
+            build()
+        monkeypatch.delenv(name)
+
+    monkeypatch.setenv("STEWARD_PLAN_THINK", "high")
+    with caplog.at_level(logging.INFO, logger=wf.__name__):
+        build()
+    lines = [r.getMessage() for r in caplog.records if r.name == wf.__name__]
+    assert lines == [f"Steward step plan: model options {{'num_ctx': {steward.OLLAMA_OPTIONS['num_ctx']}, 'keep_alive': '30m', 'think': 'high'}}"], lines
+
+
+def test_mafs_ollama_client_sends_a_string_think_to_ollama_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OllamaChatOptions types think as bool, but MAF passes it through to ollama's chat, which takes "low" | "medium" |
+    "high" for gpt-oss; temperature and seed go in Ollama's options. No network: ollama's AsyncClient.chat records."""
+    import ollama
+    from agent_framework.ollama import OllamaChatClient
+
+    sent: list[dict[str, Any]] = []
+
+    async def chat(self: Any, **kwargs: Any) -> Any:
+        sent.append(kwargs)
+        return ollama.ChatResponse(model="steward:1", message=ollama.Message(role="assistant", content="ok"), done=True)
+
+    monkeypatch.setattr(ollama.AsyncClient, "chat", chat)
+    client = OllamaChatClient(model="steward:1", host="http://127.0.0.1:9")
+    reply = asyncio.run(client.get_response([Message(role="user", contents=["hi"])], options={"think": "high", "temperature": 0.2, "seed": 3}))
+    assert reply.text == "ok"
+    [kwargs] = sent
+    assert kwargs["think"] == "high" and kwargs["options"] == {"temperature": 0.2, "seed": 3}, kwargs
+
+
 def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
     """Piece 4: CHECK runs after EXECUTE, model-free. Failing with attempts left, REPAIR hands EXECUTE the output in
     its own session; passing, REPORT gives his answer with the result; after MAX_ATTEMPTS, REPORT says they still

@@ -80,6 +80,10 @@ was never merged and has no entry.
 
 ### Added
 
+- Per-step model options, for measuring gpt-oss: `STEWARD_<STEP>_THINK` (low, medium, high, true, false),
+  `_TEMPERATURE` (0 to 2) and `_SEED` for route, plan, answer, execute and repair, read once at build and logged; a
+  bad value stops the build. Unset, every call's options are unchanged. Plan, answer and execute get them through
+  `step_options_turn` (agent middleware setting the run's options, as `plan_mode_turns` sets `response_format`).
 - `pr_checks`: he waits through the door's `git_pr` list for a pull request to open (on the owner's Approve) and for
   its checks to pass or fail, asking every 30 s for up to 20 minutes, no card; the github skill calls it before
   reporting (Kyle, 2026-11-04: "make the doors push and PR results visible"). A push's own outcome is not readable by
