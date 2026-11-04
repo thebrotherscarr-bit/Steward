@@ -25,11 +25,14 @@ from typing import Any
 
 from agent_framework import (
     BaseChatClient,
+    BaseEmbeddingClient,
     ChatMiddlewareLayer,
     ChatResponse,
     ChatResponseUpdate,
     Content,
+    Embedding,
     FunctionInvocationLayer,
+    GeneratedEmbeddings,
     Message,
     ResponseStream,
 )
@@ -235,6 +238,106 @@ def test_env_is_never_read_searched_or_listed(tmp_path: Path) -> None:
     client, _, response = run_steward([read, "Refused."], "Read .env.")
     assert not approval_requests(response)
     assert any("never read" in r for r in function_results(client.calls[1]))
+
+
+class WordEmbeddings(BaseEmbeddingClient):
+    """A deterministic stand-in for his embedder (MAF's BaseEmbeddingClient, no Ollama): each word is hashed to one of
+    the vector's dimensions, so texts that share words are close. Records every text it embeds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts: list[str] = []
+
+    async def get_embeddings(self, values: Any, *, options: Any = None) -> Any:
+        import re
+        import zlib
+
+        self.texts.extend(values)
+        vectors = []
+        for value in values:
+            vector = [0.0] * steward.CODE_EMBED_DIMENSIONS
+            vector[-1] = 0.01  # never a zero vector
+            for word in re.findall(r"[a-z]+", value.lower()):
+                vector[zlib.crc32(word.encode()) % (steward.CODE_EMBED_DIMENSIONS - 1)] += 1.0
+            vectors.append(Embedding(vector=vector, dimensions=len(vector)))
+        return GeneratedEmbeddings(vectors, options=options)
+
+
+def code_repo(root: Path) -> Path:
+    """A small git workspace: two functions, a Markdown section, a sample output under working/ and an untracked file."""
+    import subprocess
+
+    (root / "working").mkdir()
+    (root / "shop.py").write_text(
+        "import math\n\n\ndef order_total(items):\n    return sum(price * quantity for price, quantity in items)\n\n\n"
+        "# Mail goes out through the relay.\ndef send_receipt_email(address):\n    return f'mail receipt to {address}'\n",
+        encoding="utf-8",
+    )
+    (root / "notes.md").write_text("# Notes\n\nIntro.\n\n## Deploying\n\nRestart the server after a deploy.\n", encoding="utf-8")
+    (root / "working" / "out.py").write_text("def send_receipt_email():\n    pass\n", encoding="utf-8")
+    (root / "loose.py").write_text("def send_receipt_email():\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "shop.py", "notes.md", "working/out.py"], cwd=root, check=True)
+    return root
+
+
+def test_search_code_finds_a_chunk_by_meaning_and_embeds_a_changed_file_again(tmp_path: Path) -> None:
+    """His search_code (MAF's create_vector_search_tool over InMemoryCollection): the query finds the right chunk of the
+    tracked files, as path:start-end and its text; working/ and untracked files are never indexed; the index is built on
+    the first search, reused by the next, and a file whose mtime changed is embedded again."""
+    embedder = WordEmbeddings()
+    index = steward.CodeIndex(code_repo(tmp_path), embedder)
+    search = steward.code_search_tool(index)
+
+    async def ask(query: str) -> list[str]:
+        return [c.text for c in await search.invoke(arguments={"query": query})]
+
+    assert not embedder.texts, "nothing is embedded before the first search"
+    hits = asyncio.run(ask("send the receipt email"))
+    assert hits[0].startswith("shop.py:8-10\n# Mail goes out through the relay.\ndef send_receipt_email"), hits
+    assert asyncio.run(ask("restart the server after deploy"))[0].startswith("notes.md:5-7\n## Deploying"), "a Markdown section"
+    paths = {text.split("\n", 1)[0] for text in embedder.texts}
+    assert paths <= {"shop.py", "notes.md", "send the receipt email", "restart the server after deploy"}, paths
+    embedded = len(embedder.texts)
+    assert asyncio.run(index.refresh()) == [], "an unchanged workspace is not embedded again"
+
+    shop = tmp_path / "shop.py"
+    shop.write_text(shop.read_text(encoding="utf-8") + "\n\ndef refund_payment(order):\n    return -order\n", encoding="utf-8")
+    os.utime(shop, ns=(shop.stat().st_atime_ns, shop.stat().st_mtime_ns + 5_000_000_000))
+    hits = asyncio.run(ask("refund the payment"))
+    assert hits[0].startswith("shop.py:13-14\ndef refund_payment"), hits
+    assert all(text.startswith(("shop.py", "refund")) for text in embedder.texts[embedded:]), "only the changed file"
+    assert len(index.collection._state.records) == 6, "the changed file's old chunks were replaced, not added to"  # noqa: SLF001
+
+
+def test_search_code_is_on_his_live_path_with_no_card_and_its_embedder_runs_on_the_cpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live Steward offers search_code and runs it without a card, in plan mode too (it only reads);
+    STEWARD_CODE_SEARCH=off drops it. His embedder is embeddinggemma-2:270m and every embed call sends num_gpu 0."""
+    index = steward.CodeIndex(code_repo(tmp_path), WordEmbeddings())
+    monkeypatch.setattr(steward, "code_index", lambda: index)
+    search = Content.from_function_call(call_id="q1", name="search_code", arguments={"query": "send the receipt email"})
+    client, agent, response = run_steward([search, "It is in shop.py."], "Where is the receipt mailed?")
+    assert "search_code" in offered_tools(client.calls[0])
+    assert not approval_requests(response), "search_code asked a card"
+    assert any("shop.py:8-10" in r for r in function_results(client.calls[1])), "it ran and found the chunk"
+    monkeypatch.setenv(steward.CODE_SEARCH_ENV, "off")
+    client, _, _ = run_steward(["Hello."], "Hello")
+    assert "search_code" not in offered_tools(client.calls[0]), "switched off, it is not offered"
+
+    embedder = steward.code_embedder()
+    assert embedder.model == steward.CODE_EMBED_MODEL == "embeddinggemma-2:270m"
+    sent: list[dict[str, Any]] = []
+
+    async def request(*args: Any, **kwargs: Any) -> Any:
+        sent.append(kwargs["json"])
+        return {"embeddings": [[0.0] * steward.CODE_EMBED_DIMENSIONS]}
+
+    monkeypatch.setattr(embedder.client, "_request", request)
+    asyncio.run(embedder.get_embeddings(["x"], options={"dimensions": steward.CODE_EMBED_DIMENSIONS}))
+    assert sent[0]["options"] == {"num_gpu": 0} and sent[0]["model"] == "embeddinggemma-2:270m", sent
+    assert "dimensions" not in sent[0], "ollama 0.5.3's embed takes no dimensions"
 
 
 def test_charter_and_notes_reach_him_every_turn(monkeypatch: Any) -> None:

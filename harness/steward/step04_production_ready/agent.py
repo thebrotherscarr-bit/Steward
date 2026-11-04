@@ -32,10 +32,14 @@ Environment variables:
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
     STEWARD_SAFETY_OBSERVE     — "off" turns off MAF's FIDES in its record-only mode (default on); it only
                                  records, to halo_traces/fides.jsonl, and never refuses or changes a call
+    STEWARD_CODE_SEARCH        — "off" drops his search_code tool (default on): the workspace's tracked .py and .md
+                                 files searched by meaning, embedded on the CPU with embeddinggemma-2:270m
 """
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import copy
 import difflib
 import json
@@ -47,6 +51,7 @@ import sys
 import uuid
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Awaitable, Callable, Sequence
@@ -70,6 +75,7 @@ from agent_framework import (
     FileSkillsSource,
     FileSystemAgentFileStore,
     HistoryProvider,
+    InMemoryCollection,
     InMemoryHistoryProvider,
     MCPSkillsSource,
     FunctionInvocationContext,
@@ -82,18 +88,21 @@ from agent_framework import (
     ResponseStream,
     SkillsProvider,
     TodoProvider,
+    VectorStoreField,
     background_tasks_running,
     background_tasks_running_message,
     create_harness_agent,
+    create_vector_search_tool,
     get_agent_mode,
     set_agent_mode,
     todos_remaining,
     todos_remaining_message,
     tool,
+    vectorstoremodel,
 )
 from agent_framework.monty import MontyCodeActProvider
 from agent_framework_monty import FileMount
-from agent_framework.ollama import OllamaChatClient
+from agent_framework.ollama import OllamaChatClient, OllamaEmbeddingClient
 from agent_framework.security import (
     IntegrityLabel,
     LabelTrackingFunctionMiddleware,
@@ -110,6 +119,7 @@ from agent_framework.tools import (
 from dotenv import load_dotenv
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
+from ollama import AsyncClient as OllamaAsyncClient
 from pydantic import Field
 import httpx2
 
@@ -508,6 +518,205 @@ def _build_conversation_agent() -> Any:
 
 
 # </background>
+
+
+# <code_search>
+# His search_code: the workspace's tracked .py and .md files found by meaning, MAF's RAG way (Learn, agents/rag and
+# integrations/by-component/vector-stores, Python pivot): a @vectorstoremodel record in MAF's InMemoryCollection with an
+# embedding_generator, exposed with create_vector_search_tool (agent_framework/_vectors.py:2551), approval_mode
+# "never_require" as MAF's VectorCollectionContextProvider leaves its search ("get and search don't" ask). The index is
+# built on the first search, not at startup, and a file is embedded again when its mtime changes. In memory only.
+CODE_SEARCH_ENV = "STEWARD_CODE_SEARCH"
+CODE_EMBED_MODEL = "embeddinggemma-2:270m"
+# The operator, 2026-11-02: the embedder runs on the CPU, beside the chat model on the GPU (Ollama's num_gpu 0).
+CODE_EMBED_OPTIONS: dict[str, Any] = {"num_gpu": 0}
+CODE_EMBED_DIMENSIONS = 768  # EmbeddingGemma's vector length; MAF checks every vector against it (_vectors.py:167)
+_CODE_SUFFIXES = (".py", ".md")
+# Not searched: sample outputs under working/, and the state folders (gitignored anyway) his runs write.
+_CODE_SKIP_DIRS = _SKIP_DIRS | {"working", "storage", "halo_traces", "agent-memory", "agent-file-memory"}
+_CHUNK_MAX_LINES = 80
+_CHUNK_MAX_CHARS = 3_000
+_EMBED_BATCH = 16
+
+
+def code_search_on() -> bool:
+    """Whether he has search_code (STEWARD_CODE_SEARCH, on unless "off", "0", "false" or "no")."""
+    return os.environ.get(CODE_SEARCH_ENV, "on").strip().lower() not in {"off", "0", "false", "no"}
+
+
+class CpuOllamaClient(OllamaAsyncClient):
+    """Ollama's AsyncClient whose embed always runs on the CPU, given to MAF's OllamaEmbeddingClient as its client=.
+
+    MAF's client forwards only model, input, truncate, keep_alive and dimensions to embed
+    (agent_framework_ollama/_embedding_client.py:149-157), so Ollama's options (num_gpu) can only ride on the client.
+    And MAF always asks for the vector field's dimensions (_vectors.py:375), which ollama 0.5.3's embed does not take
+    (ollama/_client.py:871): it is dropped here, and MAF still checks each vector's length against the field.
+    """
+
+    async def embed(self, model: str = "", input: Any = "", truncate: bool | None = None, options: Any = None,
+                    keep_alive: float | str | None = None, dimensions: int | None = None) -> Any:
+        return await super().embed(
+            model=model, input=input, truncate=truncate, options={**(options or {}), **CODE_EMBED_OPTIONS}, keep_alive=keep_alive
+        )
+
+
+def code_embedder() -> OllamaEmbeddingClient:
+    """His code embedder: MAF's OllamaEmbeddingClient on CODE_EMBED_MODEL, on the CPU (CpuOllamaClient)."""
+    return OllamaEmbeddingClient(model=CODE_EMBED_MODEL, client=CpuOllamaClient(host=os.environ.get("OLLAMA_HOST")))
+
+
+@vectorstoremodel(collection_name="steward_code")
+@dataclass
+class CodeChunk:
+    """One chunk of a workspace file: a top-level function or class, or a Markdown section (Learn's Hotel sample shape:
+    the vector field holds the text to embed until MAF replaces it with its vector)."""
+
+    key: Annotated[str, VectorStoreField("key")]
+    path: Annotated[str, VectorStoreField("data", is_indexed=True)]
+    start_line: Annotated[int, VectorStoreField("data")]
+    end_line: Annotated[int, VectorStoreField("data")]
+    text: Annotated[str, VectorStoreField("data")]
+    embedding: Annotated[
+        str | list[float] | None,
+        VectorStoreField("vector", dimensions=CODE_EMBED_DIMENSIONS, distance_function="cosine_similarity"),
+    ] = None
+
+
+def _chunk_starts(path: str, lines: list[str]) -> list[int]:
+    """The 1-based lines where a chunk starts: each top-level def or class (its decorators and the comment block right
+    above it included) for .py, each heading outside a code fence for .md."""
+    starts = {1}
+    if path.endswith(".py"):
+        try:
+            body = ast.parse("\n".join(lines)).body
+        except (SyntaxError, ValueError):
+            body = []  # unparsable: bounded pieces only
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+                while start > 1 and lines[start - 2].startswith("#"):
+                    start -= 1
+                starts.add(start)
+    else:
+        fenced = False
+        for number, line in enumerate(lines, 1):
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+            elif not fenced and line.startswith("#"):
+                starts.add(number)
+    return sorted(starts)
+
+
+def code_chunks(path: str, text: str) -> list[tuple[int, int, str]]:
+    """(start line, end line, text) for each chunk of a file, each at most _CHUNK_MAX_LINES lines and _CHUNK_MAX_CHARS."""
+    lines = text.splitlines()
+    starts = _chunk_starts(path, lines)
+    chunks: list[tuple[int, int, str]] = []
+    for start, end in zip(starts, [*starts[1:], len(lines) + 1]):
+        piece_start, size = start, 0
+        for number in range(start, end):
+            size += len(lines[number - 1]) + 1
+            if number + 1 == end or number + 1 - piece_start >= _CHUNK_MAX_LINES or size >= _CHUNK_MAX_CHARS:
+                body = "\n".join(lines[piece_start - 1 : number])
+                if body.strip():
+                    chunks.append((piece_start, number, body[:_CHUNK_MAX_CHARS]))
+                piece_start, size = number + 1, 0
+    return chunks
+
+
+class CodeIndex:
+    """The workspace's code in MAF's InMemoryCollection, searched through MAF's SupportsVectorSearch.search: each search
+    first embeds the tracked files that are new or changed (by mtime) and drops the ones that are gone."""
+
+    def __init__(self, root: Path, embedding_generator: Any) -> None:
+        self.root = root
+        self.collection: InMemoryCollection[str, CodeChunk] = InMemoryCollection(CodeChunk, embedding_generator=embedding_generator)
+        self.definition = self.collection.definition  # read by create_vector_search_tool for its filters
+        self._files: dict[str, tuple[int, list[str]]] = {}  # path -> (mtime_ns, its chunk keys)
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: Any = None
+
+    def tracked_files(self) -> dict[str, int]:
+        """Each tracked .py and .md file under the root (git ls-files), outside the skipped folders, with its mtime."""
+        listed = subprocess.run(["git", "ls-files", "-z", "--", "."], cwd=self.root, capture_output=True, text=True, timeout=30)
+        files: dict[str, int] = {}
+        for path in listed.stdout.split("\0") if listed.returncode == 0 else []:
+            parts = Path(path).parts
+            if not path.endswith(_CODE_SUFFIXES) or _CODE_SKIP_DIRS.intersection(parts) or Path(path).name.startswith(".env"):
+                continue
+            try:
+                files[path] = (self.root / path).stat().st_mtime_ns
+            except OSError:
+                continue  # deleted in the working tree
+        return files
+
+    async def refresh(self) -> list[str]:
+        """Embed the new and changed files, drop the gone ones; returns the paths embedded."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock_loop is not loop:
+            self._lock, self._lock_loop = asyncio.Lock(), loop
+        async with self._lock:
+            await self.collection.ensure_collection_exists()
+            tracked = self.tracked_files()
+            embedded: list[str] = []
+            for path in [p for p in self._files if p not in tracked]:
+                await self.collection.delete(self._files.pop(path)[1])
+            for path, mtime in tracked.items():
+                if path in self._files and self._files[path][0] == mtime:
+                    continue
+                if path in self._files:
+                    await self.collection.delete(self._files.pop(path)[1])
+                text = (self.root / path).read_text(encoding="utf-8", errors="replace")
+                records = [
+                    CodeChunk(f"{path}:{start}", path, start, end, body, f"{path}\n{body}")
+                    for start, end, body in code_chunks(path, text)
+                ]
+                for first in range(0, len(records), _EMBED_BATCH):
+                    await self.collection.upsert(records[first : first + _EMBED_BATCH])
+                self._files[path] = (mtime, [r.key for r in records])
+                embedded.append(path)
+            if embedded:
+                logger.info("Code search: embedded %d file(s).", len(embedded))
+            return embedded
+
+    async def search(self, values: Any = None, **kwargs: Any) -> Any:
+        await self.refresh()
+        return await self.collection.search(values, **kwargs)
+
+
+_CODE_INDEXES: dict[Path, CodeIndex] = {}
+
+
+def code_index() -> CodeIndex:
+    """One index of the workspace per process: his hosts build Steward per request, and the index outlives each build."""
+    if _WORKING_DIR not in _CODE_INDEXES:
+        _CODE_INDEXES[_WORKING_DIR] = CodeIndex(_WORKING_DIR, code_embedder())
+    return _CODE_INDEXES[_WORKING_DIR]
+
+
+def _code_hit(result: Any) -> str:
+    chunk = result["record"]
+    return f"{chunk.path}:{chunk.start_line}-{chunk.end_line}\n{chunk.text}"
+
+
+def code_search_tool(index: CodeIndex | None = None) -> FunctionTool:
+    """His search_code tool, a fresh one per build (MAF's workflow host refuses a tool shared between requests)."""
+    return create_vector_search_tool(
+        index or code_index(),
+        name="search_code",
+        description=(
+            "Search the workspace's tracked .py and .md files by meaning, not exact text: returns the 5 closest chunks "
+            "(a top-level function or class, or a Markdown section) as path:start-end and the text. Use it to find where "
+            "something is done when you do not know its name; use file_access_grep for exact text. The first search "
+            "indexes the workspace and can take minutes."
+        ),
+        approval_mode="never_require",
+        top=5,
+        result_mapper=_code_hit,
+    )
+
+
+# </code_search>
 
 
 # <atlas>
@@ -1887,6 +2096,9 @@ async def build_steward_agent(
         # A copy per build: MAF's native workflow host builds Steward for every request and refuses a tool object
         # shared between requests (agent_framework_foundry_hosting WorkflowResolver), and git_commit is module-level.
         part3_tools: list[Any] = [*tools, copy.copy(git_commit), *extra_tools]
+        if code_search_on():
+            # His search_code (<code_search>): reads only, so no card; nothing is embedded until his first search.
+            part3_tools.append(code_search_tool())
         # ADR-0001 items 5 and 6: Atlas's door. SecondBrain serves the door's tools on the same MCP
         # client Steward already holds (its share key, as a client: reads run, writes park as holds for
         # the operator), and the door carries his repository as the world `steward`. So the door is one
