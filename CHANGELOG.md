@@ -38,6 +38,15 @@ was never merged and has no entry.
   (rebase, amend, filter-branch), deleting main, or Archive path. The door does not carry `neiro` yet and refuses it
   by name.
 
+### Removed
+
+- The older build path (`part > 4`), called by no host, caller or test in this repo, SecondBrain's Electron app or
+  Manjuel: its Coder, Reasoner and Explainer background agents (`STEWARD_REASONER_MODEL` deepseek-r1:14b and
+  `STEWARD_CONVERSATION_MODEL` gemma4:26b, `_TEAM_CONTEXT`), its `STEWARD_INSTRUCTIONS`, its `_build_explorer_agent`
+  and its own SecondBrain connection (`_connect_secondbrain` and its tool lists). A part above 4 is now refused. The
+  live build (CodeExplorer and WebResearchAgent) and the improvement loop's coder (`STEWARD_CODER_MODEL`,
+  qwen2.5-coder:14b) are unchanged. Test: `test_the_older_team_path_is_gone_and_the_live_team_is_kept`.
+
 ### Fixed
 
 - The answer given twice in a non-streaming run (the MCP door). After #93 the Agent tab showed it once, but MAF's

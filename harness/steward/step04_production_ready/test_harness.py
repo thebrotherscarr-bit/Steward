@@ -4012,7 +4012,7 @@ def test_the_estates_writes_always_ask_and_its_reads_never_do(monkeypatch: Any) 
 
 def test_an_eval_build_gets_only_the_estates_reads(monkeypatch: Any) -> None:
     """An eval's Steward reads the Estate but never changes it: eval_build offers estate_status, estate_logs and
-    approvals_history, and none of its writes, and the older path's eval list (_SECONDBRAIN_READS) is reads only."""
+    approvals_history, and none of its writes."""
     monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
     monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
     server = _estate_server()
@@ -4029,9 +4029,6 @@ def test_an_eval_build_gets_only_the_estates_reads(monkeypatch: Any) -> None:
     offered = offered_tools(asyncio.run(_go()).calls[0])
     assert {f"secondbrain_{t}" for t in steward.ESTATE_READS} <= offered
     assert not offered & {f"secondbrain_{t}" for t in steward.ESTATE_ASKS}, sorted(offered)
-    assert set(steward.ESTATE_READS) <= set(steward._SECONDBRAIN_READS)
-    assert not set(steward.ESTATE_ASKS) & set(steward._SECONDBRAIN_READS)
-    assert set(steward.ESTATE_ASKS) <= set(steward._SECONDBRAIN_ASKS) & set(steward._SECONDBRAIN_TOOLS)
 
 
 def test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell() -> None:
@@ -4594,3 +4591,26 @@ def test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_st
     assert steward.ESTATE_LOCK.parents[2] == steward._STEWARD_DIR.parents[3], "the lock is beside the Steward repo"
     for host in (hosted, mcp_app):
         assert "await warn_model_drift()" in inspect.getsource(host.main), f"{host.__name__} checks at start"
+
+
+def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
+    """The part > 4 build (Coder, Reasoner, Explainer on their own models, gemma4:26b and deepseek-r1:14b) was called by
+    no host and is removed (2026-11-04). The live build keeps CodeExplorer on his client, and the improvement loop's
+    coder keeps STEWARD_CODER_MODEL; a part above 4 is refused instead of building the old team."""
+    from agent_framework import BackgroundAgentsProvider
+
+    for gone in ("_build_coder_agent", "_build_reasoner_agent", "_build_conversation_agent", "_build_explorer_agent",
+                 "_REASONER_MODEL", "_CONVERSATION_MODEL", "_TEAM_CONTEXT", "STEWARD_INSTRUCTIONS", "_connect_secondbrain"):
+        assert not hasattr(steward, gone), gone
+    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b"), "the fixer's model stays"
+
+    async def _go(part: int) -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=ScriptedChatClient([]), enable_shell=False, part=part)
+            async with agent:
+                [team] = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
+                return [a.name for a in team._agents.values()]
+
+    assert asyncio.run(_go(4)) == ["CodeExplorer"], "SecondBrain is not connected here, so no WebResearchAgent"
+    with pytest.raises(ValueError, match="parts 1 to 4"):
+        asyncio.run(_go(5))
