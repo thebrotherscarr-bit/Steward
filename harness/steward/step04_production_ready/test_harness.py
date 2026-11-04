@@ -1751,6 +1751,52 @@ def test_the_commit_step_writes_only_the_message_and_the_workflow_raises_the_git
         asyncio.run(_without())
 
 
+def test_the_small_asks_see_a_write_approved_on_its_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live 2026-11-04, evals.py small (the item_count ask): EXECUTE wrote inventory.py on an approved card, the checks
+    passed and the commit card came, yet check_covers_writes said "No approved .py write in the run" and
+    edit_keeps_file_whole "The run wrote no .py file". The write is in the run only as its card and the user's answer
+    (the call rides on the answer), and the eval sent its answers without keeping them. Driven as evals.py small drives
+    it (run_small_asks, then score_small_asks); a run that writes nothing still fails both checks."""
+    import evals
+    import steward_workflow as wf
+
+    module = "harness/steward/working/sample-project/inventory.py"
+    path = steward._WORKING_DIR / module
+    committed = path.read_bytes()
+    added = path.read_text(encoding="utf-8") + '\n\ndef item_count(items):\n    """The total quantity."""\n    return sum(i["quantity"] for i in items)\n'
+    plan = '{"type": "approval", "questions": [{"message": "Add item_count."}], "steps": ["Add item_count"]}'
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": module, "content": added})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "added"}]})
+    checked = f"$ pytest -q {Path(module).parent.as_posix()}\n(exit 0)\n1 passed"
+    build = wf.build_steward_workflow
+    monkeypatch.setattr(wf, "build_steward_workflow", lambda agent: build(agent, checks=lambda _m: (True, checked), changes=lambda: [module]))
+
+    def small(replies: list[Any]) -> dict[str, Any]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> Any:
+            steward_, responses = await evals.run_small_asks([evals.SMALL_ASK_NEW_CODE], client=client, enable_shell=False)
+            return await evals.score_small_asks(steward_, [evals.SMALL_ASK_NEW_CODE], responses)
+
+        try:
+            [item] = asyncio.run(_go()).items
+        finally:
+            evals.SMALL_ASK_FILES.clear()
+            evals.SMALL_ASK_ORIGINALS.clear()
+        return {score.name: (score.passed, (score.sample or {}).get("reason")) for score in item.scores}
+
+    message = '{"message": "Add item_count to inventory.py"}'
+    scores = small([plan, write, done, "Added item_count.", message])
+    assert path.read_bytes() == committed, "the sample project is put back after the run"
+    assert evals.CASE_ERRORS == {}, evals.CASE_ERRORS
+    for name in ("check_covers_writes", "edit_keeps_file_whole", "commit_by_tool", "commit_message_specific"):
+        assert scores[name][0] is True, (name, scores[name])
+    # A run that writes nothing: the same checks fail, as they must.
+    scores = small([plan, done, "Added item_count.", message])
+    assert scores["check_covers_writes"] == (False, "No approved .py write in the run."), scores
+    assert scores["edit_keeps_file_whole"] == (False, "The run wrote no .py file."), scores
+
+
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
     """Live run 2026-11-01: an unasked commit step was denied twelve times, because its open todo made MAF's
     todos_remaining send him back each time. The user's No ends EXECUTE; the check and the report follow."""

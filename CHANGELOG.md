@@ -19,6 +19,10 @@ was never merged and has no entry.
   MAF's own read-only approval rules (`READ_ONLY_RULES`, shared with the build's approval rules); a write is never
   chosen, and zero or several read-only fits stay text (live eval 2026-11-04: the discount ask's plan step wrote
   `{"file_name": ...}`).
+- The small-ask evals see a write approved on its card. `_run_answering_cards` kept only the agent's streamed
+  updates and dropped its own Approve answers, which carry the approved call, so `check_covers_writes` and
+  `edit_keeps_file_whole` reported "no write" on a run that wrote (live 2026-11-04, item_count). Each answer now goes
+  into the scored conversation right after the turn that raised its card. A run that writes nothing still fails.
 - He never asks about committing in words (live evals 2026-11-04, three runs: "Do you approve this commit?" in prose,
   so no card). The commit step writes only the message: one structured-output call (`CommitMessage`, one line of at
   most 72 characters, at least two words), then the workflow raises his `git_commit` card itself; Approve commits,
