@@ -758,27 +758,48 @@ def repaired_tool_name(name: str, offered: set[str]) -> str | None:
     return scored[0][1]
 
 
+def _repair_names(contents: Any, offered: set[str]) -> None:
+    """Repair, in place, each function_call in contents whose name clearly means one offered tool."""
+    for c in contents or []:
+        if c.type == "function_call" and (right := repaired_tool_name(c.name, offered)):
+            logger.info("Tool name repaired: %s -> %s", c.name, right)
+            c.name = right
+
+
+def names_repaired_as_they_pass(inner: ResponseStream[Any, Any], offered: set[str]) -> ResponseStream[Any, Any]:
+    """The model's stream with each function_call's name repaired as its update passes; nothing is held back.
+
+    Read inside a new ResponseStream, as held_back_when_it_could_be_a_call reads it and MAF's MessageInjectionMiddleware
+    reads its inner stream (_sessions.py:1520-1541): a stream hook on the context is lost when streamed (see
+    recover_text_tool_calls). MAF's loop finds the calls to run in the stream's final response (_tools.py:6168), which
+    the injection middleware rebuilds from these updates (_sessions.py:1545-1556); the inner final response is repaired
+    in place too, as the history middleware keeps it.
+    """
+    finals: list[ChatResponse[Any]] = []
+
+    async def repaired() -> Any:
+        async for update in inner:
+            _repair_names(update.contents, offered)
+            yield update
+        final = await inner.get_final_response()
+        for message in final.messages:
+            _repair_names(message.contents, offered)
+        finals.append(final)
+
+    return ResponseStream(repaired(), finalizer=lambda updates: finals[-1])
+
+
 async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
     """Chat middleware: repair clearly misspelled tool names in the model's reply, streamed or not."""
     offered = {n for n in (getattr(t, "name", None) for t in (context.options or {}).get("tools") or []) if n}
-
-    def fix(contents: Any) -> None:
-        for c in contents or []:
-            if c.type == "function_call" and (right := repaired_tool_name(c.name, offered)):
-                logger.info("Tool name repaired: %s -> %s", c.name, right)
-                c.name = right
-
     await call_next()
     if isinstance(context.result, ResponseStream):
-
-        def fix_update(update: Any) -> Any:
-            fix(getattr(update, "contents", None))
-            return update
-
-        context.stream_transform_hooks.append(fix_update)
+        # On the stream itself, as recover_text_tool_calls does: the context's stream_* lists are applied before
+        # MAF's MessageInjectionMiddleware reads the rest of the chain (_middleware.py:1669, _sessions.py:1581).
+        context.result = names_repaired_as_they_pass(context.result, offered)
     elif context.result is not None:
         for message in context.result.messages:
-            fix(message.contents)
+            _repair_names(message.contents, offered)
 
 
 # Live 2026-11-03 (the diagnosis traces): gpt-oss sometimes ends a turn with a tool call's arguments written as its
