@@ -37,7 +37,11 @@ from agent_framework.observability import ChatTelemetryLayer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent as steward  # noqa: E402
+import halo_traces  # noqa: E402
 import pytest  # noqa: E402
+
+# His real trace file, as halo_traces resolved it on import (HALO_TRACE_PATH, or <repo>/halo_traces/traces.jsonl).
+REAL_HALO_TRACES = halo_traces.HALO_TRACE_PATH
 
 
 @pytest.fixture(autouse=True)
@@ -55,6 +59,26 @@ def _his_response_records_are_never_the_real_ones(tmp_path: Path, monkeypatch: p
     import hosted
 
     monkeypatch.setattr(hosted, "_STORAGE_DIR", tmp_path / "responses")
+
+
+@pytest.fixture(autouse=True)
+def _his_traces_are_never_the_real_ones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """HALO's spans and the service's metrics and logs go to a throwaway folder, never the repo's halo_traces/ (in his
+    checkout, the trace file the improvement loop reads). The path is also a default argument, bound when halo_traces
+    and hosted were imported, so those defaults are replaced too. OpenTelemetry's providers are process-global: an
+    exporter a test sets up keeps exporting after it, so no exporter made here may ever name the real path."""
+    import hosted
+
+    traces = tmp_path / "halo_traces" / "traces.jsonl"
+    monkeypatch.setattr(halo_traces, "HALO_TRACE_PATH", traces)
+    monkeypatch.setattr(hosted, "HALO_TRACE_PATH", traces)
+    monkeypatch.setattr(hosted, "TELEMETRY_DIR", traces.parent)
+    for function, path in (
+        (halo_traces.HaloJsonlSpanExporter.__init__, traces),
+        (halo_traces.setup_halo_tracing, traces),
+        (hosted.telemetry_file_exporters, traces.parent),
+    ):
+        monkeypatch.setattr(function, "__defaults__", (path, *function.__defaults__[1:]))
 
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
 for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
@@ -475,20 +499,29 @@ def test_a_request_that_matches_a_skill_or_helper_gets_one_line_naming_it() -> N
 
 
 def test_a_clearly_misspelled_tool_name_is_repaired_and_an_unclear_one_is_not() -> None:
-    """repair_tool_names: "totos_add" (his most common slip) runs todos_add, streamed or not; an unknown name stays unknown."""
-    slip = Content.from_function_call(call_id="t1", name="totos_add", arguments={"todos": [{"title": "Write it"}]})
-    client, _, _ = run_steward([slip, "Planned."], "Plan it.")
+    """repair_tool_names: "totos_add" (his most common slip) runs todos_add, streamed or not; an unknown name stays unknown.
+    Each run gets its own call: a repair is made in place, so a shared one would arrive already repaired."""
+
+    def slip() -> Content:
+        return Content.from_function_call(call_id="t1", name="totos_add", arguments={"todos": [{"title": "Write it"}]})
+
+    client, _, _ = run_steward([slip(), "Planned."], "Plan it.")
     assert any('"title": "Write it"' in r for r in function_results(client.calls[1])), "the todo was made"
 
-    async def _streamed() -> ScriptedChatClient:
-        c = ScriptedChatClient([slip, "Planned."])
+    async def _streamed() -> tuple[ScriptedChatClient, list[str]]:
+        # Live 2026-11-03: streamed, as his hosted workflow runs him, the slip reached MAF's loop unrepaired ("not found").
+        c = ScriptedChatClient([slip(), "Planned."])
         async with AsyncExitStack() as stack:
             agent = await steward.build_steward_agent(stack, client=c, enable_shell=False)
             async with agent:
-                await agent.run("Plan it.", session=agent.create_session(), stream=True).get_final_response()
-        return c
+                stream = agent.run("Plan it.", session=agent.create_session(), stream=True)
+                names = [x.name for u in [u async for u in stream] for x in u.contents if x.type == "function_call"]
+                await stream.get_final_response()
+        return c, names
 
-    assert any('"title": "Write it"' in r for r in function_results(asyncio.run(_streamed()).calls[1])), "streamed too"
+    c, names = asyncio.run(_streamed())
+    assert any('"title": "Write it"' in r for r in function_results(c.calls[1])), "streamed too"
+    assert names == ["todos_add"], f"the caller's stream carries the repaired name: {names}"
     unknown = Content.from_function_call(call_id="u1", name="unknown_tool", arguments={})
     client, _, _ = run_steward([unknown, "Ok."], "Do it.")
     assert any("not found" in r for r in function_results(client.calls[1]))
@@ -1320,6 +1353,32 @@ def test_the_trace_file_is_capped_and_keeps_the_newest_whole_spans() -> None:
         assert path.stat().st_size <= 4000, path.stat().st_size
         assert all(json.loads(line) for line in lines), "every line kept is a whole span"
         assert lines and lines[-1].find("span-59") >= 0, "the newest span is kept"
+
+
+def test_the_suite_never_writes_his_real_trace_file(tmp_path: Path, monkeypatch: Any) -> None:
+    """2026-11-03: running these tests left halo_traces/traces.jsonl in the repo (an eval set's HaloJsonlSpanExporter(),
+    on its default path), which in his checkout is the real file the improvement loop reads. Every writer that takes the
+    default path writes to the test's own folder (_his_traces_are_never_the_real_ones)."""
+    import evals
+    import hosted
+    from opentelemetry.sdk.trace import TracerProvider
+
+    provider = TracerProvider()
+    monkeypatch.setattr(halo_traces.trace, "get_tracer_provider", lambda: provider)  # never the process's own provider
+    spans = [evals.HaloJsonlSpanExporter(), halo_traces.setup_halo_tracing()]
+    metrics, logs = hosted.telemetry_file_exporters()
+    files = [Path(e.path) for e in spans] + [Path(t.out.handler.baseFilename) for t in (metrics, logs)]
+    try:
+        # Checked before anything is written, so an unplugged fixture fails here, not in his file.
+        assert all(tmp_path in f.parents and REAL_HALO_TRACES.parent not in f.parents for f in files), files
+        with provider.get_tracer("leak").start_as_current_span("leak-check"):
+            pass
+    finally:
+        provider.shutdown()
+        spans[0].shutdown()
+        metrics.out.close()
+        logs.out.close()
+    assert "leak-check" in (tmp_path / "halo_traces" / "traces.jsonl").read_text(encoding="utf-8")
 
 
 def test_metrics_and_otel_logs_are_compact_lines_in_rotating_files_never_stdout(tmp_path: Path) -> None:
