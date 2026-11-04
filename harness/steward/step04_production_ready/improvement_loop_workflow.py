@@ -246,8 +246,9 @@ def build_coder(client: Any = None) -> Agent[Any]:
         context_providers=[files],
         default_options={**steward.OLLAMA_OPTIONS, "num_ctx": FIXER_CONTEXT},
         # The graders' gate. It refuses after the card, as the write would run: no rule skips the card for it, so
-        # without the gate a grader's write is only ever a card, never written unasked.
-        middleware=[refuse_grader_writes],
+        # without the gate a grader's write is only ever a card, never written unasked. And Steward's own gate on
+        # Unicode punctuation in code (agent.refuse_unicode_punctuation_in_code), for the coder's writes too.
+        middleware=[refuse_grader_writes, steward.refuse_unicode_punctuation_in_code],
     )
 
 

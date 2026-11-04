@@ -30,8 +30,8 @@ When the user asks you to run your evals:
    Never run it again to get a better result either: a result that changes between runs is a fault in the
    harness to look into, not a reason to retry.
 5. Do not change any file during or after the run. The evals plant and remove their own test bug, answer their
-   own cards, and put the sample project back when they finish. If a card from SecondBrain's door appears
-   during the run (a commit through the door), tell the user to deny it.
+   own cards, and put the sample project back when they finish. An eval's Steward is built without
+   SecondBrain's door and note writes, so no eval can park a card in the user's SecondBrain.
 
 ## The diagnosis
 

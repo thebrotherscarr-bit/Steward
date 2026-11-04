@@ -201,7 +201,58 @@ def test_file_write_waits_for_approval() -> None:
     assert len(client.calls) == 1
 
 
-INVENTORY = "harness/steward/working/sample-project/inventory.py"
+def test_a_unicode_dash_in_code_is_refused_with_its_place_and_nothing_is_written() -> None:
+    """Live 2026-11-04 (the item_count ask): gpt-oss wrote U+2011 for a minus in a .py file, which then failed with a
+    SyntaxError. refuse_unicode_punctuation_in_code (function middleware on his writes and the coder's) refuses such a
+    write, even once its card is approved, naming the character's line and column and the ASCII one to use; the same
+    character in a string literal, or in a .md file, is written as it is."""
+    import improvement_loop_workflow as loop
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    dash = "‑"
+
+    def approved_write(file_name: str, content: str, *, coder: bool = False) -> tuple[list[str], bool]:
+        """One approved file_access_write: (its tool results, whether the file was written). The file is removed."""
+        path = steward._WORKING_DIR / file_name
+        write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": file_name, "content": content})
+        client = ScriptedChatClient([write, "Done."])
+
+        async def _go() -> None:
+            async with AsyncExitStack() as stack:
+                agent = loop.build_coder(client) if coder else await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                session = agent.create_session()
+                for modes in [p for p in agent.context_providers if isinstance(p, AgentModeProvider)]:
+                    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                cards = approval_requests(await agent.run("Write the file.", session=session))
+                assert [c.function_call.name for c in cards] == ["file_access_write"], "the write asks its card as ever"
+                await agent.run(Message(role="user", contents=[c.to_function_approval_response(True) for c in cards]), session=session)
+
+        try:
+            asyncio.run(_go())
+            return function_results(client.calls[-1]), path.exists()
+        finally:
+            path.unlink(missing_ok=True)
+
+    results, written = approved_write("test_harness_dash_probe.py", f"def f():\n    return 1 {dash} 1\n")
+    assert not written, "the .py file with a Unicode dash in its code was written"
+    [refusal] = results
+    assert "line 2, column 14" in refusal and "U+2011" in refusal and "'-'" in refusal and "Nothing was written" in refusal, refusal
+    results, written = approved_write("test_harness_dash_probe.py", f"def f():\n    return 1 {dash} 1\n", coder=True)
+    assert not written and "line 2, column 14" in results[0], "the round's coder is refused too"
+    results, written = approved_write("test_harness_dash_probe.py", f"LABEL = 'Kestrel{dash}47'  # a {dash} b\n")
+    assert written and results == ["File 'test_harness_dash_probe.py' written."], "in a string or comment it is his text"
+    results, written = approved_write("test_harness_dash_probe.md", f"Kestrel{dash}47\n")
+    assert written, "a .md file is never checked"
+    # An edit is judged by the file it would leave; curly quotes and a no-break space in code are refused too.
+    assert "U+201C" in steward.code_punctuation_problem("a.py", "x = “hi”\n")
+    assert "U+00A0" in steward.code_punctuation_problem("a.py", "x = 1 + 1\n")
+    assert "column 10" in steward.code_punctuation_problem("a.py", f"x = f'{{a {dash} b}}'\n"), "an f-string's code part"
+    assert steward.code_punctuation_problem("a.py", f"x = f'{{a}} {dash}'\n") is None, "an f-string's text part"
+    assert steward.code_punctuation_problem("a.py", f's = """{dash}') is None, "an edit made in parts, still in its string"
+    assert steward.code_punctuation_problem("a.py", "x = 1 - 1\n") is None
+
+
+INVENTORY ="harness/steward/working/sample-project/inventory.py"
 
 
 def function_results(call: dict[str, Any]) -> list[str]:
@@ -2111,6 +2162,86 @@ def test_door_calls_stay_on_stewards_world() -> None:
     assert not reached, "no project means the door's default world, which is refused"
     assert gate("atlas_git", {"project": "steward"}) == (None, True)
     assert gate("git_commit", {"message": "x"}) == (None, True), "Steward's own tools are untouched"
+
+
+def test_an_eval_never_reaches_the_users_door_or_writes_his_notes(monkeypatch: Any) -> None:
+    """Live 2026-11-04 (evals.py small, the discount ask): the eval's Steward committed through the door, which parked a
+    real hold card in the user's SecondBrain. Every eval set builds Steward through evals.run_steward or with
+    eval_build=True (steps), and that build offers no Atlas door tool, no pr_checks and no note write, while his notes'
+    reads and the Charter stay. The live build, on the same SecondBrain, still offers them all."""
+    import contextlib
+
+    import evals
+    import steward_workflow as wf
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("secondbrain")
+
+    @server.tool()
+    def read_note(id: str) -> str:
+        return "CHARTER: what binds you." if id == "steward-charter" else ""
+
+    @server.tool()
+    def search_notes(query: str) -> str:
+        return "[]"
+
+    @server.tool()
+    def list_notes() -> str:
+        return "[]"
+
+    @server.tool()
+    def write_note(id: str, content: str) -> str:
+        return "written"
+
+    @server.tool()
+    def append_to_note(id: str, content: str) -> str:
+        return "appended"
+
+    @server.tool()
+    def git_commit(project: str, message: str) -> str:
+        return "HELD: parked as hold_1"
+
+    @server.tool()
+    def git(project: str, args: str = "") -> str:
+        return "ok"
+
+    @server.tool()
+    def git_pr(action: str = "", project: str = "") -> str:
+        return '{"pull_requests": []}'
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    door = {"atlas_git", "atlas_git_commit", "atlas_git_pr", steward.PR_CHECKS_TOOL}
+    note_writes = {"secondbrain_write_note", "secondbrain_append_to_note"}
+    reads = {"secondbrain_search_notes", "secondbrain_read_note", "secondbrain_list_notes"}
+
+    live, _, _ = run_steward(["Hello."], "Hello")  # the live build, as his hosts make it
+    assert door | note_writes | reads <= offered_tools(live.calls[0]), "the live build offers the door and his note writes"
+
+    client = ScriptedChatClient(["Just words."])
+    asyncio.run(evals.run_steward("Fix the discount bug.", set(), client=client, enable_shell=False))
+    offered = offered_tools(client.calls[0])
+    assert not offered & (door | note_writes), f"an eval's Steward is offered {sorted(offered & (door | note_writes))}"
+    assert reads <= offered and "CHARTER: what binds you." in str(client.calls[0]["options"].get("instructions") or "")
+
+    built: list[dict[str, Any]] = []
+
+    async def recorded(stack: Any, **build: Any) -> Any:
+        built.append(build)
+        raise RuntimeError("built")
+
+    monkeypatch.setattr(wf, "build_steward", recorded)
+    monkeypatch.setattr(evals, "build_steward", recorded)
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(evals.steps_main())
+    # Any build an eval makes: the steps set's own, and run_steward's even when a caller asks otherwise.
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(evals.run_steward("q", set(), eval_build=False))
+    assert [b.get("eval_build") for b in built] == [True, True], built
 
 
 def test_pr_checks_waits_through_the_door_for_the_open_and_the_checks(monkeypatch: Any) -> None:
