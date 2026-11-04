@@ -670,6 +670,7 @@ def test_plan_mode_states_the_tool_policy_and_every_tool_stays_offered() -> None
     offered, instructions = offered_tools(client.calls[0]), str(client.calls[0]["options"].get("instructions") or "")
     # The door's and SecondBrain's tools come over MCP, which these tests do not connect.
     over_mcp = {"atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr", "secondbrain_write_note", "secondbrain_append_to_note"}
+    over_mcp |= {f"secondbrain_{name}" for name in steward.ESTATE_ASKS}  # the Estate's writes (2026-11-04)
     assert steward._CHANGES_THINGS - {"run_shell", *over_mcp} <= offered
     assert {"todos_add", "mode_set"} <= offered
     assert steward.PLAN_MODE_TOOL_POLICY in instructions and "file_access_write" in steward.PLAN_MODE_TOOL_POLICY
@@ -2383,8 +2384,9 @@ def test_every_host_builds_the_same_steward_workflow() -> None:
     assert console_app.build_steward_agent is steward.build_steward_agent, "the console builds Steward somewhere else"
 
 
-def test_door_calls_stay_on_stewards_world() -> None:
-    """steward_world_only, MAF's middleware gating: a door call on another world, or none, never reaches the door."""
+def test_door_calls_stay_on_the_estates_worlds() -> None:
+    """estate_door_gate, MAF's middleware gating: a door call on a world outside the Estate, or none, never reaches the
+    door (since 2026-11-04 the Estate's five repositories are his; before, only his own)."""
     from types import SimpleNamespace
 
     def gate(name: str, arguments: dict[str, Any]) -> tuple[Any, bool]:
@@ -2394,10 +2396,10 @@ def test_door_calls_stay_on_stewards_world() -> None:
             reached.append(True)
 
         context = SimpleNamespace(function=SimpleNamespace(name=name), arguments=arguments, result=None)
-        asyncio.run(steward.steward_world_only(context, call_next))
+        asyncio.run(steward.estate_door_gate(context, call_next))
         return context.result, bool(reached)
 
-    result, reached = gate("atlas_git_commit", {"project": "research", "message": "x"})
+    result, reached = gate("atlas_git_commit", {"project": "sewder", "message": "x"})
     assert not reached and 'project="steward"' in result
     result, reached = gate("atlas_git_commit", {"message": "x"})
     assert not reached, "no project means the door's default world, which is refused"
@@ -3927,6 +3929,173 @@ def test_every_pin_in_pyproject_is_locked_and_every_action_is_pinned_to_a_commit
         for use in uses:
             assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*", use.strip()), f"{workflow.name}: {use}"
         assert "-latest" not in " ".join(re.findall(r"(?m)^\s*runs-on:\s*(.+)$", text)), workflow.name
+
+
+def _estate_server() -> Any:
+    """A stand-in for SecondBrain's MCP with its Estate tools (electron/estate.cjs's names and arguments) and a note."""
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("secondbrain")
+
+    @server.tool()
+    def read_note(id: str) -> str:
+        return ""
+
+    @server.tool()
+    def estate_status() -> str:
+        return '{"services": [], "sitting": {"open": false}}'
+
+    @server.tool()
+    def estate_logs(service: str, lines: int = 100) -> str:
+        return "log"
+
+    @server.tool()
+    def approvals_history(limit: int = 50) -> str:
+        return "[]"
+
+    @server.tool()
+    def service_control(service: str, action: str) -> str:
+        return "restarted"
+
+    @server.tool()
+    def ollama_unload(model: str) -> str:
+        return "unloaded"
+
+    @server.tool()
+    def app_update(action: str) -> str:
+        return "checked"
+
+    return server
+
+
+def test_the_estates_writes_always_ask_and_its_reads_never_do(monkeypatch: Any) -> None:
+    """2026-11-04, Steward is the agent of the Estate: SecondBrain's Estate tools are on his live build, the reads with
+    no card and service_control, ollama_unload and app_update (check or apply: one name) always on the user's card,
+    reported so on the tool-policy shelf. Red if a write stops asking."""
+    import json
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    reads = {f"secondbrain_{t}" for t in steward.ESTATE_READS}
+    asks = {f"secondbrain_{t}" for t in steward.ESTATE_ASKS}
+    assert asks == {"secondbrain_service_control", "secondbrain_ollama_unload", "secondbrain_app_update"}
+    assert asks <= steward._CHANGES_THINGS, "plan mode leaves the Estate's writes alone"
+
+    client, _, _ = run_steward(["Hello."], "Hello", mode="execute")
+    assert reads | asks <= offered_tools(client.calls[0]), "the live build offers the Estate's tools"
+    rows = {row["name"]: row for row in json.loads(steward.TOOL_POLICY_PATH.read_text(encoding="utf-8"))["tools"]}
+    for name in reads:
+        assert (rows[name]["approval"], rows[name]["source"]) == ("never", "mcp:secondbrain"), rows[name]
+    for name in asks:
+        assert (rows[name]["approval"], rows[name]["source"]) == ("always", "mcp:secondbrain"), rows[name]
+        assert "Estate write" in rows[name]["notes"] and "plan-mode gate" in rows[name]["notes"], rows[name]
+
+    for name, arguments in (
+        ("secondbrain_service_control", {"service": "steward", "action": "restart"}),
+        ("secondbrain_ollama_unload", {"model": "gpt-oss:20b"}),
+        ("secondbrain_app_update", {"action": "check"}),
+    ):
+        call = Content.from_function_call(call_id="e1", name=name, arguments=arguments)
+        _, _, response = run_steward([call, "Waiting on your card."], "Do it.", mode="execute")
+        assert [r.function_call.name for r in approval_requests(response)] == [name], f"{name} ran without a card"
+    status = Content.from_function_call(call_id="e2", name="secondbrain_estate_status", arguments={})
+    client, _, response = run_steward([status, "All up."], "How is the estate?", mode="execute")
+    assert not approval_requests(response) and "sitting" in function_results(client.calls[1])[0], "a read asks no card"
+    # Any Estate tool not named a read asks, MAF's default for the rest (a tool added later is never let through).
+    assert steward.estate_approval(["estate_status", "something_new"]) == {
+        "always_require_approval": ["something_new"], "never_require_approval": ["estate_status"], "default": "always_require",
+    }
+
+
+def test_an_eval_build_gets_only_the_estates_reads(monkeypatch: Any) -> None:
+    """An eval's Steward reads the Estate but never changes it: eval_build offers estate_status, estate_logs and
+    approvals_history, and none of its writes, and the older path's eval list (_SECONDBRAIN_READS) is reads only."""
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+
+    async def _go() -> ScriptedChatClient:
+        client = ScriptedChatClient(["Just words."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, eval_build=True)
+            async with agent:
+                await agent.run("Hello", session=agent.create_session())
+        return client
+
+    offered = offered_tools(asyncio.run(_go()).calls[0])
+    assert {f"secondbrain_{t}" for t in steward.ESTATE_READS} <= offered
+    assert not offered & {f"secondbrain_{t}" for t in steward.ESTATE_ASKS}, sorted(offered)
+    assert set(steward.ESTATE_READS) <= set(steward._SECONDBRAIN_READS)
+    assert not set(steward.ESTATE_ASKS) & set(steward._SECONDBRAIN_READS)
+    assert set(steward.ESTATE_ASKS) <= set(steward._SECONDBRAIN_ASKS) & set(steward._SECONDBRAIN_TOOLS)
+
+
+def test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell() -> None:
+    """His git across the Estate's five repositories, every write on the card, and what is never his refused at run
+    time before any card, on the door (estate_door_gate) and in his shell (MAF's ShellPolicy, ESTATE_GIT_REFUSALS):
+    no force-push, no --all or --mirror push, no tag, no release, no history rewrite, no deleting main, no Archive."""
+    from types import SimpleNamespace
+
+    from agent_framework_tools.shell import ShellCommandError
+
+    def gate(name: str, arguments: dict[str, Any]) -> tuple[Any, bool]:
+        reached: list[bool] = []
+
+        async def call_next() -> None:
+            reached.append(True)
+
+        context = SimpleNamespace(function=SimpleNamespace(name=name), arguments=arguments, result=None)
+        asyncio.run(steward.estate_door_gate(context, call_next))
+        return context.result, bool(reached)
+
+    assert set(steward.ESTATE_WORLDS) == {"research", "atlas", "secondbrain", "steward", "neiro"}
+    for world in steward.ESTATE_WORLDS:
+        assert gate("atlas_git_push", {"project": world}) == (None, True), world
+    assert gate("atlas_git_commit", {"project": "secondbrain", "message": "Refuse --force in the gate", "files": "a.py"}) == (
+        None, True), "a commit message is words, not flags"
+    assert gate("atlas_git_branch", {"project": "atlas", "action": "land", "name": "fix-x"}) == (None, True)
+    for name, arguments in (
+        ("atlas_git_push", {"project": "steward", "args": "--force"}),
+        ("atlas_git_push", {"project": "steward", "args": "--force-with-lease"}),
+        ("atlas_git_push", {"project": "research", "args": "--mirror"}),
+        ("atlas_git_push", {"project": "atlas", "args": "--all"}),
+        ("atlas_git_tag", {"project": "steward", "action": "cut", "name": "v1"}),
+        ("atlas_release_step", {"project": "secondbrain"}),
+        ("atlas_git_branch", {"project": "steward", "action": "close", "name": "main"}),
+        ("atlas_git_commit", {"project": "research", "message": "x", "files": "C:\\Users\\novad\\Desktop\\Archive\\a.txt"}),
+        ("atlas_git_diff", {"project": "research", "file": "../Archive/notes.md"}),
+    ):
+        result, reached = gate(name, arguments)
+        assert not reached and str(result).startswith("Refused:"), (name, arguments, result)
+
+    shell = steward._build_shell()
+    for command in (
+        "git push --force origin main", "git push --mirror", "git push --all origin", "git tag v1.0",
+        "gh release create v1", "git rebase -i HEAD~3", "git commit --amend -m x", "git filter-branch --all",
+        "git branch -D main", "cat C:/Users/novad/Desktop/Archive/a.txt", "ls ../../../Archive",
+    ):
+        with pytest.raises(ShellCommandError):
+            asyncio.run(shell.run(command))  # refused by the policy before any shell starts
+    for command in ("git log --all --oneline", "rm -f build.log", "ls --all", "git branch -d fix-x", "pytest -q"):
+        assert shell._policy.evaluate_command(command).decision == "allow", command
+    _, agent, _ = run_steward(["Hello."], "Hello")
+    assert steward.estate_door_gate in (agent.middleware or []), "the door's gate is on his live build"
+
+
+def test_every_skill_on_disk_is_listed_and_the_estate_skills_name_their_tools() -> None:
+    """The SKILLS tuple is the skills folder (a skill added or dropped is said here), the estate skill names every
+    Estate tool it runs, and the github skill names the five repositories as the door addresses them."""
+    on_disk = {p.parent.name for p in steward._SKILLS_DIR.glob("*/SKILL.md")}
+    assert on_disk == set(SKILLS), sorted(on_disk ^ set(SKILLS))
+    estate = (steward._SKILLS_DIR / "estate" / "SKILL.md").read_text(encoding="utf-8")
+    assert all(f"secondbrain_{t}" in estate for t in (*steward.ESTATE_READS, *steward.ESTATE_ASKS)), "estate skill tools"
+    assert "RULE 9" in estate and "Archive" in estate
+    github = (steward._SKILLS_DIR / "github" / "SKILL.md").read_text(encoding="utf-8")
+    assert all(f"`{world}`" in github for world in steward.ESTATE_WORLDS), "github skill repositories"
+    assert "RULE 9" in github and "Archive" in github
 
 
 

@@ -8,6 +8,7 @@ Kyle's local, private system on this PC. Four parts, plus the models.
 | SecondBrain | Jesster | The console: notes vault, Agent tab, the door's host, the Services window; starts and supervises your servers | `worlds/jesster` |
 | Atlas | Aurora | The glass (web app) and the door (git and other writing tools for Kyle's repositories) | `atlas/` in the ground |
 | Steward | Steward | You: a Microsoft Agent Framework harness agent on local Ollama | `worlds/steward` |
+| Neiro | Neiro | The Estate's lock: which version of each part, and which models, belong together | `worlds/neiro` |
 | Ollama | - | The model runtime: gpt-oss (you, `steward:1`), qwen2.5-coder (the Coder), embeddinggemma (`search_code`, on the CPU) | `127.0.0.1:11434` |
 
 ## How the parts connect to you
@@ -42,11 +43,33 @@ Kyle's local, private system on this PC. Four parts, plus the models.
 | The diagnosis handoff | `improvement_loop/latest/handoff.md` |
 | The host's saved responses and checkpoints (14 days) | `storage/responses/`, `.as/` |
 
-Outside your workspace, and not readable by you: the ground's records (sessions, the law chain), SecondBrain's own
-logs and settings, and Ollama's `server.log`. Ask Kyle, or use the notes and door tools.
+Outside your workspace, and not readable as files: the ground's records (sessions, the law chain), SecondBrain's own
+settings, and Ollama's `server.log`. The servers' logs are read with `secondbrain_estate_logs`; for the rest use the
+notes and door tools, or ask Kyle.
+
+## The Estate's tools (SecondBrain's MCP)
+| Tool | Reads or writes | Card |
+|---|---|---|
+| `secondbrain_estate_status` | servers, SecondBrain's build, Ollama's models, the open sitting | none |
+| `secondbrain_estate_logs` | one server's log tail (`service`, `lines` up to 400) | none |
+| `secondbrain_approvals_history` | the answered cards, newest first (`limit` up to 200) | none |
+| `secondbrain_service_control` | start, stop or restart one server (never SecondBrain; never the door in a sitting) | always |
+| `secondbrain_ollama_unload` | one model out of memory | always |
+| `secondbrain_app_update` | `check` the newest build, or `apply` it (restarts SecondBrain) | always |
+
+## The repositories, as the door names them
+| `project=` | Part | Where |
+|---|---|---|
+| `research` | Manjuel, the ground | `Desktop\Research` (RULE 9: never while a sitting is open) |
+| `atlas` | Aurora | `atlas/` |
+| `secondbrain` | Jesster | `worlds/jesster` |
+| `steward` | you | `worlds/steward` |
+| `neiro` | the Estate lock | `worlds/neiro` (the door does not carry it yet: it refuses it by name) |
 
 ## Your reach
-- **Now:** your own repository (`worlds/steward`). You read it freely; writes, shell commands and commits ask on
-  Kyle's card. The door's writes are `project="steward"` only.
-- **Later:** Kyle widens your reach one part at a time, "as needed", once you are reliable. Until then, a request
-  about another part gets your reading of the map and a plain proposal, not an action.
+- **Your files:** your own repository (`worlds/steward`). You read it freely; writes, shell commands and commits ask
+  on Kyle's card.
+- **The Estate:** its servers, models and SecondBrain's update through the tools above, every change on Kyle's
+  card; git on the five repositories through the door (the `github` skill), every write on Kyle's card. Tags,
+  releases, force-pushes, history rewrites, deleting main and any path under `Desktop\Archive` are refused before
+  any card.
