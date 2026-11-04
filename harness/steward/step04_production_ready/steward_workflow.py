@@ -36,6 +36,9 @@ Pieces 1 to 4 of the build order:
   their folders run. Failing with attempts left, REPAIR hands EXECUTE the output; passing, or after MAX_ATTEMPTS,
   REPORT gives his answer with the checks' result. Nothing written, nothing run. The attempt count is workflow
   state, so it is in the checkpoint across a write card's pause.
+* COMMIT takes only the files EXECUTE's run wrote with MAF's file tools (agent.record_written_files keeps them in
+  EXECUTE's session, which MAF checkpoints; a new approved plan starts the list again), never every change in the
+  workspace (audit 2026-11-04), and his git_commit runs through the agent's function middleware as any approved call.
 * COMMIT does not leave the tool call to the model (live evals 2026-11-04, three runs: gpt-oss asked "Do you approve
   this commit?" in words and never called git_commit; Ollama's tool_choice takes only auto or none). The model only
   writes the message, as structured output (CommitMessage, as ROUTE's Route), and the workflow raises git_commit's
@@ -94,6 +97,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for th
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
+# write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
+from agent import WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +296,9 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
     async def approved_plan_turn_(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
         steps = approved_steps(context.messages)
         if steps and context.session is not None:
+            if list(steps) != [REPAIR_TODO]:
+                # A new approved plan is a new run of work: the files it writes are the ones its commit takes.
+                context.session.state[WRITTEN_FILES_KEY] = []
             set_agent_mode(
                 context.session, "execute", source_id=mode_provider.source_id, available_modes=mode_provider.available_modes
             )
@@ -449,12 +457,6 @@ def written_python_files(messages: Sequence[Message]) -> list[str]:
     return files
 
 
-def write_happened(result: str) -> bool:
-    """Whether a MAF file-writing tool's result says it wrote (its success texts, _file_access.py), not a refusal."""
-    text = str(result or "")
-    return text.startswith("Replaced ") or (text.startswith("File '") and text.endswith(("' written.", "' deleted.")))
-
-
 # Set on the check's own pytest, so a workflow run inside those tests does not start the check again.
 _CHECK_RUNNING = "STEWARD_CHECK_RUNNING"
 # pytest's exit code when it collected no tests (pytest.ExitCode.NO_TESTS_COLLECTED).
@@ -473,7 +475,8 @@ def changed_python_files(workspace: Path) -> list[str]:
 
 def changed_files(workspace: Path | None = None) -> list[str]:
     """The files under the workspace that differ from the committed state (changed, new or deleted), as git lists
-    them: what his git_commit would stage (git add --all -- .). The commit message is written from them."""
+    them. Since the audit of 2026-11-04 his git_commit stages only the files his run wrote (agent.written_files), and
+    the commit step lists those; this is every change, his or not."""
     if workspace is None:
         from agent import _WORKING_DIR as workspace  # noqa: PLC0415 - the folder his git_commit commits in
 
@@ -682,6 +685,11 @@ class Commit(Executor):
     git_commit and carrying the message, so every host shows it as his git_commit's card and the evals find it
     (evals._cards_named). Approved, his own git_commit tool runs with the card's arguments; denied, nothing is
     committed and the run says so. The message rides in the card, so it is in the checkpoint while the run waits.
+
+    What it commits (audit 2026-11-04): the files EXECUTE's run wrote (``changes``, by default agent.written_files of
+    EXECUTE's session), and git_commit is run as MAF's loop runs an approved call, through the agent's function
+    middleware with EXECUTE's session (agent.invoke_through_middleware), not by FunctionTool.invoke alone. The user's
+    Approve on the card is what puts that session in execute mode, as the plan's Approve does (approved_plan_turn).
     """
 
     def __init__(
@@ -689,7 +697,10 @@ class Commit(Executor):
         client: Any,
         options: dict[str, Any],
         git_commit: Any,
-        changes: Callable[[], list[str]] = changed_files,
+        changes: Callable[[], list[str]],
+        agent: Any = None,
+        session: Callable[[], Any] = lambda: None,
+        modes: AgentModeProvider | None = None,
         id: str = COMMIT_STEP,
     ) -> None:
         super().__init__(id=id)
@@ -697,6 +708,9 @@ class Commit(Executor):
         self._options = options
         self._git_commit = git_commit
         self._changes = changes
+        self._agent = agent
+        self._session = session
+        self._modes = modes
 
     @handler
     async def write(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
@@ -738,9 +752,12 @@ class Commit(Executor):
         if not getattr(response, "approved", False):
             await ctx.yield_output(COMMIT_NOT_APPROVED.format(message=arguments.get("message", "")))
             return
-        # His git_commit itself (agent.py), run as the tool runs it once approved (FunctionTool.invoke).
-        result = await self._git_commit.invoke(arguments=arguments, skip_parsing=True)
-        await ctx.yield_output(str(result))
+        session = self._session()
+        if session is not None and self._modes is not None:
+            set_agent_mode(session, "execute", source_id=self._modes.source_id, available_modes=self._modes.available_modes)
+        # His git_commit itself (agent.py), through his function middleware as MAF's loop runs an approved call.
+        result = await invoke_through_middleware(self._agent, self._git_commit, {"message": arguments.get("message", "")}, session)
+        await ctx.yield_output(result)
 
 
 class Repair(Executor):
@@ -782,12 +799,19 @@ def checks_text(report: CheckReport) -> str:
     return f"Checks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
 
 
+def executor_session(executor: AgentExecutor) -> Any:
+    """The session an AgentExecutor runs its agent in: the one MAF checkpoints and restores with it
+    (on_checkpoint_save's "agent_session", _agent_executor.py:682 and :721-730). MAF has no public getter for it."""
+    return executor._session  # noqa: SLF001
+
+
 def build_steward_workflow(
-    agent: Agent[Any], checks: Checks = python_tests_for_changes, changes: Callable[[], list[str]] = changed_files
+    agent: Agent[Any], checks: Checks = python_tests_for_changes, changes: Callable[[], list[str]] | None = None
 ) -> Workflow:
     """The graph over one build_steward_agent Steward: route, then answer, or plan, read_plan, ask_approval, execute,
     check, repair, then ask_commit and commit when the checks passed on changed code, else report. ``changes`` lists
-    the changed files the commit message is written from."""
+    the files the commit message is written from: by default the files EXECUTE's run wrote, which are the ones his
+    git_commit commits (agent.written_files)."""
     from agent import OLLAMA_OPTIONS  # noqa: PLC0415
 
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
@@ -822,7 +846,12 @@ def build_steward_workflow(
     if git_commit is None:
         raise ValueError(f"Steward has no {GIT_COMMIT} tool, so the workflow's commit step cannot commit.")
     # The message's call on his own client with the router's options (his window and keep-alive).
-    commit = Commit(agent.client, base, git_commit, changes)
+    def execute_session() -> Any:
+        return executor_session(execute)
+
+    commit = Commit(
+        agent.client, base, git_commit, changes or (lambda: written_files(execute_session())), agent, execute_session, modes
+    )
     report = Report()
     # The run's output is the steps' own (a reply, a clarification, a refusal, the report, the commit's result).
     # EXECUTE's work streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and

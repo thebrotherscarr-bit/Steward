@@ -35,6 +35,24 @@ was never merged and has no entry.
 
 ### Fixed
 
+- Security audit, 2026-11-04 (each with a test that goes red when the fix is unplugged):
+  - SecondBrain's web tools are untrusted content to FIDES: `secondbrain_web_tools` connects them through
+    `labelled_mcp_tool` (`IntegrityLabel.UNTRUSTED`), as his notes and the Estate are, and WebResearchAgent records
+    with its own `fides_observer` (`web_search` and `web_fetch` are its data fetchers). FIDES stays record-only.
+  - His shell sees no keys. `LocalShellTool` gets MAF's `clean_env=True` with `shell_env()`: the names Windows, Git
+    Bash, git, Python and pytest need, the `PYTHON*` and `LC_*` ones and his own venv first; never a name `.env` sets
+    (`SECONDBRAIN_MCP_KEY` among them) nor one that reads as a secret.
+  - The workflow's commit takes only what the run wrote. `record_written_files` (function middleware) keeps each file
+    a MAF write tool wrote in the run's session; `git_commit` stages and commits only those (`git commit --only`),
+    never `git add --all -- .`, and says so when there is nothing. The commit step runs it through the agent's
+    function middleware with EXECUTE's session (`invoke_through_middleware`), not `FunctionTool.invoke` alone; a new
+    approved plan starts the list again, a repair keeps it.
+  - An error raised by SecondBrain's MCP server (notes, the Estate, the web) reaches him without the server's text
+    (`withhold_untrusted_errors`). MAF's `include_detailed_errors` is one switch per client, so it stays on for his
+    own tools, whose error text he repairs from.
+- Two stale docstrings: `hosted.py` (Steward is built per request, not once and kept warm) and `agent.py`'s team list
+  (the live build is CodeExplorer and WebResearchAgent; Coder, Reasoner and Explainer only on the unused part > 4
+  path).
 - The small-ask evals pass and fail for the right reason (audit 2026-11-04, against the cookbook's answer-level
   checks). A case whose fixture raises (`discount_bug_planted`) fails that case with the reason and the set goes on
   and records its history (`fixture_entered`; the regression and steps sets too). `answer_on_topic` scores his own
@@ -345,6 +363,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- Sensitive telemetry is off by default (security audit, 2026-11-04; MAF: sensitive events "only ... on test and
+  development environments"). `setup_halo_tracing` records message and tool content only when
+  `STEWARD_SENSITIVE_TELEMETRY` is on, so the live hosts (`hosted.py`, `mcp_app.py`, and the console and DevUI) leave
+  it out; the evals, dev runs, keep `enable_sensitive_data=True`. Set it on for a diagnosis that needs the live
+  traces' content.
 - The fixer's model is now `qwen2.5-coder:14b` (the operator, 2026-11-03), and `devstral-small-2:24b` is dropped.
   Measured that day with one model loaded at a time: qwen sits wholly on the 16 GB card at the fixer's 32K window
   (12.1 GB), reads 227 tok/s on a 2.7K prompt and 49 on a 17K one, and writes 28-46 tok/s; devstral kept 5-7 of its

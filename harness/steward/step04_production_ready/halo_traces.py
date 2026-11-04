@@ -14,8 +14,11 @@ cookbook's keys:
     execute_tool -> TOOL   (tool.name, input.value, output.value)
     anything else-> CHAIN  (sdk.span.type, sdk.span.name)
 
-Message and tool content is captured (``enable_sensitive_data``), as the cookbook's traces carry
-inputs and outputs. The file stays on this PC: ``halo_traces/`` is gitignored.
+Message and tool content (MAF's ``enable_sensitive_data``) is captured only when STEWARD_SENSITIVE_TELEMETRY is on
+(audit 2026-11-04; MAF: "Sensitive events should only be enabled on test and development environments",
+agent_framework/observability.py ObservabilitySettings). The live hosts (hosted.py, mcp_app.py) leave it off by
+default; the evals are dev runs and turn it on themselves, as the cookbook's traces carry inputs and outputs. The file
+stays on this PC: ``halo_traces/`` is gitignored.
 
 The file is capped (Kyle, 2026-11-01: "cut the traces file down to a 100MB max"; it had reached 988 MB): when a
 write takes it past HALO_TRACE_MAX_BYTES, the oldest spans are dropped and the newest half is kept, from a whole line.
@@ -23,6 +26,7 @@ write takes it past HALO_TRACE_MAX_BYTES, the oldest spans are dropped and the n
 Environment variables:
     HALO_TRACE_PATH — where to write (defaults to <repo>/halo_traces/traces.jsonl)
     HALO_TRACE_MAX_BYTES — the cap (defaults to 100 MB)
+    STEWARD_SENSITIVE_TELEMETRY — "on" (or 1, true, yes) records message and tool content; off by default
 """
 
 from __future__ import annotations
@@ -44,6 +48,13 @@ from opentelemetry.trace import SpanKind, StatusCode
 _REPO_DIR = Path(__file__).resolve().parents[3]
 HALO_TRACE_PATH = Path(os.environ.get("HALO_TRACE_PATH") or _REPO_DIR / "halo_traces" / "traces.jsonl")
 HALO_TRACE_MAX_BYTES = int(os.environ.get("HALO_TRACE_MAX_BYTES") or 100 * 1024 * 1024)
+SENSITIVE_TELEMETRY_ENV = "STEWARD_SENSITIVE_TELEMETRY"
+
+
+def sensitive_telemetry_on() -> bool:
+    """Whether his telemetry records message and tool content (STEWARD_SENSITIVE_TELEMETRY: off unless "on", "1",
+    "true" or "yes")."""
+    return os.environ.get(SENSITIVE_TELEMETRY_ENV, "").strip().lower() in {"on", "1", "true", "yes"}
 
 
 def keep_newest(path: Path, keep_bytes: int) -> None:
@@ -225,16 +236,20 @@ class HaloJsonlSpanExporter(SpanExporter):
 OTLP_PROTOCOL = "http/protobuf"
 
 
-def setup_halo_tracing(path: Path = HALO_TRACE_PATH, exporters: Sequence[Any] = ()) -> HaloJsonlSpanExporter:
+def setup_halo_tracing(
+    path: Path = HALO_TRACE_PATH, exporters: Sequence[Any] = (), sensitive: bool | None = None
+) -> HaloJsonlSpanExporter:
     """Write every span to the HALO JSONL file, alongside whatever tracing is already set up.
 
     ``exporters``: metric and log exporters for MAF's providers (hosted.py's telemetry files), used when this call is
-    the one that sets the providers up.
+    the one that sets the providers up. ``sensitive``: record message and tool content; None reads
+    STEWARD_SENSITIVE_TELEMETRY (sensitive_telemetry_on, off by default).
     """
+    sensitive = sensitive_telemetry_on() if sensitive is None else sensitive
     exporter = HaloJsonlSpanExporter(path)
     provider = trace.get_tracer_provider()
     if isinstance(provider, TracerProvider):
         provider.add_span_processor(SimpleSpanProcessor(exporter))
     else:
-        configure_otel_providers(exporters=[exporter, *exporters], enable_sensitive_data=True, otlp_protocol=OTLP_PROTOCOL)
+        configure_otel_providers(exporters=[exporter, *exporters], enable_sensitive_data=sensitive, otlp_protocol=OTLP_PROTOCOL)
     return exporter

@@ -5,8 +5,10 @@ Serves the same ``build_steward_agent`` the console uses over the Responses prot
 answers Steward's approval requests (``mcp_approval_request`` out, ``mcp_approval_response`` in).
 
 Changes from the guide for local Ollama:
-    * No Foundry project, credential, Purview or per-request scoping: there is one user, Kyle, so
-      one Steward is built at start and kept warm (its SecondBrain connection and shell stay open).
+    * No Foundry project, credential or Purview: there is one user, Kyle. Steward and his workflow are built fresh
+      for every request (steward_graph, MAF's request-aware workflow factory), as MAF's native workflow host requires;
+      what lasts between requests (each step's session, the pending approval) is in the workflow's checkpoint, and
+      his SecondBrain connection and shell are opened and closed with each build.
     * File access and the shell stay on: this runs on Kyle's own PC, not a shared container.
     * Background tasks are still released at the end of each request, as in the guide.
 
@@ -417,7 +419,8 @@ def show_workflow_failure_tracebacks() -> None:
 
 def steward_observability(**_: Any) -> None:
     """The host's configure_observability hook. The host passes connection_string, log_level and enable_sensitive_data
-    (_base.py:306-311); nothing leaves this PC, the log level is main's, and sensitive data is on, as for HALO."""
+    (_base.py:306-311); nothing leaves this PC, the log level is main's, and message content is recorded only when
+    STEWARD_SENSITIVE_TELEMETRY is on (halo_traces.sensitive_telemetry_on; off by default since 2026-11-04)."""
     show_workflow_failure_tracebacks()
     setup_halo_tracing(exporters=telemetry_file_exporters())
 
