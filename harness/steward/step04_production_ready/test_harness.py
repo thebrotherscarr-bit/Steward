@@ -2186,6 +2186,9 @@ def test_the_memory_eval_recalls_in_a_new_conversation_what_the_first_one_saved(
     forgot = [Message(role="assistant", contents=[Content.from_text("I do not know the codename.")])]
     assert not scored(evals.memory_recalled, evals.MEMORY_RECALL, forgot).passed
     assert scored(evals.memory_recalled, evals.MEMORY_REMEMBER, forgot).passed, "not the recall case"
+    # Live 2026-11-03: gpt-oss wrote the codename with a non-breaking hyphen (U+2011); that is still a recall.
+    typed = [Message(role="assistant", contents=[Content.from_text("It is codenamed Kestrel‑47.")])]
+    assert scored(evals.memory_recalled, evals.MEMORY_RECALL, typed).passed, "a Unicode hyphen is still the fact"
 
 
 def test_without_a_memory_store_nothing_is_extracted_and_hosts_pass_his_store() -> None:

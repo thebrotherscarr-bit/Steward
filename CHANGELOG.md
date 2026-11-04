@@ -15,6 +15,9 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The memory eval's recall check reads a Unicode hyphen as a hyphen. Live 2026-11-03 (the first memory eval to finish
+  with an approved run_shell), he recalled the codename in a new conversation as "Kestrel‑47" with U+2011, and the
+  check, looking for "Kestrel-47", failed a recall that had happened.
 - His service's telemetry stays out of `steward.log` (192 MB on 2026-11-03). The host's default observability, the
   microsoft-opentelemetry distro, printed every metric, span and log record as indented JSON on stdout. `hosted.py`
   now passes the host's own `configure_observability` hook `steward_observability`: spans to HALO as before; metrics
