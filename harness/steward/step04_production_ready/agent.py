@@ -58,6 +58,7 @@ from agent_framework import (
     ChatContext,
     ChatMiddleware,
     ChatResponse,
+    ChatResponseUpdate,
     Content,
     ContextProvider,
     DeduplicatingSkillsSource,
@@ -830,6 +831,61 @@ def recovered_tool_call(response: ChatResponse[Any], tools: Sequence[Any]) -> Ch
     return response
 
 
+def _could_be_a_call(text: str) -> bool:
+    """Whether a reply's opening text could be one tool call's arguments: a JSON object, or a fence around one."""
+    return text.lstrip().startswith(("{", "```"))
+
+
+def held_back_when_it_could_be_a_call(inner: ResponseStream[Any, Any], tools: Sequence[Any]) -> ResponseStream[Any, Any]:
+    """The model's stream, released as it comes unless its first text could be a call's arguments.
+
+    MAF's stream hooks cannot do this: buffering is fixed before the first update is read (ResponseStream
+    _ensure_content_configuration_mutable, _types.py:4929), an update transform cannot hold an update back (None keeps
+    it, _types.py:4555), and flat_map has no end of stream to release held updates at (Ollama's last update need not
+    carry a finish_reason, agent_framework_ollama/_chat_client.py:656). So the stream is read inside a new
+    ResponseStream, as MAF's own MessageInjectionMiddleware reads its inner stream (_sessions.py:1520-1541). Updates
+    before any text (his reasoning) and every update of a reply that opens with prose or a call pass at once. A reply
+    that opens with "{" or a fence is held to its end: then it is released as it came, or, when it was one tool's
+    arguments, as that call (its other contents, such as usage, kept). The final response is the inner one, so MAF's
+    function loop and history middleware see the same response as before (rewritten in place when recovered).
+    """
+    finals: list[ChatResponse[Any]] = []
+
+    async def released() -> Any:
+        held: list[Any] = []
+        text = ""
+        holding: bool | None = None  # None until the reply's first text or call decides it
+        async for update in inner:
+            if holding is None:
+                if any(c.type in ("function_call", "function_approval_request") for c in update.contents):
+                    holding = False
+                else:
+                    text += update.text or ""
+                    if text.strip():
+                        holding = _could_be_a_call(text)
+            if holding:
+                held.append(update)
+            else:
+                yield update
+        final = await inner.get_final_response()
+        finals.append(final)
+        if not holding:
+            return
+        if recovered_tool_call(final, tools) is None:
+            for update in held:
+                yield update
+            return
+        for update in held:
+            if rest := [c for c in update.contents if c.type != "text"]:
+                kept = copy.copy(update)
+                kept.contents = rest
+                yield kept
+        call = next(c for m in final.messages for c in m.contents if c.type == "function_call")
+        yield ChatResponseUpdate(contents=[call], role="assistant")
+
+    return ResponseStream(released(), finalizer=lambda updates: finals[-1])
+
+
 async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
     """Chat middleware: a reply that is only a tool call's arguments runs as that call, streamed or not."""
     options = context.options or {}
@@ -841,14 +897,11 @@ async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], 
         # On the stream itself, as MAF's PerServiceCallHistoryPersistingMiddleware does (_sessions.py:1802): streamed,
         # MAF's MessageInjectionMiddleware runs the rest of the chain only when its stream is read (_sessions.py:1580),
         # after the pipeline has applied the context's stream_* lists (_middleware.py:1669), so those would be lost.
-        # Buffered: the call has to reach the caller's transcript too, and a streamed update cannot be taken back.
-        # MAF's ChatResponse.to_updates is for this ("where middleware buffers a stream, decides on the complete
-        # content, and then releases it"); a transform returning None keeps the buffered updates as they came
-        # (ResponseStream._apply_transforms, _ensure_buffered_materialized). MAF's history middleware, inner to this
-        # one, persists the reply first; his hosts' InMemoryHistoryProvider keeps that same Message, rewritten here.
-        context.result = context.result.buffer_updates(result_to_updates=ChatResponse.to_updates).with_result_transform(
-            lambda final: recovered_tool_call(final, tools)
-        )
+        # Only a reply that opens like a call is held back (held_back_when_it_could_be_a_call): the call has to reach
+        # the caller's transcript, and a streamed update cannot be taken back; prose streams as before. MAF's history
+        # middleware, inner to this one, persists the reply first; his hosts' InMemoryHistoryProvider keeps that same
+        # Message, rewritten here.
+        context.result = held_back_when_it_could_be_a_call(context.result, tools)
     elif context.result is not None:
         recovered_tool_call(context.result, tools)
 

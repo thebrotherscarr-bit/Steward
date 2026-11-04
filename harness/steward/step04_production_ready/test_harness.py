@@ -540,6 +540,48 @@ def test_a_tool_call_written_as_text_runs_and_an_unclear_one_is_left_as_it_is() 
     )
 
 
+def test_a_streamed_prose_reply_reaches_the_caller_as_it_is_written() -> None:
+    """recover_text_tool_calls holds back only a reply that opens like a call ("{" or a fence): his prose answer streams
+    to the caller update by update, each while the model is still writing the next, never as one batch at the end."""
+
+    async def _go() -> tuple[list[bool], list[str], str]:
+        first_seen = asyncio.Event()
+        waited: list[bool] = []
+
+        class Writing(ScriptedChatClient):
+            """His answer in three updates; the second is written only once the caller has the first (or after 2 s)."""
+
+            def _inner_get_response(self, *, messages: Sequence[Message], stream: bool = False, **kwargs: Any) -> Any:
+                async def _stream() -> AsyncIterable[ChatResponseUpdate]:
+                    yield ChatResponseUpdate(contents=[Content.from_text("It holds ")], role="assistant")
+                    try:
+                        await asyncio.wait_for(first_seen.wait(), 2)
+                        waited.append(True)
+                    except TimeoutError:
+                        waited.append(False)
+                    yield ChatResponseUpdate(contents=[Content.from_text("the sample ")], role="assistant")
+                    yield ChatResponseUpdate(contents=[Content.from_text("project.")], role="assistant", finish_reason="stop")
+
+                return ResponseStream(_stream(), finalizer=lambda updates: ChatResponse.from_updates(updates))
+
+        texts: list[str] = []
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=Writing([]), enable_shell=False)
+            async with agent:
+                stream = agent.run("What is in harness/steward/working?", session=agent.create_session(), stream=True)
+                async for update in stream:
+                    if update.text:
+                        texts.append(update.text)
+                        first_seen.set()
+                final = await stream.get_final_response()
+        return waited, texts, final.text
+
+    waited, texts, answer = asyncio.run(_go())
+    assert waited == [True], "the first words reached the caller only after the whole reply was written"
+    assert texts == ["It holds ", "the sample ", "project."], texts
+    assert answer == "It holds the sample project."
+
+
 def test_a_tool_call_written_as_text_runs_through_the_hosted_workflow(monkeypatch: Any) -> None:
     """The live fault where it happened: EXECUTE, streamed on his host. The recovered file_access_ls runs, the loop goes
     on to the todo and his answer, and the Agent tab shows his answer, not the arguments."""
