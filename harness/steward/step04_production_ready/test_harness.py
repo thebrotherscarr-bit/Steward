@@ -1587,6 +1587,17 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
 
     assert wf.written_python_files([answered("p/c.py", True), answered("p/d.py", False)]) == ["p/c.py"], "approved writes only"
 
+    # Only writes that happened (audit 2026-11-04): an approved card his middleware or MAF's tool then refused wrote nothing.
+    def result(call_id: str, text: str) -> Message:
+        return Message(role="tool", contents=[Content.from_function_result(call_id=call_id, result=text)])
+
+    refused = "Refused: p/c.py would not be Python (invalid syntax, line 1), so nothing was written."
+    assert wf.written_python_files([answered("p/c.py", True), result("p/c.py", refused)]) == [], "a refused write is no write"
+    exists = "File 'p/c.py' already exists. To replace it, write again with overwrite set to true."
+    assert wf.written_python_files([answered("p/c.py", True), result("p/c.py", exists)]) == [], "a failed write is no write"
+    assert wf.written_python_files([answered("p/c.py", True), result("p/c.py", "Replaced 1 occurrence(s) in 'p/c.py'.")]) == ["p/c.py"]
+    assert wf.written_python_files([call("file_access_write", "p/e.py"), result("p/e.py", "File 'p/e.py' written.")]) == ["p/e.py"]
+
     # The check reads the files on disk (live 2026-11-02: an edit approved before two commit cards was missed, because
     # MAF hands the next step only the messages since the last card). A changed file is tested whatever wrote it.
     import subprocess
@@ -1776,9 +1787,11 @@ def test_the_small_asks_see_a_write_approved_on_its_card(monkeypatch: pytest.Mon
     module = "harness/steward/working/sample-project/inventory.py"
     path = steward._WORKING_DIR / module
     committed = path.read_bytes()
-    added = path.read_text(encoding="utf-8") + '\n\ndef item_count(items):\n    """The total quantity."""\n    return sum(i["quantity"] for i in items)\n'
+    added = path.read_text(encoding="utf-8") + '\n\ndef item_count(items):\n    """The total quantity."""\n    return sum(i.quantity for i in items)\n'
     plan = '{"type": "approval", "questions": [{"message": "Add item_count."}], "steps": ["Add item_count"]}'
-    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": module, "content": added})
+    write = Content.from_function_call(
+        call_id="w1", name="file_access_write", arguments={"file_name": module, "content": added, "overwrite": True}
+    )
     done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "added"}]})
     checked = f"$ pytest -q {Path(module).parent.as_posix()}\n(exit 0)\n1 passed"
     build = wf.build_steward_workflow
@@ -1796,18 +1809,27 @@ def test_the_small_asks_see_a_write_approved_on_its_card(monkeypatch: pytest.Mon
         finally:
             evals.SMALL_ASK_FILES.clear()
             evals.SMALL_ASK_ORIGINALS.clear()
+            evals.SMALL_ASK_RESULTS.clear()
         return {score.name: (score.passed, (score.sample or {}).get("reason")) for score in item.scores}
 
     message = '{"message": "Add item_count to inventory.py"}'
     scores = small([plan, write, done, "Added item_count.", message])
     assert path.read_bytes() == committed, "the sample project is put back after the run"
     assert evals.CASE_ERRORS == {}, evals.CASE_ERRORS
-    for name in ("check_covers_writes", "edit_keeps_file_whole", "commit_by_tool", "commit_message_specific"):
+    for name in ("check_covers_writes", "edit_keeps_file_whole", "commit_by_tool", "commit_message_specific", "item_count_works"):
         assert scores[name][0] is True, (name, scores[name])
-    # A run that writes nothing: the same checks fail, as they must.
+    assert scores["answer_on_topic"] == (True, "On topic."), "his own reply, not the denied commit's sentence"
+    # A run that writes nothing: the same checks fail, as they must, and so does the result.
     scores = small([plan, done, "Added item_count.", message])
     assert scores["check_covers_writes"] == (False, "No approved .py write in the run."), scores
     assert scores["edit_keeps_file_whole"] == (False, "The run wrote no .py file."), scores
+    assert scores["item_count_works"][0] is False, scores
+    # An approved card the tool then refused (no overwrite: "already exists") wrote nothing (audit 2026-11-04).
+    refused = Content.from_function_call(call_id="w2", name="file_access_write", arguments={"file_name": module, "content": added})
+    scores = small([plan, refused, done, "Added item_count.", message])
+    assert path.read_bytes() == committed
+    assert scores["edit_keeps_file_whole"] == (False, "The run wrote no .py file."), scores
+    assert scores["check_covers_writes"] == (False, "No approved .py write in the run."), scores
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:
@@ -2869,6 +2891,9 @@ def test_the_small_asks_check_each_of_todays_failures() -> None:
     assert passed(evals.edit_keeps_file_whole, new_code, [])
     evals.SMALL_ASK_FILES[new_code] = {module: 'def order_total(items):\n\t"""Total."""\n    return 0\n'}
     assert not passed(evals.edit_keeps_file_whole, new_code, [])
+    # A file cut down to a stub that parses lost what it had (audit 2026-11-04).
+    evals.SMALL_ASK_FILES[new_code] = {module: 'def item_count(items):\n    return 0\n'}
+    assert scored(evals.edit_keeps_file_whole, new_code, []).reason == f"{module} lost its ['order_total']."
     evals.SMALL_ASK_FILES.clear()
     evals.SMALL_ASK_ORIGINALS.clear()
 
@@ -2890,6 +2915,27 @@ def test_the_small_asks_check_each_of_todays_failures() -> None:
     # 7. An off-topic final answer.
     assert passed(evals.answer_on_topic, discount, [said("Fixed the discount: it divides by 100 now.")])
     assert not passed(evals.answer_on_topic, discount, [said("Paris is the capital of France.")])
+    # His own reply, not the harness's: the denied commit's sentence quotes the message, and named item_count for him
+    # (audit 2026-11-04); ask_commit's checks are the harness's too.
+    denied = Message(
+        role="assistant", author_name=wf.COMMIT_STEP,
+        contents=[Content.from_text(wf.COMMIT_NOT_APPROVED.format(message="Add item_count to inventory.py"))],
+    )
+    checks = Message(role="assistant", author_name="ask_commit", contents=[Content.from_text("Checks passed:\nitem_count")])
+    assert not passed(evals.answer_on_topic, new_code, [said("Paris is the capital of France."), checks, denied])
+    unnamed = said(wf.COMMIT_NOT_APPROVED.format(message="Add item_count to inventory.py"))
+    assert not passed(evals.answer_on_topic, new_code, [said("Done."), unnamed]), "the sentence, whoever is named its author"
+    assert passed(evals.answer_on_topic, new_code, [said("Added item_count to inventory.py."), checks, denied])
+
+    # 8. The result: each ask's work does the job (measured after its run; here, canned).
+    assert passed(evals.item_count_works, readme, []), "not the README ask's check"
+    assert scored(evals.discount_test_passes, discount, []).reason == "Not measured: the ask did not run."
+    evals.SMALL_ASK_RESULTS[discount] = {"discount_test_passes": (False, "test_percent_discount does not pass.")}
+    assert not passed(evals.discount_test_passes, discount, [])
+    evals.SMALL_ASK_RESULTS[discount] = {"discount_test_passes": (True, "test_percent_discount passes.")}
+    assert passed(evals.discount_test_passes, discount, [])
+    evals.SMALL_ASK_RESULTS.clear()
+    assert {"item_count_works", "discount_test_passes"} <= {e.__name__ for e in evals.SMALL_ASK_EVALUATORS}
 
 
 def test_an_eval_run_never_touches_stewards_real_memory() -> None:
@@ -2989,7 +3035,7 @@ def test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop(tmp_path: 
     assert evals.gate(9, 14, baselines=baselines) == 1, "a drop fails the gate"
     assert evals.gate(10, 14, baselines=baselines) == 0
     assert evals.gate(11, 14, baselines=baselines) == 0
-    assert evals.gate(10, 14) == 0, "the recorded baseline is 10 of 14"
+    assert evals.gate(10, 16) == 0, "the recorded baseline is 10, now of 16 (the two result checks added 2026-11-04)"
     assert any("evals.py" in part for check in loop.GATE_CHECKS for part in check), "the loop's gate runs the evals"
 
 
@@ -3881,3 +3927,167 @@ def test_every_pin_in_pyproject_is_locked_and_every_action_is_pinned_to_a_commit
         for use in uses:
             assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*", use.strip()), f"{workflow.name}: {use}"
         assert "-latest" not in " ".join(re.findall(r"(?m)^\s*runs-on:\s*(.+)$", text)), workflow.name
+
+
+
+def test_a_small_ask_whose_fixture_raises_fails_that_case_and_the_set_records_its_history(monkeypatch: Any) -> None:
+    """Audit 2026-11-04: a raising discount_bug_planted left the small set through run_small_asks, so no ask was scored
+    and no history line written. Now that case fails with the fixture's reason, the other asks run, the report and
+    the exit code are the set's, and its history line is written."""
+    import contextlib
+    import json
+    from types import SimpleNamespace
+
+    import evals
+    from agent_framework import AgentResponse
+
+    ran: list[str] = []
+    approvals: list[set[str]] = []
+
+    async def one_run(query: str, approve: set[str], **build: Any) -> Any:
+        ran.append(query)
+        approvals.append(set(approve))
+        return SimpleNamespace(name="Steward"), AgentResponse(messages=[])
+
+    @contextlib.contextmanager
+    def raising() -> Any:
+        raise RuntimeError("inventory.py no longer holds the fixed discount line\nmore")
+        yield  # pragma: no cover
+
+    async def scored_small(steward: Any, asks: list[str], responses: list[Any]) -> Any:
+        assert len(responses) == len(asks), "every ask has its response, the failed one empty"
+        return SimpleNamespace(
+            passed=0, total=len(asks), all_passed=False,
+            items=[
+                SimpleNamespace(
+                    input_text=ask, status="fail",
+                    scores=[SimpleNamespace(name="run_completed", passed=False, sample={"reason": evals.CASE_ERRORS.get(ask, "x")})],
+                )
+                for ask in asks
+            ],
+        )
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "run_steward", one_run)
+    monkeypatch.setattr(evals, "discount_bug_planted", raising)
+    monkeypatch.setattr(evals, "score_small_asks", scored_small)
+    monkeypatch.setattr(evals, "SMALL_ASK_RESULT_CHECKS", {})  # no result measured here
+    try:
+        assert asyncio.run(evals.small_main()) == 1
+        reason = "the case's fixture raised RuntimeError: inventory.py no longer holds the fixed discount line"
+        assert evals.CASE_ERRORS[evals.SMALL_ASK_DISCOUNT] == reason, evals.CASE_ERRORS
+        assert ran == [evals.SMALL_ASK_NEW_CODE, evals.SMALL_ASK_README], "the other asks still ran"
+        assert all("run_shell" not in approve for approve in approvals), "a shell card is judged by its command (card_approved)"
+        [line] = evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()
+        history = json.loads(line)
+        assert history["set"] == "small" and history["exit_code"] == 1, history
+        assert {"name": "run_completed", "reason": reason} in history["cases"][1]["failed_checks"], history
+        # The regression set: only the diagnosis case fails with the fixture; the rest still run.
+        ran.clear()
+        monkeypatch.setattr(evals, "evaluate_agent", lambda **kwargs: asyncio.sleep(0, [SimpleNamespace(
+            passed=0, total=1, all_passed=False, items=[])]))
+        assert asyncio.run(evals.main()) == 1
+        assert ran == [q for q in evals.STEWARD_EVAL_QUERIES if q != evals.STEWARD_EVAL_QUERIES[2]], ran
+        assert evals.CASE_ERRORS[evals.STEWARD_EVAL_QUERIES[2]] == reason
+    finally:
+        evals.CASE_ERRORS.clear()
+        evals.SMALL_ASK_FILES.clear()
+        evals.SMALL_ASK_ORIGINALS.clear()
+
+
+def test_the_small_asks_result_checks_run_the_sample_project() -> None:
+    """Audit 2026-11-04 (the cookbook's answer-level checks): the process checks passed runs whose work did not do the
+    job. The discount ask's result is the sample project's own test_percent_discount passing; the item_count ask's is
+    item_count, imported in a fresh Python, returning the total quantity. Measured on the files as they stand."""
+    import evals
+
+    module = steward._WORKING_DIR / INVENTORY
+    committed = module.read_bytes()
+    try:
+        assert evals.discount_test_result() == (True, "test_percent_discount passes."), "the committed project is fixed"
+        with evals.discount_bug_planted():
+            passed, reason = evals.discount_test_result()
+        assert not passed and reason.startswith("test_percent_discount does not pass"), reason
+        passed, reason = evals.item_count_result()
+        assert not passed and "ImportError" in reason, "the committed project has no item_count"
+        body = module.read_text(encoding="utf-8")
+        module.write_text(body + "\n\ndef item_count(items):\n    return len(items)\n", encoding="utf-8")
+        passed, reason = evals.item_count_result()
+        assert not passed and "gave 2, not 5" in reason, "a count of items is not the total quantity"
+        module.write_text(body + "\n\ndef item_count(items):\n    return sum(i.quantity for i in items)\n", encoding="utf-8")
+        assert evals.item_count_result() == (True, "item_count returns the total quantity (5).")
+    finally:
+        module.write_bytes(committed)
+
+
+def test_the_evals_approve_only_the_sample_projects_pytest_on_a_shell_card() -> None:
+    """The evals run real commands on his PC: a run_shell card is approved only when its command is the sample
+    project's pytest, and every other shell command is denied, as he would, in the small set's runner and the
+    steps set's alike (audit 2026-11-04: the steps set approved every shell command)."""
+    from types import SimpleNamespace
+
+    import evals
+    from agent_framework import AgentResponseUpdate, FileAccessProvider
+
+    allowed = [
+        "pytest -q harness/steward/working/sample-project",
+        "python -m pytest -q -rA harness/steward/working/sample-project",
+        r".venv\Scripts\python.exe -m pytest -q -p no:cacheprovider harness\steward\working\sample-project",
+        "pytest harness/steward/working/sample-project/test_inventory.py::OrderTotalTests::test_percent_discount -q",
+    ]
+    denied = [
+        "del x", "rm -rf x", "curl https://example.com", "pytest -q", "pytest -q harness/steward",
+        "pytest -q harness/steward/working/sample-project; rm -rf x",
+        "pytest -q harness/steward/working/sample-project && curl https://example.com",
+        "pytest -q harness/steward/working/sample-project | sh", "pytest -q harness/steward/working/sample-project > x",
+        "pytest -q harness/steward/working/sample-project/../../..", "pytest --rootdir=/ harness/steward/working/sample-project",
+    ]
+    assert all(evals.is_sample_project_pytest(c) for c in allowed), [c for c in allowed if not evals.is_sample_project_pytest(c)]
+    assert not any(evals.is_sample_project_pytest(c) for c in denied), [c for c in denied if evals.is_sample_project_pytest(c)]
+
+    def card(name: str, arguments: dict[str, Any], call_id: str) -> Any:
+        call = Content.from_function_call(call_id=call_id, name=name, arguments=arguments)
+        return Content.from_function_approval_request(id=call_id, function_call=call)
+
+    cards = [
+        card("run_shell", {"command": "rm -rf x"}, "s1"),
+        card("run_shell", {"command": "pytest -q harness/steward/working/sample-project"}, "s2"),
+        card("run_shell", {"command": "curl https://example.com"}, "s3"),
+        card(FileAccessProvider.WRITE_TOOL_NAME, {"file_name": "x.py", "content": "x = 1"}, "w1"),
+        card("git_commit", {"message": "Add x"}, "c1"),
+    ]
+    expected = {"s1": False, "s2": True, "s3": False, "w1": True, "c1": False}
+    writes = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001
+
+    # The steps set's runner (_run_workflow_answering_cards), with "run_shell" even named in its set: still judged.
+    class Workflow:
+        def __init__(self) -> None:
+            self.answers: dict[str, Any] = {}
+
+        async def run(self, query: Any = None, *, stream: bool = True, responses: Any = None) -> Any:
+            if responses is None:
+                for c in cards:
+                    yield SimpleNamespace(type="request_info", request_id=c.id, data=c)
+            else:
+                self.answers.update(responses)
+
+    workflow = Workflow()
+    asyncio.run(evals._run_workflow_answering_cards(workflow, "q", {*writes, "run_shell"}))  # noqa: SLF001
+    assert {k: v.approved for k, v in workflow.answers.items()} == expected, workflow.answers
+
+    # The small set's runner (_run_answering_cards), as run_steward drives the workflow agent.
+    class Agent:
+        def __init__(self) -> None:
+            self.answers: list[Any] = []
+
+        async def run(self, message: Any, *, session: Any = None, stream: bool = True) -> Any:
+            if isinstance(message, str):
+                for c in cards:
+                    yield AgentResponseUpdate(contents=[c], role="assistant")
+            else:
+                self.answers += list(message.contents)
+
+    agent = Agent()
+    asyncio.run(evals._run_answering_cards(agent, None, "q", writes))  # noqa: SLF001
+    assert {a.id: a.approved for a in agent.answers} == expected, agent.answers
