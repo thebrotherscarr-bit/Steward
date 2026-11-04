@@ -34,6 +34,12 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 4, piece 4.4: background agents finish. MAF's `background_tasks_running` and
+  `background_tasks_running_message` are in his harness loop (`plan_reply_loop`, checked after its other conditions):
+  while a background task (CodeExplorer, WebResearchAgent) is still running, the turn does not end, and the loop tells
+  him which tasks still run and to wait for their results. Before, a turn could end while a background agent still
+  ran. With no task running the loop is as before, and `loop_max_iterations` still bounds it.
+  `test_a_turn_does_not_end_while_a_background_agent_still_runs`.
 - Step 6: the split fixer (the operator, 2026-11-03: "the fixer doesn't need some big huge model"), Aider's architect
   and editor in MAF's pieces. Steward diagnoses on his own model (gpt-oss reads long prompts fast) and hands each edit
   to the coder with his new `hand_to_coder` tool: a file, at most 80 lines, and the change in words. A new `HandToCoder`

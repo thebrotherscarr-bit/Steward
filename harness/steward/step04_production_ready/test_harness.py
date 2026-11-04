@@ -1486,3 +1486,58 @@ def test_steward_and_his_team_send_their_own_ollama_window_and_keep_alive() -> N
     assert {k: research.default_options.get(k) for k in wanted} == wanted
     assert fixer.default_options["num_ctx"] == loop.FIXER_CONTEXT and fixer.default_options["keep_alive"] == "30m"
     assert steward._STEWARD_CONTEXT == wanted["num_ctx"], "the compaction budget is the same window"
+
+
+def test_a_turn_does_not_end_while_a_background_agent_still_runs() -> None:
+    """Step 4, 4.4: MAF's background_tasks_running in his harness loop. A turn that started CodeExplorer does not end
+    while the task still runs: the loop reminds him which task (background_tasks_running_message), he waits for it,
+    and the loop stops once no task runs."""
+    from agent_framework import Agent, AgentModeProvider, BackgroundAgentsProvider, set_agent_mode
+
+    start = Content.from_function_call(
+        call_id="s1",
+        name="background_agents_start_task",
+        arguments={"agent_name": "CodeExplorer", "input": "Explore harness/.", "description": "Explore harness"},
+    )
+    wait = Content.from_function_call(call_id="w1", name="background_agents_wait_for_first_completion", arguments={"task_ids": [1]})
+
+    async def _go() -> tuple[ScriptedChatClient, Any]:
+        finish = asyncio.Event()
+
+        class Steward(ScriptedChatClient):
+            """Lets CodeExplorer finish only once the loop has told him a task still runs."""
+
+            def _inner_get_response(self, *, messages: Sequence[Message], **kwargs: Any) -> Any:
+                if any("background task(s) running" in (m.text or "") for m in messages):
+                    finish.set()
+                return super()._inner_get_response(messages=messages, **kwargs)
+
+        class Explorer(ScriptedChatClient):
+            """CodeExplorer's model, still busy until the gate opens."""
+
+            def _inner_get_response(self, **kwargs: Any) -> Any:
+                reply = super()._inner_get_response(**kwargs)
+
+                async def _later() -> ChatResponse:
+                    await finish.wait()
+                    return await reply
+
+                return _later()
+
+        client = Steward([start, "Started CodeExplorer.", wait, "CodeExplorer is done."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            [team] = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
+            team._agents["codeexplorer"] = Agent(client=Explorer(["harness/ holds the steps."]), name="CodeExplorer")
+            async with agent:
+                session = agent.create_session()
+                modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                await agent.run("Ask CodeExplorer what harness/ holds.", session=session)
+                return client, session.state[team.source_id]
+
+    client, state = asyncio.run(_go())
+    assert len(client.calls) == 4, f"{len(client.calls)} model calls: the turn ended while CodeExplorer still ran"
+    reminder = " ".join(m.text or "" for m in client.calls[2]["messages"])
+    assert "#1 (CodeExplorer): Explore harness" in reminder, "the loop names the running task"
+    assert [task["status"] for task in state["tasks"]] == ["completed"], "and stops once none runs"
