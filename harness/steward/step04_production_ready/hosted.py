@@ -72,7 +72,15 @@ from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent, repeats_what_was_shown, steward_memory_store, warn_model_drift  # noqa: E402
+from agent import (  # noqa: E402
+    STATE_RETENTION_DAYS,
+    STATE_RETENTION_DAYS_ENV,
+    build_steward_agent,
+    repeats_what_was_shown,
+    state_retention_days,
+    steward_memory_store,
+    warn_model_drift,
+)
 from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import HALO_TRACE_PATH, setup_halo_tracing  # noqa: E402
 
@@ -485,16 +493,11 @@ def steward_observability(**_: Any) -> None:
 # than the window: a lineage's head and response records, except a head whose response waits on an approval, and
 # every checkpoint no kept record names. The response files, which have no SDK call for it, go by date, keeping each
 # response a kept record names and every item a kept response refers to.
-STATE_RETENTION_DAYS = 14
-STATE_RETENTION_DAYS_ENV = "STEWARD_STATE_RETENTION_DAYS"
+# The window (STATE_RETENTION_DAYS, STATE_RETENTION_DAYS_ENV, state_retention_days) is agent.py's since 2026-11-04, so
+# the console's and the MCP door's history files (agent.steward_history_provider) keep the same rule; imported above.
 _BINDINGS_ROOT = "workflow_bindings/v2/"  # FoundryWorkflowBindingStore's store name (_workflow_state.py:214)
 _CHECKPOINTS_ROOT = FoundryCheckpointStore.DEFAULT_ROOT_SCOPE + "/"
 _RUNNING_RESPONSE = ("queued", "in_progress")
-
-
-def state_retention_days() -> int:
-    """Days the host keeps its state: STEWARD_STATE_RETENTION_DAYS, or STATE_RETENTION_DAYS."""
-    return int(os.environ.get(STATE_RETENTION_DAYS_ENV, STATE_RETENTION_DAYS))
 
 
 def _state_store_names() -> list[str]:

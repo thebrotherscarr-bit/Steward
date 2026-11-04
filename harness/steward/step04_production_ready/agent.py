@@ -77,6 +77,7 @@ from agent_framework import (
     ContextProvider,
     DeduplicatingSkillsSource,
     FileAccessProvider,
+    FileHistoryProvider,
     FileMemoryProvider,
     FileSkillsSource,
     FileSystemAgentFileStore,
@@ -2136,6 +2137,40 @@ def whole_write_problem(file_name: str, content: str) -> str | None:
 
 
 # </code_punctuation>
+
+
+# <history>
+# His conversation history on disk (2026-11-04): MAF's FileHistoryProvider (agent_framework/_sessions.py), one
+# append-only JSON Lines file per session_id under the Steward repo's gitignored storage/history, so a console or MCP
+# session keeps its history across a restart; InMemoryHistoryProvider kept it in the session's state only. The
+# Responses host keeps its own checkpoints and stays on InMemoryHistoryProvider. A session's file is kept for the
+# host-state window (hosted.py's <retention>, STEWARD_STATE_RETENTION_DAYS, 14 days) since it was last written:
+# FileHistoryProvider has no expiry of its own, so older files are removed when the provider is made, at host start.
+STATE_RETENTION_DAYS = 14
+STATE_RETENTION_DAYS_ENV = "STEWARD_STATE_RETENTION_DAYS"
+HISTORY_DIR = _STEWARD_DIR.parents[1] / "storage" / "history"
+
+
+def state_retention_days() -> int:
+    """Days the host keeps its state: STEWARD_STATE_RETENTION_DAYS, or STATE_RETENTION_DAYS."""
+    return int(os.environ.get(STATE_RETENTION_DAYS_ENV, STATE_RETENTION_DAYS))
+
+
+def steward_history_provider(path: Path = HISTORY_DIR, *, now: float | None = None) -> FileHistoryProvider:
+    """His history provider for the console and the MCP door: FileHistoryProvider on ``path``, after removing each
+    session's file not written within state_retention_days()."""
+    provider = FileHistoryProvider(path)  # makes the folder
+    cutoff = (time.time() if now is None else now) - 86_400 * state_retention_days()
+    removed = 0
+    for old in path.glob("*.jsonl"):
+        if old.stat().st_mtime < cutoff:
+            old.unlink(missing_ok=True)
+            removed += 1
+    logger.info("History in %s; %d session(s) older than %d days removed.", path, removed, state_retention_days())
+    return provider
+
+
+# </history>
 
 
 # <automatic_memory>

@@ -4614,3 +4614,46 @@ def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
     assert asyncio.run(_go(4)) == ["CodeExplorer"], "SecondBrain is not connected here, so no WebResearchAgent"
     with pytest.raises(ValueError, match="parts 1 to 4"):
         asyncio.run(_go(5))
+
+
+def test_a_sessions_history_survives_rebuilding_the_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The console and the MCP door keep each session's history in MAF's FileHistoryProvider (storage/history), so a
+    session continued after a restart (a new build, a new provider over the same folder) still has its history; a
+    session's file not written within the host-state window (14 days) is removed at start."""
+    import inspect
+    import os as _os
+    import time as _time
+
+    import console_app
+    import hosted
+    import mcp_app
+
+    history = tmp_path / "history"
+
+    async def turn(text: str) -> ScriptedChatClient:
+        client = ScriptedChatClient([f"Reply to {text}."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, history_provider=steward.steward_history_provider(history)
+            )
+            async with agent:
+                await agent.run(text, session=agent.create_session(session_id="kyle-1"))
+        return client
+
+    asyncio.run(turn("Remember Juniper"))
+    second = asyncio.run(turn("What did I ask?"))
+    sent = " ".join(m.text or "" for m in second.calls[0]["messages"])
+    assert "Remember Juniper" in sent and "Reply to Remember Juniper." in sent, "the history is read back after a rebuild"
+    [kept] = list(history.glob("*.jsonl"))
+
+    old = history / "old-session.jsonl"
+    old.write_text("", encoding="utf-8")
+    stale = _time.time() - 86_400 * (steward.STATE_RETENTION_DAYS + 1)
+    _os.utime(old, (stale, stale))
+    monkeypatch.delenv(steward.STATE_RETENTION_DAYS_ENV, raising=False)
+    steward.steward_history_provider(history)
+    assert not old.exists() and kept.exists(), "only a session older than the window goes"
+    assert steward.HISTORY_DIR.parts[-2:] == ("storage", "history") and steward.HISTORY_DIR.parents[1] == steward._STEWARD_DIR.parents[1]
+    assert hosted.state_retention_days is steward.state_retention_days, "one retention rule for the host and history"
+    for host in (console_app, mcp_app):
+        assert "history_provider=steward_history_provider()" in inspect.getsource(host.main), host.__name__
