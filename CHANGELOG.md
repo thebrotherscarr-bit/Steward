@@ -15,6 +15,8 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A denied commit says which change was not committed: `The commit "<message>" was not approved, so nothing was
+  committed.` (live eval 2026-11-04: the bare sentence left a denied run's last reply naming nothing).
 - He never asks about committing in words (live evals 2026-11-04, three runs: "Do you approve this commit?" in prose,
   so no card). The commit step writes only the message: one structured-output call (`CommitMessage`, one line of at
   most 72 characters, at least two words), then the workflow raises his `git_commit` card itself; Approve commits,

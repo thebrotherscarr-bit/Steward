@@ -1604,7 +1604,8 @@ def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> N
     cards, outputs = asyncio.run(_go())
     assert cards == [wf.APPROVE_PLAN, "git_commit"], "the commit asked on its own card, after the checks"
     assert steward._git("rev-parse", "HEAD").stdout == head, "the denied commit did not run"
-    assert outputs == ["Fixed x.", "Checks passed:\n1 passed", wf.COMMIT_NOT_APPROVED], outputs
+    assert outputs[:2] == ["Fixed x.", "Checks passed:\n1 passed"], outputs
+    assert outputs[2].startswith('The commit "') and outputs[2].endswith("was not approved, so nothing was committed."), outputs
     assert len(client.calls) == 4, "plan, execute's two, the commit message's one"
 
 
@@ -1661,7 +1662,7 @@ def test_the_commit_step_writes_only_the_message_and_the_workflow_raises_the_git
 
     _, messages, shown, committed = run(['{"message": "Add item_count to inventory.py"}'], answer=False)
     assert messages == ["Add item_count to inventory.py"] and committed == [], "denied: nothing committed"
-    assert shown[-1] == wf.COMMIT_NOT_APPROVED, shown
+    assert shown[-1] == wf.COMMIT_NOT_APPROVED.format(message="Add item_count to inventory.py"), "a denial names what was not committed"
 
     # Twice unparseable (prose, then a bare word the schema's check refuses): the built message, never empty.
     _, messages, _, committed = run([prose, '{"message": "Update"}'], answer=True)
