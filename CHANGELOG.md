@@ -75,6 +75,14 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A step ended with no call after malformed tool calls (steps eval 2026-11-04 21:52, head 90dc8d4: three "error parsing
+  tool call" in EXECUTE, "No write to inventory.py. Calls: []"). Ollama's error carries the model's raw text; when it
+  decodes leniently (a raw line break inside a string, text after the object) to arguments that fit exactly one offered
+  tool, or names one (`tool_call_in_raw`, the fit rule `tool_call_in_text` uses), it runs as that call, given back as
+  Ollama's own tool call. When the retries and the one unload are spent, the model is asked once more with the parse
+  error as a correction turn (`TOOL_CALL_CORRECTION`) before the error is the run's. The steps log did not hold the
+  raw text, so the test replays a write whose code carries raw line breaks. Test:
+  `test_a_malformed_tool_call_in_execute_is_recovered_or_corrected_and_the_write_happens`.
 - A run ended by a cut connection after the stale-runner unload (eval run 2026-11-04 21:46, README ask: two malformed
   tool calls, the unload, then httpx's `ReadError`). The unload ends the runner and cuts the connection it was serving,
   so within `_AFTER_UNLOAD_SECONDS` (120 s) of an unload a call cut by `httpx.ReadError` or `RemoteProtocolError`
