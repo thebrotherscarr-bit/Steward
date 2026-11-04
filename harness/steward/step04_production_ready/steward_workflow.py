@@ -330,6 +330,9 @@ def written_python_files(messages: Sequence[Message]) -> list[str]:
 
 # Set on the check's own pytest, so a workflow run inside those tests does not start the check again.
 _CHECK_RUNNING = "STEWARD_CHECK_RUNNING"
+# pytest's exit code when it collected no tests (pytest.ExitCode.NO_TESTS_COLLECTED).
+_NO_TESTS_COLLECTED = 5
+NO_TESTS_RAN = "No tests ran for the changed files in {target}: add a test there that covers the change."
 
 
 def changed_python_files(workspace: Path) -> list[str]:
@@ -342,7 +345,11 @@ def changed_python_files(workspace: Path) -> list[str]:
 
 
 def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None = None) -> tuple[bool, str] | None:
-    """The tests in the folder of each changed .py file (pytest; "no tests collected" passes). None when no code changed.
+    """The tests in the folder of each changed .py file (pytest). None when no code changed (a docs-only change).
+
+    A folder where pytest collects no tests (its exit 5) fails the check with NO_TESTS_RAN, which the repair reads: a
+    code change nothing tested has passed nothing (audit, 2026-11-03: the check passed vacuously). The cookbook's
+    repair loops: the artifact "has to satisfy the checks that matter".
 
     The check reads the files on disk, not EXECUTE's messages: the cookbook's repair loops validate the artifact itself
     ("The repaired notebook has to satisfy the checks that matter"), and MAF's AgentExecutor hands the next step only
@@ -367,8 +374,11 @@ def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None
             command, cwd=workspace, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
             env={**os.environ, _CHECK_RUNNING: "1"},
         )
-        outputs.append(f"$ pytest -q {target}\n(exit {done.returncode})\n{(done.stdout + done.stderr)[-_OUTPUT_TAIL:]}")
-        passed = passed and done.returncode in (0, 5)  # 5: no tests collected
+        output = f"$ pytest -q {target}\n(exit {done.returncode})\n{(done.stdout + done.stderr)[-_OUTPUT_TAIL:]}"
+        if done.returncode == _NO_TESTS_COLLECTED:
+            output += "\n" + NO_TESTS_RAN.format(target=target)
+        outputs.append(output)
+        passed = passed and done.returncode == 0
     return passed, "\n\n".join(outputs)
 
 

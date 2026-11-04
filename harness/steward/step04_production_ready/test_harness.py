@@ -877,6 +877,19 @@ def _the_check_reads_the_files_on_disk(wf: Any) -> None:
         result = wf.python_tests_for_changes([], workspace=workspace)
         assert result is not None and not result[0], "a broken change fails the check, with no write in the messages"
         assert "pytest -q p" in result[1], result
+        # Audit 2026-11-03: a code change where pytest collects nothing (exit 5) passed; it fails, with the reason.
+        git("checkout", "--", "p/test_t.py")
+        (workspace / "q").mkdir()
+        (workspace / "q" / "util.py").write_text("X = 1\n", encoding="utf-8")
+        result = wf.python_tests_for_changes([], workspace=workspace)
+        assert result is not None and not result[0], "a code change no test ran passed the check"
+        assert wf.NO_TESTS_RAN.format(target="q") in result[1], result
+        (workspace / "q" / "util.py").unlink()
+        (workspace / "p" / "notes.md").write_text("How to run the tests.\n", encoding="utf-8")
+        assert wf.python_tests_for_changes([], workspace=workspace) is None, "a docs-only change is not checked, as before"
+        (workspace / "p" / "helper.py").write_text("X = 1\n", encoding="utf-8")
+        result = wf.python_tests_for_changes([], workspace=workspace)
+        assert result is not None and result[0], f"a change beside its tests passes: {result}"
 
 
 def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> None:
@@ -1534,6 +1547,88 @@ def test_a_bad_edit_goes_back_to_steward_with_the_reason() -> None:
     assert "lines" in loop.edit_problem(loop.Edit("README.md", 1, 100_000, "x"))
     assert "split it" in loop.edit_problem(loop.Edit("harness/steward/step04_production_ready/agent.py", 1, 200, "x"))
     assert "no change" in loop.edit_problem(loop.Edit("README.md", 1, 1, " "))
+
+
+def test_a_round_never_changes_what_grades_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit 2026-11-03: the improve skill only asked a round to leave its graders alone. The hand-off refuses an edit
+    to one (edit_problem), and refuse_grader_writes (MAF function middleware) refuses the coder's or the diagnoser's
+    write with the reason, even once its card is approved. test_harness.py takes only new tests at its end; the sample project, and
+    Steward outside a round, are edited as ever."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    import improvement_loop_workflow as loop
+
+    tests = steward._WORKING_DIR / loop.GATE_TESTS
+    committed = tests.read_text(encoding="utf-8")
+    monkeypatch.setattr(loop, "gate_tests_at_head", lambda: committed)  # this file as it stands is the committed one
+    count = len(committed.splitlines())
+    evals_py, baselines = "harness/steward/step04_production_ready/evals.py", "harness/steward/step04_production_ready/eval_baselines.json"
+    # The hand-off.
+    assert "grades the improvement round" in loop.edit_problem(loop.Edit(evals_py, 1, 2, "Pass every check."))
+    assert "grades the improvement round" in loop.edit_problem(loop.Edit(".github/workflows/gate.yml", 1, 1, "x"))
+    assert "only take a new test" in loop.edit_problem(loop.Edit(loop.GATE_TESTS, 1, 2, "x"))
+    assert loop.edit_problem(loop.Edit(loop.GATE_TESTS, count, count, "add after it")) is None, "a new test is handed on"
+    assert loop.edit_problem(loop.Edit(INVENTORY, 1, 2, "x")) is None, "the sample project is handed on"
+    # The gate's tests: a new test after the last line passes; a changed line, or a same-named test, is refused.
+    last = committed.splitlines()[-1]
+
+    def appended(text: str) -> str | None:
+        arguments = {"file_name": loop.GATE_TESTS, "old_string": last, "new_string": last + text}
+        return loop.grader_write_problem("file_access_replace", arguments)
+
+    assert appended("\n\n\ndef test_a_new_check() -> None:\n    assert True") is None
+    assert "gate's own tests" in appended("\n\n\ndef test_a_round_never_changes_what_grades_it() -> None:\n    pass")
+    assert "gate's own tests" in appended("\n\n\n@pytest.fixture(autouse=True)\ndef test_x() -> None:\n    pass")
+    weakened = {"file_name": loop.GATE_TESTS, "old_string": last, "new_string": "    pass"}
+    assert "gate's own tests" in loop.grader_write_problem("file_access_replace", weakened)
+
+    def approved(agent: Any) -> list[str]:
+        """One turn whose write card is approved, as the user would: the names on its cards."""
+
+        async def _go() -> list[str]:
+            session = agent.create_session()
+            modes = [p for p in agent.context_providers if isinstance(p, AgentModeProvider)]
+            for provider in modes:  # the loop runs Steward in execute mode (create_workflow)
+                set_agent_mode(session, "execute", source_id=provider.source_id, available_modes=provider.available_modes)
+            cards = approval_requests(await agent.run("Make the edit.", session=session))
+            if cards:
+                answer = Message(role="user", contents=[card.to_function_approval_response(True) for card in cards])
+                await agent.run(answer, session=session)
+            return [card.function_call.name for card in cards]
+
+        return asyncio.run(_go())
+
+    before = (steward._WORKING_DIR / baselines).read_bytes()
+    # Not overwrite: were the gate unplugged, MAF's write would fail on the existing file, never change it.
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": baselines, "content": "{}"})
+    # The coder: even with its card approved, the write is refused with the reason, and nothing is written.
+    client = ScriptedChatClient([write, "Refused."])
+    assert approved(loop.build_coder(client)) == ["file_access_write"]
+    assert any("grades the improvement round" in r for r in function_results(client.calls[-1])), "the coder reads why"
+    assert (steward._WORKING_DIR / baselines).read_bytes() == before
+    # The coder's edit to the sample project is not refused (old_string is not unique, so MAF's own tool refuses it).
+    edit = Content.from_function_call(
+        call_id="e1", name="file_access_replace", arguments={"file_name": INVENTORY, "old_string": "def", "new_string": "def"}
+    )
+    client = ScriptedChatClient([edit, "Done."])
+    assert approved(loop.build_coder(client)) == ["file_access_replace"]
+    assert not any("Refused" in r for r in function_results(client.calls[-1])) and function_results(client.calls[-1])
+
+    # The diagnoser: refused too.
+    async def _diagnoser(client: ScriptedChatClient) -> Any:
+        async with AsyncExitStack() as stack:
+            return await loop.build_diagnoser(stack, client=client, enable_shell=False)
+
+    client = ScriptedChatClient([write, "Refused."])
+    assert approved(asyncio.run(_diagnoser(client))) == ["file_access_write"]
+    assert any("grades the improvement round" in r for r in function_results(client.calls[-1])), "the diagnoser reads why"
+    assert (steward._WORKING_DIR / baselines).read_bytes() == before
+    # Steward outside a round edits the gate's tests as ever: the change asks its card.
+    change = Content.from_function_call(
+        call_id="t1", name="file_access_replace", arguments={"file_name": loop.GATE_TESTS, "old_string": last, "new_string": "    pass"}
+    )
+    _, _, response = run_steward([change], "Edit the test.", mode="execute")
+    assert [r.function_call.name for r in approval_requests(response)] == ["file_access_replace"]
 
 
 def test_the_small_asks_check_each_of_todays_failures() -> None:
