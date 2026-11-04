@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The host's state is no longer kept forever (Kyle, 2026-11-04: 14 days). At start, `expire_host_state` removes
+  responses, workflow records and checkpoints older than `STEWARD_STATE_RETENTION_DAYS` (14), through the hosting
+  SDK's store calls where it has them, and keeps anything an unanswered approval still needs; superseded checkpoints
+  go at once. The SDK's 30-day store TTL applies only when a store is read again, `FileResponseStore` has no expiry,
+  and the Responses host never reclaims superseded checkpoints (29 MB on 2026-11-03). Restart required.
 - A misspelled tool name is repaired on streamed calls too (live 2026-11-03: `totos_complete`, "not found"). Streamed,
   the context's stream hooks were lost, so `repair_tool_names` now wraps the stream (`names_repaired_as_they_pass`) as
   `recover_text_tool_calls` does; nothing is held back. The test suite no longer writes `halo_traces/` (an autouse

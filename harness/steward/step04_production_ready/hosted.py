@@ -17,6 +17,7 @@ at 10 MB, five kept), and nothing of it on stdout, which SecondBrain writes to s
 Environment variables:
     OLLAMA_HOST, OLLAMA_MODEL, STEWARD_WORKSPACE, SECONDBRAIN_MCP_* — see agent.py
     STEWARD_PORT — port to serve on (defaults to 43120)
+    STEWARD_STATE_RETENTION_DAYS — days the host keeps its responses, records and checkpoints (defaults to 14)
 
 Run:
     python harness/steward/step04_production_ready/hosted.py
@@ -25,12 +26,18 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
+import json
 import logging
 import os
+import shutil
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 from contextlib import AsyncExitStack, asynccontextmanager
 from logging.handlers import RotatingFileHandler
@@ -51,7 +58,12 @@ from agent_framework import (
 )
 from agent_framework.observability import OBSERVABILITY_SETTINGS
 from agent_framework_foundry_hosting import CheckpointStoreProvider, HostedResponseRequest, ResponsesHostServer, WorkflowTurn
+from agent_framework_foundry_hosting._state_store import FoundryCheckpointStore, _store_name
+from agent_framework_foundry_hosting._workflow_state import WorkflowHead, WorkflowRecord, _key
+from azure.ai.agentserver.core import resolve_state_subdir
+from azure.ai.agentserver.core.storage import FoundryStateStore
 from azure.ai.agentserver.responses import FileResponseStore
+from azure.ai.agentserver.responses.store._file import _ITEM_REF_KEY
 from dotenv import load_dotenv
 from opentelemetry.sdk._logs.export import ConsoleLogRecordExporter
 from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
@@ -413,6 +425,182 @@ def steward_observability(**_: Any) -> None:
 # </observability>
 
 
+# <retention>
+# The host's state had no end (2026-11-03: .as/state_stores 29 MB in 37 stores, storage/responses 992 responses and
+# 4,933 items back to 10-29). What the SDK offers, and what it leaves:
+# * Its state stores expire items: a store-wide item_ttl_seconds, 30 days by default, sliding on each write
+#   (azure/ai/agentserver/core/storage/_state.py:49, _local_state.py:315-316), applied whenever the store is read
+#   (_local_state.py:370-379). The host's stores are made without one (_state_store.py:150-153, _workflow_state.py:
+#   212-215), and it is fixed at creation (_state.py:118-120), so it stays 30 days. A conversation's checkpoint store is
+#   never read again once it ends, so its expired items and its file stay; and every superstep's checkpoint stays,
+#   though only the one a response record names can be resumed (_workflow_state.py:552-566), and only from the
+#   lineage's current head (:525). MAF's Invocations host reclaims them (reclaim_superseded, _invocations.py:825;
+#   _workflow_state.py:876-912); the Responses host does not ask it (_workflow_responses.py:446-458).
+# * FileResponseStore has no expiry; its delete_response only writes a .deleted marker beside the files
+#   (azure/ai/agentserver/responses/store/_file.py:429-451).
+# So at start, before the host serves (no turn is in flight), expire_host_state reads each store through the SDK
+# (FoundryStateStore.list_keys, which runs its expiry) and removes with its own delete_item and delete what is older
+# than the window: a lineage's head and response records, except a head whose response waits on an approval, and
+# every checkpoint no kept record names. The response files, which have no SDK call for it, go by date, keeping each
+# response a kept record names and every item a kept response refers to.
+STATE_RETENTION_DAYS = 14
+STATE_RETENTION_DAYS_ENV = "STEWARD_STATE_RETENTION_DAYS"
+_BINDINGS_ROOT = "workflow_bindings/v2/"  # FoundryWorkflowBindingStore's store name (_workflow_state.py:214)
+_CHECKPOINTS_ROOT = FoundryCheckpointStore.DEFAULT_ROOT_SCOPE + "/"
+_RUNNING_RESPONSE = ("queued", "in_progress")
+
+
+def state_retention_days() -> int:
+    """Days the host keeps its state: STEWARD_STATE_RETENTION_DAYS, or STATE_RETENTION_DAYS."""
+    return int(os.environ.get(STATE_RETENTION_DAYS_ENV, STATE_RETENTION_DAYS))
+
+
+def _state_store_names() -> list[str]:
+    """Every local state store's name, read back from its file name (_state.py:54-56 and 137-139)."""
+    folder = resolve_state_subdir("state_stores")
+    names = []
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        try:
+            names.append(base64.urlsafe_b64decode(path.stem + "=" * (-len(path.stem) % 4)).decode("utf-8"))
+        except ValueError:
+            continue
+    return names
+
+
+async def _store_keys(store: FoundryStateStore) -> list[Any]:
+    """Every key in a store, page by page; listing runs the store's own expiry first (_local_state.py:230)."""
+    keys: list[Any] = []
+    after = None
+    while True:
+        page = await store.list_keys(limit=100, order="asc", after=after)
+        keys += page.keys
+        if not page.has_more or page.last_id is None:
+            return keys
+        after = page.last_id
+
+
+def _checkpoint_store_name(scope: Any, lineage_id: str) -> str:
+    """A lineage's checkpoint store, named as the host names it (_workflow_state.py:541, _state_store.py:149-153)."""
+    return _store_name(FoundryCheckpointStore.DEFAULT_ROOT_SCOPE, scope,_key("native", f"{scope.storage_key}:{lineage_id}"))
+
+
+async def _expire_workflow_state(cutoff: float, removed: dict[str, int]) -> set[str]:
+    """Drop old heads, records and checkpoints; return the response ids whose records are kept."""
+    names = _state_store_names()
+    kept_responses: set[str] = set()
+    kept_checkpoints: dict[str, set[str] | None] = {}  # a live lineage's checkpoint store: the ids to keep (None: all)
+    for name in (n for n in names if n.startswith(_BINDINGS_ROOT)):
+        scope = SimpleNamespace(storage_key=name[len(_BINDINGS_ROOT):])  # all from_value and _store_name read of it
+        store = await FoundryStateStore.get_or_create(name, user_isolation=True)
+        heads: list[tuple[WorkflowHead, Any]] = []
+        records: list[tuple[WorkflowRecord, Any]] = []
+        for key in await _store_keys(store):
+            item = await store.get_item(key.key)
+            try:
+                if item is not None and "blocked" in item.value:
+                    heads.append((WorkflowHead.from_value(item.value, scope), key))
+                elif item is not None:
+                    records.append((WorkflowRecord.from_value(item.value, scope), key))
+            except (TypeError, ValueError, PermissionError):
+                continue  # not a shape this host writes: left alone
+        by_response = {record.binding.response_id: record for record, _ in records}
+        live: dict[str, WorkflowHead] = {}
+        for head, key in heads:
+            current = by_response.get(head.binding.response_id) if head.binding is not None else None
+            # A head whose response waits on his answer stays: its record keeps only pending approvals (:815-819).
+            if key.updated_at >= cutoff or (current is not None and current.approvals):
+                live[head.lineage_id] = head
+            else:
+                await store.delete_item(key.key)
+                removed["heads"] += 1
+        named = {h.binding.response_id for h in live.values() if h.binding} | {h.response_id for h in live.values() if h.response_id}
+        kept_records = []
+        for record, key in records:
+            if record.binding.response_id in named or key.updated_at >= cutoff:
+                kept_records.append(record)
+                kept_responses.add(record.binding.response_id)
+            else:
+                await store.delete_item(key.key)
+                removed["records"] += 1
+        for lineage, head in live.items():
+            kept_checkpoints[_checkpoint_store_name(scope, lineage)] = None if head.owner is not None else {
+                r.binding.checkpoint_id for r in kept_records if r.binding.lineage_id == lineage and r.binding.checkpoint_id
+            }
+    for name in (n for n in names if n.startswith(_CHECKPOINTS_ROOT)):
+        store = await FoundryStateStore.get_or_create(name, user_isolation=True)
+        keys = await _store_keys(store)
+        if name in kept_checkpoints:
+            wanted = kept_checkpoints[name]
+            for key in keys if wanted is not None else []:
+                if key.key not in wanted:
+                    await store.delete_item(key.key)
+                    removed["checkpoints"] += 1
+        elif all(key.updated_at < cutoff for key in keys):
+            await store.delete()
+            removed["checkpoint_stores"] += 1
+    return kept_responses
+
+
+def _epoch(value: Any) -> float | None:
+    """A response's created_at, which the store holds as epoch seconds or an ISO date."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(value).timestamp() if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _expire_responses(folder: Path, cutoff: float, kept_responses: set[str], removed: dict[str, int]) -> None:
+    """Remove old responses and the items no kept response refers to (FileResponseStore's layout, _file.py:41-56)."""
+    for partition in sorted((folder / "partitions-v1").glob("*")):
+        responses, items = partition / "responses", partition / "items"
+        needed: set[str] = set()
+        for path in sorted(responses.glob("*.json")):
+            if path.name.endswith(".indexes.json"):
+                continue
+            response_id = path.stem
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            created = _epoch(envelope.get("created_at"))
+            if (
+                response_id in kept_responses
+                or envelope.get("status") in _RUNNING_RESPONSE
+                or created is None
+                or created >= cutoff
+            ):
+                indexes_path = responses / f"{response_id}.indexes.json"
+                indexes = json.loads(indexes_path.read_text(encoding="utf-8")) if indexes_path.exists() else {}
+                for name in ("history_item_ids", "input_item_ids", "output_item_ids"):
+                    needed.update(indexes.get(name) or [])
+                needed.update(o[_ITEM_REF_KEY] for o in envelope.get("output") or [] if isinstance(o, dict) and _ITEM_REF_KEY in o)
+                continue
+            for leftover in (path, responses / f"{response_id}.indexes.json", responses / f"{response_id}.deleted"):
+                leftover.unlink(missing_ok=True)
+            shutil.rmtree(responses / f"{response_id}.items", ignore_errors=True)
+            removed["responses"] += 1
+        for path in sorted(items.glob("*.json")):
+            if path.stem not in needed and path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed["items"] += 1
+
+
+async def expire_host_state(days: int | None = None, *, now: float | None = None) -> dict[str, int]:
+    """Remove the host's state older than the retention window (see above); return what was removed.
+
+    Run at start, after steward_server has named the state root and before the host serves. On Foundry the stores are
+    the service's (_state.py:136), so nothing is done."""
+    removed = dict.fromkeys(("heads", "records", "checkpoints", "checkpoint_stores", "responses", "items"), 0)
+    if os.environ.get("FOUNDRY_HOSTING_ENVIRONMENT"):
+        return removed
+    cutoff = (time.time() if now is None else now) - 86_400 * (state_retention_days() if days is None else days)
+    kept_responses = await _expire_workflow_state(cutoff, removed)
+    _expire_responses(_STORAGE_DIR, cutoff, kept_responses, removed)
+    return removed
+
+
+# </retention>
+
+
 def steward_server(
     client_factory: Callable[[], Any] | None = None,
     observability: Callable[..., None] | None = None,
@@ -462,6 +650,9 @@ async def main() -> None:
     # Every span goes to halo_traces/traces.jsonl (cookbook improvement loop, step 2), metrics and OTel logs to their
     # rotating files beside it: the host runs steward_observability as it is built.
     server = steward_server(observability=steward_observability)
+    # After steward_server, which names the state root; before the host serves, so no turn is in flight.
+    removed = await expire_host_state()
+    logger.info("Host state older than %d days removed: %s.", state_retention_days(), removed)
     logger.info("Steward serving on http://127.0.0.1:%d (Responses protocol, MAF workflow).", port)
     await server.run_async(host="127.0.0.1", port=port)
 

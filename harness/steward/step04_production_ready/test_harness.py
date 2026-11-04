@@ -1416,6 +1416,86 @@ def test_the_harness_loops_nudges_never_reach_the_agent_tab(monkeypatch: Any) ->
     assert texts == ["First part.", "Still going.", "Juniper."], texts
 
 
+def test_the_hosts_old_state_expires_and_a_waiting_card_and_new_turns_are_kept(monkeypatch: Any) -> None:
+    """2026-11-03: the host's state grew without end (.as 29 MB; every response since 10-29 in storage/responses). At
+    start, expire_host_state removes what is older than the window with the SDK's own store calls: an old answered
+    question goes (its head, record, checkpoint store, response and items); an old plan waiting on his card stays, with
+    only the checkpoint its record names, and its Approve still runs; a new question stays."""
+    import json
+    import tempfile
+    from datetime import datetime, timedelta
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    monkeypatch.delenv(hosted.STATE_RETENTION_DAYS_ENV, raising=False)
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    replies: list[Any] = [ANSWERED, plan, ANSWERED, done, "Done: the discount is fixed."]
+    routes: list[str] = ['{"kind": "answer"}', '{"kind": "task"}', '{"kind": "answer"}']
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.routes = replies, routes
+        return client
+
+    def ask(http: Any, **body: Any) -> dict[str, Any]:
+        return http.post("/responses", json={"store": True, **body}).json()
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        old_answer = ask(http, input=QUESTION)
+        waiting = ask(http, input="Fix the discount bug.")
+    [card] = [o for o in waiting["output"] if o["type"] == "mcp_approval_request"]
+
+    # Twenty days pass for both: every store item, response and item file is dated back.
+    days_ago = 20 * 86_400
+    stores = Path(state.name) / "state_stores"
+    for path in stores.glob("*.json"):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for item in document["items"].values():
+            for field in ("created_at", "updated_at", "expires_at"):
+                item[field] -= days_ago
+        path.write_text(json.dumps(document, indent=2, sort_keys=True), encoding="utf-8")
+    partition = hosted._STORAGE_DIR / "partitions-v1" / "anonymous"  # noqa: SLF001 - the test's own folder
+    for path in [*partition.rglob("*.json")]:
+        if not path.name.endswith(".indexes.json") and path.parent.name == "responses":
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            created = envelope["created_at"]  # epoch seconds or an ISO date, as the store has it
+            envelope["created_at"] = created - days_ago if isinstance(created, int) else (
+                datetime.fromisoformat(created) - timedelta(seconds=days_ago)
+            ).isoformat()
+            path.write_text(json.dumps(envelope), encoding="utf-8")
+        os.utime(path, (path.stat().st_atime - days_ago, path.stat().st_mtime - days_ago))
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        new_answer = ask(http, input=QUESTION)
+    responses = partition / "responses"
+    old_items = [o["id"] for o in old_answer["output"]]
+    assert hosted.state_retention_days() == hosted.STATE_RETENTION_DAYS == 14
+    assert len([n for n in hosted._state_store_names() if n.startswith("checkpoints/")]) == 3, "three lineages"
+
+    removed = asyncio.run(hosted.expire_host_state())
+    assert removed["checkpoint_stores"] == 1 and removed["responses"] == 1, removed
+    assert removed["heads"] == 1 and removed["records"] == 1 and removed["checkpoints"] >= 1 and removed["items"] >= 1, removed
+    assert not (responses / f"{old_answer['id']}.json").exists(), "the old answer's response is gone"
+    assert not any((partition / "items" / f"{i}.json").exists() for i in old_items), "and its items"
+    assert (responses / f"{waiting['id']}.json").exists() and (responses / f"{new_answer['id']}.json").exists()
+    assert len([n for n in hosted._state_store_names() if n.startswith("checkpoints/")]) == 2, "the old answer's store went"
+    assert asyncio.run(hosted.expire_host_state()) == dict.fromkeys(removed, 0), "a second start finds nothing more"
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        answer = {"type": "mcp_approval_response", "approval_request_id": card["id"], "approve": True}
+        approved = ask(http, previous_response_id=waiting["id"], input=[answer])
+        gone = http.post("/responses", json={"store": True, "previous_response_id": old_answer["id"], "input": "And?"})
+    state.cleanup()
+    assert approved["status"] == "completed", approved.get("error")
+    texts = [c["text"] for o in approved["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["Done: the discount is fixed."], texts
+    assert gone.status_code >= 400 or gone.json().get("status") != "completed", "the expired answer cannot be continued"
+
+
 def test_the_steps_eval_scores_each_workflow_step_by_its_own_evaluator() -> None:
     """Piece 5: evals.py steps groups a run's conversations by executor id and scores PLAN and EXECUTE apart."""
     import evals
@@ -1564,11 +1644,17 @@ def test_the_service_sets_up_its_own_local_telemetry_instead_of_the_hosts_consol
         built.append(kwargs)
         return Served()
 
+    async def expired(**_: Any) -> dict[str, int]:  # the host's old state is expired at start, after the server is built
+        built.append({"expired_after": len(built)})
+        return {}
+
     monkeypatch.setattr(hosted, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(hosted.logging, "basicConfig", lambda **k: None)
     monkeypatch.setattr(hosted, "steward_server", server)
+    monkeypatch.setattr(hosted, "expire_host_state", expired)
     asyncio.run(hosted.main())
-    assert [b.get("observability") for b in built] == [hosted.steward_observability]
+    assert [b.get("observability") for b in built] == [hosted.steward_observability, None]
+    assert built[1] == {"expired_after": 1}, "main expires the host's old state once its server has named the state root"
     monkeypatch.undo()
 
     # ... which steward_server hands to the host as its configure_observability ...
