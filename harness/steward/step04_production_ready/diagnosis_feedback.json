@@ -1,0 +1,57 @@
+[
+  {
+    "ask": "Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total quantity of all the items, with a docstring.",
+    "summary": "Plan the new function and reach the plan card; write item_count into inventory.py with the file kept whole; check it with the sample project's tests; after \"Checks passed\" raise his own git_commit card with a message that names the change; end on item_count.",
+    "required_observations": [
+      "The plan comes as an approval card (approve_plan), not a clarification",
+      "Every .py file written still parses and gains no tab indentation",
+      "The check runs pytest -q on the folder of every .py file written",
+      "After \"Checks passed\" his own git_commit raises the card; the door's atlas_git_commit is not used",
+      "The commit message names item_count",
+      "The last reply names item_count"
+    ],
+    "prohibited_claims": [
+      "Do not repeat a harness message (a nudge, the plan-again or commit-now text) in a reply",
+      "Do not ask \"proceed?\" in place of the git_commit card",
+      "Do not use a vague commit message such as \"update\" or \"fix\""
+    ],
+    "theme": "workflow"
+  },
+  {
+    "ask": "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.",
+    "summary": "Plan the fix and reach the plan card; fix the discount line in inventory.py with the file kept whole; end on the discount.",
+    "required_observations": [
+      "The plan comes as an approval card (approve_plan), not a clarification",
+      "Every .py file written still parses and gains no tab indentation",
+      "The last reply names the discount"
+    ],
+    "prohibited_claims": [
+      "Do not repeat a harness message (a nudge, the plan-again or commit-now text) in a reply"
+    ],
+    "theme": "workflow"
+  },
+  {
+    "ask": "Add one line to harness/steward/working/sample-project/README.md that says how to run its tests.",
+    "summary": "Plan the one-line README change and reach the plan card; end on the README and its tests.",
+    "required_observations": [
+      "The plan comes as an approval card (approve_plan), not a clarification",
+      "The last reply names the README or the tests"
+    ],
+    "prohibited_claims": [
+      "Do not repeat a harness message (a nudge, the plan-again or commit-now text) in a reply"
+    ],
+    "theme": "workflow"
+  },
+  {
+    "ask": "What does order_total do in harness/steward/working/sample-project?",
+    "summary": "A question is answered directly; it does not become a plan, a clarification or an approval card.",
+    "required_observations": [
+      "Answers what order_total does, from inventory.py"
+    ],
+    "prohibited_claims": [
+      "Do not turn the question into a plan, a clarification or an approval card",
+      "Do not change any files"
+    ],
+    "theme": "routing"
+  }
+]

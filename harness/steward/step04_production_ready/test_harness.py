@@ -1744,3 +1744,146 @@ def test_the_mcp_doors_sessions_are_kept_on_disk(tmp_path: Path, monkeypatch: py
 
     restored = asyncio.run(_go())
     assert restored is not None and restored.state.get("marker") == "kept", "a fresh store reads the session back"
+
+
+def test_the_diagnosis_traces_the_small_asks_and_a_plain_question_through_his_workflow(monkeypatch: Any) -> None:
+    """Step 6: the diagnosis traced a bare agent on five old read-only questions, an agent nobody uses. It runs the small
+    asks and one plain question through his workflow (evals.run_steward) as evals.py small runs them, through the one
+    shared runner: the same approvals, the discount bug planted for the discount ask only, the sample project put back,
+    each ask in its own trace span, and the harness described from the agent that ran."""
+    import inspect
+    from types import SimpleNamespace
+
+    import agent_framework.observability as observability
+    import evals
+    import halo_traces
+    import improvement_loop as diagnosis
+    from agent_framework import AgentResponse, FileAccessProvider
+    from opentelemetry.sdk.trace import TracerProvider
+
+    module = steward._WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
+    before = module.read_bytes()
+    ran: list[tuple[str, set[str], dict[str, Any], bool]] = []
+
+    async def recorder(query: str, approve: set[str], **build: Any) -> Any:
+        ran.append((query, set(approve), dict(build), b"(1 - discount_percent)" in module.read_bytes()))
+        said = Message(role="assistant", contents=[Content.from_text(f"Answer {len(ran)}")])
+        return SimpleNamespace(name="Steward"), AgentResponse(messages=[said])
+
+    async def scores(agent: Any, asks: list[str], responses: list[Any]) -> Any:
+        return SimpleNamespace(items=[SimpleNamespace(scores=[]) for _ in asks])
+
+    provider = TracerProvider()
+    serialize = diagnosis.serialize_agent_config
+    monkeypatch.setattr(evals, "run_steward", recorder)
+    monkeypatch.setattr(evals, "score_small_asks", scores)
+    monkeypatch.setattr(halo_traces, "setup_halo_tracing", lambda path: None)
+    monkeypatch.setattr(observability, "get_tracer", lambda *args, **kwargs: provider.get_tracer("test"))
+    monkeypatch.setattr(diagnosis, "serialize_agent_config", lambda agent: {"described": agent.name})
+
+    asks = diagnosis.traced_asks()
+    assert asks == [*evals.SMALL_ASKS, diagnosis.PLAIN_QUESTION], "the small asks and one plain question"
+    traces, harness, checks = asyncio.run(diagnosis.generate_traces(asks))
+    assert [query for query, _, _, _ in ran] == asks, "each ask ran through run_steward"
+    assert all(approve == set(FileAccessProvider._WRITE_TOOL_NAMES) for _, approve, _, _ in ran), "small_main's approvals"
+    assert all(build == {"auto_approve_skill_scripts": True} for _, _, build, _ in ran)
+    assert [planted for _, _, _, planted in ran] == [query == evals.SMALL_ASK_DISCOUNT for query in asks]
+    assert module.read_bytes() == before, "the sample project is put back"
+    assert [t.trace_label for t in traces] == ["trace-01", "trace-02", "trace-03", "trace-04"]
+    assert [(t.question, t.answer) for t in traces] == [(q, f"Answer {i}") for i, q in enumerate(asks, 1)]
+    assert len({t.trace_id for t in traces}) == 4 and "0" * 32 not in {t.trace_id for t in traces}, "a span per ask"
+    assert harness == {"described": "Steward"} and len(checks) == 4
+    assert "run_small_asks(SMALL_ASKS)" in inspect.getsource(evals.small_main), "define once: small_main runs it too"
+    assert "build_steward_agent" not in inspect.getsource(diagnosis.generate_traces), "no bare agent"
+
+    import steward_workflow as wf
+
+    async def _built() -> tuple[Any, Any]:
+        async with AsyncExitStack() as stack:
+            agent, workflow = await wf.build_steward(stack, client=ScriptedChatClient([]), enable_shell=False)
+            return agent, workflow.as_agent(name="Steward")
+
+    agent, ran_as = asyncio.run(_built())
+    config = serialize(ran_as)
+    assert config["system_prompt"] == agent.default_options.get("instructions"), "the agent his workflow ran"
+    assert {wf.PLAN_STEP, wf.EXECUTE_STEP, wf.COMMIT_STEP} <= set(config["tool_policy"]["workflow_steps"])
+
+
+def test_the_diagnosis_reads_its_feedback_file_and_adds_each_failing_check(tmp_path: Path) -> None:
+    """Step 6: the feedback is diagnosis_feedback.json, keyed by the ask, not code; an ask with no entry gets none. Each
+    failing small-ask check on a traced run is one more item (source_type eval_checks) carrying the check's reason."""
+    import json
+    from types import SimpleNamespace
+
+    import improvement_loop as diagnosis
+
+    asks = diagnosis.traced_asks()
+    entries = json.loads(diagnosis.FEEDBACK_PATH.read_text(encoding="utf-8"))
+    assert [entry["ask"] for entry in entries] == asks, "one entry per traced ask"
+    [plain] = [entry for entry in entries if entry["ask"] == diagnosis.PLAIN_QUESTION]
+    assert "it does not become a plan, a clarification or an approval card" in plain["summary"]
+
+    traces = [diagnosis.TraceRecord(f"t{i}", f"trace-{i:02d}", q, "a", "workflow") for i, q in enumerate([*asks, "Unlisted?"], 1)]
+    edited = tmp_path / "feedback.json"
+    edited.write_text(json.dumps([{
+        "ask": asks[0], "summary": "Edited.", "required_observations": ["r"], "prohibited_claims": ["p"], "theme": "t",
+    }]), encoding="utf-8")
+    [item] = diagnosis.generate_human_feedback(traces, edited)
+    assert (item["trace_id"], item["summary"], item["source_type"]) == ("t1", "Edited.", "human_feedback"), "the file is read"
+    assert [i["question"] for i in diagnosis.generate_human_feedback(traces)] == asks, "the unlisted ask gets none"
+
+    def score(name: str, passed: bool, reason: str) -> Any:
+        return SimpleNamespace(name=name, passed=passed, sample={"reason": reason})
+
+    items = [
+        SimpleNamespace(scores=[score("plan_is_approval", False, "No plan card: 'Proceed?'"), score("answer_on_topic", True, "On topic.")]),
+        SimpleNamespace(scores=[score("commit_by_tool", True, "Not this case.")]),
+        *[SimpleNamespace(scores=[]) for _ in range(3)],
+    ]
+    [check] = diagnosis.eval_check_feedback(traces, items)
+    assert (check["source_type"], check["trace_id"], check["theme"]) == ("eval_checks", "t1", "plan_is_approval")
+    assert "No plan card: 'Proceed?'" in check["summary"], "with the check's reason"
+    assert set(check) == set(item), "the feedback shape"
+
+
+def test_the_diagnosis_drops_background_mcp_spans_and_keeps_every_span_of_an_ask(tmp_path: Path, monkeypatch: Any) -> None:
+    """Step 6: background MCP housekeeping (pings, tools/list, discover, initialize, their POSTs) outnumbered the request
+    spans three to one in the trace file and steered the handoff to trace attributes. Those traces are dropped before
+    HALO's context is written; every span of a traced ask's trace is kept. Children are written before their roots."""
+    import json
+
+    import improvement_loop as diagnosis
+
+    def span(trace: str, span_id: str, name: str, parent: str = "") -> str:
+        return json.dumps({"trace_id": trace, "span_id": span_id, "parent_span_id": parent, "name": name})
+
+    lines = [
+        span("a1", "3", "MCP send resources/read", "2"), span("a1", "4", "POST", "3"),
+        span("a1", "5", "MCP send ping", "1"), span("a1", "2", "invoke_agent.invoke_agent Steward", "1"),
+        span("a1", "1", "Steward improvement loop trace-01"),
+        span("p", "7", "POST", "6"), span("p", "6", "MCP send ping"),
+        span("l", "10", "POST", "9"), span("l", "9", "MCP send tools/list", "8"), span("l", "8", "tools/list"),
+        span("d", "11", "MCP send server/discover"), span("i", "12", "MCP send initialize"), span("h", "13", "POST"),
+        span("w", "14", "workflow.build"),
+    ]
+    kept = diagnosis.drop_background_spans(lines, {"a1"})
+    assert [json.loads(line)["span_id"] for line in kept] == ["3", "4", "5", "2", "1", "14"]
+
+    monkeypatch.setattr(diagnosis, "ARTIFACT_DIR", tmp_path)
+    monkeypatch.setattr(diagnosis, "HALO_TRACE_PATH", tmp_path / "traces.jsonl")
+    (tmp_path / "traces.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    check = {
+        "feedback_id": "eval-trace-01-plan_is_approval", "trace_id": "a1", "trace_label": "trace-01", "question": "q",
+        "source_type": "eval_checks", "theme": "plan_is_approval", "summary": "No plan card.",
+        "required_observations": [], "prohibited_claims": [],
+    }
+    context = {
+        "traces": [{"trace_id": "a1"}], "human_feedback": [check], "llm_feedback": [], "eval_suite": [],
+        "gate_result": {"total": 0, "passed": 0, "failed": 0, "rows": []},
+        "agent_config": {"version": "x", "system_prompt": "", "model_settings": {}, "tool_policy": {}, "eval_metadata": {}},
+    }
+    written = [json.loads(line) for line in diagnosis.write_halo_optimization_context(context).read_text(encoding="utf-8").splitlines()]
+    assert [s["span_id"] for s in written[:6]] == ["3", "4", "5", "2", "1", "14"], "the context carries no housekeeping"
+    [verdict] = [s for s in written if s.get("attributes", {}).get("optimizer.signal_source") == "eval_checks"]
+    assert verdict["name"] == "eval_checks.verdict"
+    assert verdict["attributes"]["feedback.summary"] == "No plan card."

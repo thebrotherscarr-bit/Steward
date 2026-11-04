@@ -42,6 +42,22 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 6: the diagnosis traces the real workflow: `improvement_loop.py` no longer asks a bare `build_steward_agent`
+  Part 3's five old read-only questions. It traces evals.py small's three asks (item_count, the discount fix, the
+  README line) plus one plain question ("What does order_total do in harness/steward/working/sample-project?"), each
+  once through `evals.run_small_asks`, the per-ask runner now shared with `small_main` (define once: `run_steward`,
+  the same approvals, the discount bug planted for its ask only, the sample project put back, a throwaway memory per
+  run), each in its own trace span; `serialize_agent_config` describes the workflow and the agent that ran. The
+  feedback is `diagnosis_feedback.json` (a list keyed by the ask, edited without code; seeded from the small-ask checks
+  and, for the plain question, "A question is answered directly; it does not become a plan, a clarification or an
+  approval card."), and each failing small-ask check on a traced run is one more item (source_type `eval_checks`, with
+  its reason; `evals.score_small_asks`, shared with `small_main`). `drop_background_spans` drops background MCP
+  housekeeping traces (roots "MCP send ping", "tools/list", "MCP send tools/list", "MCP send server/discover", "MCP
+  send initialize" and a bare "POST") before HALO's context is written, keeping every span of a traced ask's trace
+  (1651 of a 5000-line sample of the trace file). Tests:
+  `test_the_diagnosis_traces_the_small_asks_and_a_plain_question_through_his_workflow`,
+  `test_the_diagnosis_reads_its_feedback_file_and_adds_each_failing_check`,
+  `test_the_diagnosis_drops_background_mcp_spans_and_keeps_every_span_of_an_ask`.
 - Step 5, piece 5.3: the memory eval case, `evals.py memory`. Two requests run through his workflow (`run_steward`),
   each a new conversation, sharing one throwaway automatic memory (`isolated_memory_store`; file memory is not
   shared, so a recall proves MAF's MemoryContextProvider carried it):
