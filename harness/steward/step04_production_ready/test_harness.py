@@ -4821,3 +4821,59 @@ def test_a_call_cut_right_after_the_runner_is_unloaded_is_asked_again(monkeypatc
     with pytest.raises(Exception, match="cut"):
         _ask(client)
     assert len(chats) == 1, chats
+
+
+def test_each_ollama_chat_call_records_its_timings_in_usage_and_on_its_span(monkeypatch: Any) -> None:
+    """Ollama's load_duration, prompt_eval_duration, eval_count and eval_duration (MAF's OllamaChatClient keeps only
+    the token counts) go into each chat call's usage as "ollama.<field>", streamed or not, and onto the current span."""
+    import ollama
+    from agent_framework.ollama import OllamaChatClient
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    timings = {"load_duration": 5, "prompt_eval_duration": 7, "eval_count": 3, "eval_duration": 11}
+    expected = {f"ollama.{k}": v for k, v in timings.items()}
+
+    def answer(model: str, content: str, done: bool) -> Any:
+        extra = {**timings, "prompt_eval_count": 2} if done else {}
+        return ollama.ChatResponse(model=model, message=ollama.Message(role="assistant", content=content), done=done, **extra)
+
+    async def chat(**kwargs: Any) -> Any:
+        if not kwargs.get("stream"):
+            return answer(kwargs["model"], "ok", True)
+
+        async def parts() -> Any:
+            yield answer(kwargs["model"], "o", False)
+            yield answer(kwargs["model"], "k", True)
+
+        return parts()
+
+    client = OllamaChatClient(model="steward:1", host="http://127.0.0.1:9")
+    monkeypatch.setattr(client.client, "chat", chat)
+    client = steward._record_ollama_timings(client)
+    messages = [Message(role="user", contents=["hi"])]
+
+    response = asyncio.run(client.get_response(messages))
+    assert response.text == "ok"
+    assert {k: response.usage_details[k] for k in expected} == expected, response.usage_details
+    assert response.usage_details["input_token_count"] == 2, "MAF's own counts are kept"
+
+    async def streamed() -> Any:
+        return await client.get_response(messages, stream=True).get_final_response()
+
+    final = asyncio.run(streamed())
+    assert final.text == "ok"
+    assert {k: final.usage_details[k] for k in expected} == expected, final.usage_details
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    with trace.use_span(provider.get_tracer("t").start_span("chat steward:1"), end_on_exit=True):
+        client._parse_response_from_ollama(answer("steward:1", "ok", True))
+    with trace.use_span(provider.get_tracer("t").start_span("chat steward:1"), end_on_exit=True):
+        client._parse_streaming_response_from_ollama(answer("steward:1", "o", False))
+        client._parse_streaming_response_from_ollama(answer("steward:1", "k", True))
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 2 and all({k: span.attributes.get(k) for k in expected} == expected for span in spans), spans
