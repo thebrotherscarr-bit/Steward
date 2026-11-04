@@ -68,6 +68,7 @@ from agent_framework import (
     AgentContext,
     AgentModeProvider,
     AggregatingSkillsSource,
+    BackgroundAgentsProvider,
     CachingSkillsSource,
     ChatContext,
     ChatMiddleware,
@@ -2211,6 +2212,137 @@ async def labelled_mcp_tool(stack: AsyncExitStack, mcp_tool: MCPStreamableHTTPTo
 # </safety_observe>
 
 
+# <tool_policy>
+# SecondBrain's tool-policy shelf (2026-11-04): a read-only table of which of his tools ask for a card, written by the
+# live build to storage/tool-policy.json (gitignored). Read off the built agent, never kept by hand: his own and MCP tools
+# from its tool list (an MCP tool's functions carry the approval_mode its approval_mode setting gave each), the
+# providers' tools from their before_run on a throwaway session (the memory providers on copies over a throwaway store,
+# so nothing of his is read or written), and each "always_require" tool tried against the auto-approval rules the build
+# hands MAF's ToolApprovalMiddleware, in order, as it tries them (_tool_approval.py _matches_auto_rule), with an empty
+# call outside any run. A rule that approves that call decides the tool ("rule"); one that needs a run or arguments to
+# approve (the plan-mode gate) leaves it "always". A write that fails is a logged warning; the build goes on.
+TOOL_POLICY_PATH = _WORKING_DIR / "storage" / "tool-policy.json"
+_PROVIDER_SOURCES: tuple[tuple[type, str], ...] = (
+    (FileAccessProvider, "file access"),
+    (SkillsProvider, "skills"),
+    (FileMemoryProvider, "memory"),
+    (MemoryContextProvider, "memory"),
+    (MontyCodeActProvider, "codeact"),
+    (BackgroundAgentsProvider, "background"),
+    (TodoProvider, "todos"),
+    (AgentModeProvider, "modes"),
+)
+_MCP_SOURCES = {"secondbrain_notes": "mcp:secondbrain", "secondbrain": "mcp:secondbrain", "atlas": "mcp:door"}
+_TOOL_SOURCES = {"get_repo_status": "built-in", "git_commit": "git", "run_shell": "shell", "search_code": "search_code", PR_CHECKS_TOOL: "mcp:door"}
+
+
+def _rule_entry(rule: Any) -> dict[str, str]:
+    doc = (getattr(rule, "__doc__", None) or "").strip()
+    return {"name": getattr(rule, "__qualname__", None) or repr(rule), "description": doc.splitlines()[0] if doc else ""}
+
+
+async def _deciding_rule(name: str, rules: Sequence[Any]) -> Any:
+    """The first auto-approval rule that approves an empty call to name outside any run, or None."""
+    call = Content.from_function_call(call_id="tool-policy", name=name, arguments={})
+    outside = _RUN_SESSION.set(None)
+    try:
+        for rule in rules:
+            try:
+                approved = rule(call)
+                if asyncio.iscoroutine(approved) or isinstance(approved, Awaitable):
+                    approved = await approved
+            except Exception:  # noqa: BLE001 - a rule that cannot judge an empty call does not decide it
+                continue
+            if approved:
+                return rule
+    finally:
+        _RUN_SESSION.reset(outside)
+    return None
+
+
+async def _provider_tools(agent: Agent[Any], scratch: Path) -> list[tuple[str, Any]]:
+    """(source, tool) for each tool the agent's providers offer, from their before_run on a throwaway session."""
+    from agent_framework import AgentSession, SessionContext  # noqa: PLC0415
+
+    session = AgentSession()
+    session.state[MEMORY_OWNER_KEY] = MEMORY_OWNER  # as memory_owner sets it on every run
+    found: list[tuple[str, Any]] = []
+    for provider in agent.context_providers or []:
+        source = next((s for kind, s in _PROVIDER_SOURCES if isinstance(provider, kind)), None)
+        if source is None:
+            continue
+        if isinstance(provider, FileMemoryProvider):
+            provider = copy.copy(provider)
+            provider.store = FileSystemAgentFileStore(scratch / "file-memory")
+        elif isinstance(provider, MemoryContextProvider):
+            provider = copy.copy(provider)
+            provider.store = MemoryFileStore(scratch / "memory", owner_state_key=MEMORY_OWNER_KEY)
+        context = SessionContext(session_id=session.session_id, input_messages=[])
+        try:
+            await provider.before_run(agent=agent, session=session, context=context, state={})
+        except Exception as exc:  # noqa: BLE001 - a provider that cannot list its tools is left out, and said
+            logger.warning("Tool policy: %s's tools not read: %s", type(provider).__name__, exc)
+            continue
+        found.extend((source, t) for t in context.tools)
+    return found
+
+
+async def tool_policy(agent: Agent[Any], rules: Sequence[Any], scratch: Path) -> dict[str, Any]:
+    """The tool-policy table of a built agent: each tool's name, source, approval ("always", "never" or "rule", with
+    the rule's name and description) and notes."""
+    offered: list[tuple[str, Any]] = []
+    # MAF's Agent keeps MCP tools apart from the rest (Agent.mcp_tools, agent_framework/_agents.py:1067).
+    for item in [*((agent.default_options or {}).get("tools") or []), *(getattr(agent, "mcp_tools", None) or [])]:
+        if isinstance(item, MCPStreamableHTTPTool):
+            offered.extend((_MCP_SOURCES.get(item.name, f"mcp:{item.name}"), f) for f in item.functions)
+        else:
+            offered.append((_TOOL_SOURCES.get(getattr(item, "name", ""), "built-in"), item))
+    offered.extend(await _provider_tools(agent, scratch))
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source, item in offered:
+        name = getattr(item, "name", None)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        row: dict[str, Any] = {"name": name, "source": source}
+        if getattr(item, "approval_mode", None) != "always_require":
+            row["approval"] = "never"
+        elif (rule := await _deciding_rule(name, rules)) is not None:
+            row["approval"] = "rule"
+            row["rule"] = _rule_entry(rule)
+        else:
+            row["approval"] = "always"
+        notes = []
+        if name in _CHANGES_THINGS:
+            notes.append("refused without a card in plan mode (the plan-mode gate)")
+        if source == "mcp:door" and name != PR_CHECKS_TOOL:
+            notes.append("SecondBrain's door holds its writes for approval there")
+        if notes:
+            row["notes"] = "; ".join(notes)
+        rows.append(row)
+    return {"ts": datetime.now(timezone.utc).isoformat(), "tools": rows}
+
+
+async def write_tool_policy(agent: Agent[Any], rules: Sequence[Any], path: Path | None = None) -> None:
+    """Write the agent's tool-policy table to path (TOOL_POLICY_PATH), atomically; a failure is a logged warning."""
+    import tempfile  # noqa: PLC0415
+
+    path = path or TOOL_POLICY_PATH
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=path.parent) as scratch:
+            table = await tool_policy(agent, rules, Path(scratch))
+        written = path.with_suffix(".tmp")
+        written.write_text(json.dumps(table, indent=1), encoding="utf-8")
+        written.replace(path)
+    except Exception as exc:  # noqa: BLE001 - the table never fails his build
+        logger.warning("Tool policy not written (%s): %s", path, exc)
+
+
+# </tool_policy>
+
+
 def _secondbrain_web_tools(client: Client) -> MCPStreamableHTTPTool:
     """SecondBrain's web_search and web_fetch over the shared client (Ollama has no hosted web search)."""
     return MCPStreamableHTTPTool(
@@ -2280,7 +2412,8 @@ async def build_steward_agent(
         eval_build: True for an eval's Steward (evals.py passes it): SecondBrain's reads stay (notes, the Charter,
             skills, the web), but the Atlas door (atlas_* and pr_checks) and the note writes are not offered, so an
             eval never parks a card in the user's SecondBrain (live 2026-11-04). A build argument, not an
-            environment variable, so the live host cannot be left in it.
+            environment variable, so the live host cannot be left in it. An eval's build writes no tool-policy
+            table; the live build writes storage/tool-policy.json (<tool_policy>).
 
     Returns:
         A fully configured harness agent with Step 3's capabilities.
@@ -2484,7 +2617,7 @@ async def build_steward_agent(
         gate_middleware, gate_rule = plan_mode_gate(mode_provider)
         auto_approval_rules.insert(0, gate_rule)
         loop_should_continue, loop_next_message = plan_reply_loop(mode_provider, plan_reply_check, todo_provider)
-        return create_harness_agent(
+        agent = create_harness_agent(
             client=part3_client,
             name="Steward",
             description="Software engineering and development assistant." if part4 else None,
@@ -2523,6 +2656,11 @@ async def build_steward_agent(
             default_options={**OLLAMA_OPTIONS, **(default_options or {})},
             otel_provider_name=OTEL_PROVIDER_NAME,
         )
+        # SecondBrain's tool-policy shelf (<tool_policy>): his live build only. An eval's build writes nothing, nor
+        # does a build with a caller's extra tools (the improvement round's diagnoser), which is not the agent he serves.
+        if part4 and not eval_build and not extra_tools:
+            await write_tool_policy(agent, auto_approval_rules)
+        return agent
     client = _retry_malformed_tool_calls(client or OllamaChatClient())
 
     tools: list[Any] = [get_repo_status, git_commit]
