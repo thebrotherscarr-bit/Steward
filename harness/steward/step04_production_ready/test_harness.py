@@ -833,8 +833,9 @@ def test_a_tool_call_written_as_text_runs_and_an_unclear_one_is_left_as_it_is() 
         "the streamed run's own updates carry the call (the buffered stream released the rewritten reply)"
     )
 
-    # {"file_name": ...} fits file_access_read and file_access_delete (and the memory's two): which one is a guess.
-    for unclear in ('{"file_name": "x.py"}', '{"no_such_parameter": 1}', "{}", f"Here: {LISTED_AS_TEXT}"):
+    # Arguments that fit no tool, or are not one object, stay his text. ({"file_name": ...} was here until 2026-11-04;
+    # it is now the one read-only fit, file_access_read: test_a_read_written_as_text_is_the_one_read_only_tool_that_fits.)
+    for unclear in ('{"no_such_parameter": 1}', "{}", f"Here: {LISTED_AS_TEXT}"):
         client, _, response = run_steward([unclear, "never"], "Read x.py.")
         assert len(client.calls) == 1 and response.text == unclear, unclear
     tools = client.calls[0]["options"]["tools"]
@@ -1035,6 +1036,56 @@ def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a
     assert wf.steward_plan_in(response.text) is not None
     client, response = run_unstreamed([plan, "never"], _plan_shaped_tool())
     assert len(client.calls) == 1 and response.text == plan, "not streamed, a valid plan is never a call"
+
+
+# Live eval 2026-11-04 (the discount ask): PLAN replied with file_access_read's arguments as text, which also fit
+# file_access_delete and file memory's read and delete, so it was left as text and no plan card came.
+READ_AS_TEXT = '{"file_name": "harness/steward/working/sample-project/test_inventory.py"}'
+
+
+def test_a_read_written_as_text_is_the_one_read_only_tool_that_fits() -> None:
+    """recover_text_tool_calls: when the keys fit several tools and exactly one is read-only by MAF's read-only
+    auto-approval rules (READ_ONLY_RULES), the reply runs as that read; two read-only fits, or none, stay his text."""
+    from agent_framework import tool
+
+    import steward_workflow as wf
+
+    client, _, response = run_steward([READ_AS_TEXT, "It tests order_total."], "Read test_inventory.py.", mode="execute")
+    assert {"file_access_read", "file_access_delete", "file_memory_read", "file_memory_delete"} <= offered_tools(client.calls[0])
+    assert len(client.calls) == 2 and response.text == "It tests order_total.", "the recovered read ran"
+    assert any("class OrderTotalTests" in r for r in function_results(client.calls[1])), "file_access_read read the file"
+    assert [c.name for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_call"] == ["file_access_read"]
+
+    tools = client.calls[0]["options"]["tools"]
+    assert steward.is_read_only_tool("file_access_read") and not steward.is_read_only_tool("file_access_delete")
+    assert not steward.is_read_only_tool("file_memory_read"), "never_require is not read-only by itself (MAF's rules decide)"
+    assert steward.tool_call_in_text(READ_AS_TEXT, tools) == ("file_access_read", {"file_name": "harness/steward/working/sample-project/test_inventory.py"})
+    # Only writes fit (file_access_write and file_memory_write): never chosen by a tie-break.
+    assert steward.tool_call_in_text('{"file_name": "x.py", "content": "y"}', tools) is None
+
+    @tool(name="load_skill", approval_mode="never_require")
+    def load_skill(file_name: str) -> str:
+        """A second read-only tool (by SkillsProvider's rule) that fits {"file_name": ...}."""
+        return "never"
+
+    two_reads = [t for t in tools if getattr(t, "name", "") != "load_skill"] + [load_skill]
+    assert steward.tool_call_in_text(READ_AS_TEXT, two_reads) is None, "two read-only fits: which one is a guess"
+
+    # The live fault where it happened: the workflow's PLAN step, streamed, goes on to its plan card.
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix it"]}'
+    client = ScriptedChatClient([READ_AS_TEXT, plan])
+
+    async def _go() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+                return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+    cards = asyncio.run(_go())
+    assert len(client.calls) == 2, "the recovered read ran and PLAN was called again"
+    assert any("class OrderTotalTests" in r for r in function_results(client.calls[1])), "file_access_read ran in PLAN"
+    assert cards == [wf.APPROVE_PLAN], "and the run yields the plan card"
 
 
 def test_work_that_skips_the_tool_its_request_needs_is_asked_once_and_hints_outlive_the_approve() -> None:
@@ -1699,6 +1750,52 @@ def test_the_commit_step_writes_only_the_message_and_the_workflow_raises_the_git
 
     with pytest.raises(ValueError, match="git_commit"):
         asyncio.run(_without())
+
+
+def test_the_small_asks_see_a_write_approved_on_its_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live 2026-11-04, evals.py small (the item_count ask): EXECUTE wrote inventory.py on an approved card, the checks
+    passed and the commit card came, yet check_covers_writes said "No approved .py write in the run" and
+    edit_keeps_file_whole "The run wrote no .py file". The write is in the run only as its card and the user's answer
+    (the call rides on the answer), and the eval sent its answers without keeping them. Driven as evals.py small drives
+    it (run_small_asks, then score_small_asks); a run that writes nothing still fails both checks."""
+    import evals
+    import steward_workflow as wf
+
+    module = "harness/steward/working/sample-project/inventory.py"
+    path = steward._WORKING_DIR / module
+    committed = path.read_bytes()
+    added = path.read_text(encoding="utf-8") + '\n\ndef item_count(items):\n    """The total quantity."""\n    return sum(i["quantity"] for i in items)\n'
+    plan = '{"type": "approval", "questions": [{"message": "Add item_count."}], "steps": ["Add item_count"]}'
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": module, "content": added})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "added"}]})
+    checked = f"$ pytest -q {Path(module).parent.as_posix()}\n(exit 0)\n1 passed"
+    build = wf.build_steward_workflow
+    monkeypatch.setattr(wf, "build_steward_workflow", lambda agent: build(agent, checks=lambda _m: (True, checked), changes=lambda: [module]))
+
+    def small(replies: list[Any]) -> dict[str, Any]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> Any:
+            steward_, responses = await evals.run_small_asks([evals.SMALL_ASK_NEW_CODE], client=client, enable_shell=False)
+            return await evals.score_small_asks(steward_, [evals.SMALL_ASK_NEW_CODE], responses)
+
+        try:
+            [item] = asyncio.run(_go()).items
+        finally:
+            evals.SMALL_ASK_FILES.clear()
+            evals.SMALL_ASK_ORIGINALS.clear()
+        return {score.name: (score.passed, (score.sample or {}).get("reason")) for score in item.scores}
+
+    message = '{"message": "Add item_count to inventory.py"}'
+    scores = small([plan, write, done, "Added item_count.", message])
+    assert path.read_bytes() == committed, "the sample project is put back after the run"
+    assert evals.CASE_ERRORS == {}, evals.CASE_ERRORS
+    for name in ("check_covers_writes", "edit_keeps_file_whole", "commit_by_tool", "commit_message_specific"):
+        assert scores[name][0] is True, (name, scores[name])
+    # A run that writes nothing: the same checks fail, as they must.
+    scores = small([plan, done, "Added item_count.", message])
+    assert scores["check_covers_writes"] == (False, "No approved .py write in the run."), scores
+    assert scores["edit_keeps_file_whole"] == (False, "The run wrote no .py file."), scores
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:

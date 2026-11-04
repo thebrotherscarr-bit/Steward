@@ -1165,14 +1165,32 @@ async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaita
 # calls in the response the middleware hands back (_tools.py, _process_model_function_calls; streamed, the stream's
 # final response, _tools.py:6168). So a reply that is one JSON object whose keys fit exactly one offered tool (its
 # required parameters <= the keys <= its parameters) becomes that call. Everything else is left as it is: two tools
-# that fit ({"file_name": ...} fits file_access_read and file_access_delete), none, an empty object, or a reply that
+# that fit (but see 2026-11-04 below: one read-only fit among several), none, an empty object, or a reply that
 # is the structured output its call asked for (the plan's JSON). Arguments are only ever the model's own.
 # Live eval 2026-11-04 (the discount-bug ask): in the workflow's PLAN step (response_format StewardPlan) he replied
 # with file_access_ls's arguments as text and the run ended with no plan card. So a call that asked for a Pydantic
 # format is recovered too, but only when the reply does not validate as that format, as MAF itself parses it
 # (model_validate_json, agent_framework/_types.py:3075-3079): a valid plan is never made a call. A dict schema is
 # left as before (MAF reads any JSON as its value, _types.py:3080-3084, so no reply can be told apart from it).
+# Live eval 2026-11-04 (the discount ask, again): the PLAN step's reply was {"file_name": ".../test_inventory.py"},
+# which fits file_access_read, file_access_delete and file memory's read and delete, so it was left as text and no plan
+# card came. So when several tools fit and exactly one of them is read-only, the reply is that read. Read-only is
+# MAF's own word for it, never a name guess: the read-only auto-approval rules of its providers (FileAccessProvider
+# _READ_ONLY_TOOL_NAMES, _harness/_file_access.py:2008, and SkillsProvider's, _skills.py:2193), the same rules his build
+# hands ToolApprovalMiddleware (READ_ONLY_RULES). A tool that skips its card (approval_mode "never_require") is not
+# read-only by that alone: file_memory_delete never asks. A write or delete is never chosen; zero or several read-only
+# fits stay his text.
 _FENCED_JSON = re.compile(r"\A```(?:json)?\s*(.*?)\s*```\Z", re.S | re.I)
+READ_ONLY_RULES: tuple[Callable[[Content], bool], ...] = (
+    FileAccessProvider.read_only_tools_auto_approval_rule,
+    SkillsProvider.read_only_tools_auto_approval_rule,
+)
+
+
+def is_read_only_tool(name: str) -> bool:
+    """Whether MAF's read-only auto-approval rules (READ_ONLY_RULES) approve a local call to the tool named name."""
+    call = Content.from_function_call(call_id="read-only", name=name, arguments={})
+    return any(rule(call) for rule in READ_ONLY_RULES)
 
 
 def _pydantic_format(response_format: Any) -> bool:
@@ -1197,7 +1215,8 @@ def is_the_asked_format(text: str, response_format: Any) -> bool:
 
 
 def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, Any]] | None:
-    """(tool name, arguments) when text is one JSON object that fits exactly one of the tools, else None."""
+    """(tool name, arguments) when text is one JSON object that fits exactly one of the tools, or fits several of which
+    exactly one is read-only (is_read_only_tool), else None."""
     body = (text or "").strip()
     if fenced := _FENCED_JSON.match(body):
         body = fenced.group(1)
@@ -1216,6 +1235,8 @@ def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, A
             schema = offered.parameters() or {}
             if set(schema.get("required") or ()) <= keys <= set(schema.get("properties") or {}):
                 fits.add(offered.name)
+    if len(fits) > 1:
+        fits = {name for name in fits if is_read_only_tool(name)}
     return (fits.pop(), arguments) if len(fits) == 1 else None
 
 
@@ -2597,10 +2618,8 @@ async def build_steward_agent(
         # also auto-approves skill scripts, as MAF's claw evals do.
         # Step 4, 4.5: reading a skill (load_skill, read_skill_resource) never asks a card, by MAF's own rule;
         # run_skill_script runs code and keeps its card unless the run is unattended.
-        auto_approval_rules: list[Any] = [
-            FileAccessProvider.read_only_tools_auto_approval_rule,
-            SkillsProvider.read_only_tools_auto_approval_rule,
-        ]
+        # The same rules recover_text_tool_calls reads as "read-only" (READ_ONLY_RULES).
+        auto_approval_rules: list[Any] = [*READ_ONLY_RULES]
         if part4 and auto_approve_skill_scripts:
             auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
         # Kyle, 2026-10-31 ("just change the line"): every session starts in plan mode, MAF's own default
