@@ -2903,6 +2903,82 @@ def test_every_eval_set_reports_a_raising_case_and_goes_on(monkeypatch: Any, cap
     evals.CASE_ERRORS.clear()
 
 
+def _stale_runner_client(monkeypatch: Any, failures: list[Exception]) -> tuple[Any, list[str], list[dict[str, Any]]]:
+    """MAF's OllamaChatClient under the malformed-call retry, its ollama AsyncClient faked (no network): chat raises each
+    of ``failures`` in turn, then answers "ok"; every chat and every generate (the unload) is recorded."""
+    import ollama
+    from agent_framework.ollama import OllamaChatClient
+
+    chats: list[str] = []
+    unloads: list[dict[str, Any]] = []
+
+    async def chat(**kwargs: Any) -> Any:
+        chats.append(kwargs["model"])
+        if failures:
+            raise failures.pop(0)
+        return ollama.ChatResponse(model=kwargs["model"], message=ollama.Message(role="assistant", content="ok"), done=True)
+
+    async def generate(**kwargs: Any) -> Any:
+        unloads.append(kwargs)
+        return ollama.GenerateResponse(model=kwargs["model"], response="", done=True)
+
+    client = OllamaChatClient(model="steward:1", host="http://127.0.0.1:9")
+    monkeypatch.setattr(client.client, "chat", chat)
+    monkeypatch.setattr(client.client, "generate", generate)
+    return steward._retry_malformed_tool_calls(client), chats, unloads
+
+
+def _ask(client: Any) -> str:
+    return asyncio.run(client.get_response([Message(role="user", contents=["hi"])])).text
+
+
+def test_a_stale_runner_is_unloaded_once_when_the_malformed_call_retries_run_out(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Measured 2026-11-04: a long-lived Ollama runner returned garbage tool calls and "error parsing tool call" failed
+    a whole eval; a fresh runner was clean. When both retries fail too, the model is unloaded (keep_alive 0, same client)
+    and the call asked once more; a storm that goes on raises after that one unload; within the window a second storm
+    unloads nothing; any other Ollama error never unloads."""
+    import logging
+
+    import ollama
+
+    def parse_error() -> Exception:
+        return ollama.ResponseError("error parsing tool call: raw='{\"id\": 3???????}'", 500)
+
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(3)])
+    with caplog.at_level(logging.WARNING, logger=steward.__name__):
+        assert _ask(client) == "ok", "the call after the unload answered"
+    assert unloads == [{"model": "steward:1", "keep_alive": 0}], unloads
+    assert len(chats) == 4, "the call, two retries, and one more after the unload"
+    assert "unloading steward:1 for a fresh runner" in caplog.text, caplog.text
+
+    # A storm that goes on: the error propagates after one unload (the window is open again for this storm).
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(9)])
+    with pytest.raises(Exception, match="error parsing tool call"):
+        _ask(client)
+    assert len(unloads) == 1 and len(chats) == 4, (unloads, chats)
+
+    # A second storm within the window: no unload, the error after the two retries, as before.
+    client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(9)])
+    with pytest.raises(Exception, match="error parsing tool call"):
+        _ask(client)
+    assert unloads == [] and len(chats) == 3, (unloads, chats)
+    # Once the window has passed, a storm may unload again.
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", steward._RUNNER_UNLOADED_AT - steward._RUNNER_UNLOAD_WINDOW_SECONDS - 1)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [parse_error() for _ in range(3)])
+    assert _ask(client) == "ok" and len(unloads) == 1
+
+    # Any other Ollama error: raised at once, never retried, never an unload.
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [ollama.ResponseError("model 'steward:1' not found", 404)])
+    with pytest.raises(Exception, match="not found"):
+        _ask(client)
+    assert unloads == [] and len(chats) == 1, (unloads, chats)
+
+
 def test_a_named_settings_set_reaches_its_steps_call_and_heads_the_report(monkeypatch: Any, capsys: Any, tmp_path: Path) -> None:
     """2026-11-04: Steward fumbled `VAR=x VAR=y python evals.py small`. evals.py --options NAME sets the named set's
     step options (eval_options.json) before Steward is built, and the report's first line names the set and its values.
