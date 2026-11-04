@@ -15,6 +15,9 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The background CodeExplorer's own `read_file`, `search_code` and `list_files` never read, search or list a `.env`
+  file (RULE 7), as the file store already kept them from the `file_access_*` tools; they had no such check and run
+  without a card (audit 2026-11-04).
 - A whole-file write of a `.py` file must parse, or it is refused and nothing is written (`whole_write_problem`, in
   the write middleware beside the Unicode-punctuation check). On 2026-11-04 at 10:14 Steward overwrote the sample
   project's `inventory.py` with a shortened stand-in (its docstring's first words and "..."). Edits made in parts

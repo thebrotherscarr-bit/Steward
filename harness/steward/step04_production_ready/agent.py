@@ -422,20 +422,29 @@ def _inside_workspace(path: str) -> Path:
     return resolved
 
 
+def _is_env_file(path: Path) -> bool:
+    """A .env file holds keys (RULE 7): the explorer's own tools never read, search or list one, as the file store's
+    guard keeps them from the file_access tools (audit 2026-11-04: read_file and search_code had no such check)."""
+    return path.name.lower().startswith(".env")
+
+
 def list_files(path: Annotated[str, "Folder relative to the workspace root, e.g. '.' or 'src'."] = ".") -> str:
     """List the files under a folder in the workspace (recursively, skipping build and VCS folders)."""
     root = _inside_workspace(path)
     files = [
         str(p.relative_to(_WORKING_DIR))
         for p in sorted(root.rglob("*"))
-        if p.is_file() and not _SKIP_DIRS.intersection(p.relative_to(_WORKING_DIR).parts)
+        if p.is_file() and not _is_env_file(p) and not _SKIP_DIRS.intersection(p.relative_to(_WORKING_DIR).parts)
     ]
     return "\n".join(files[:500]) or "(no files)"
 
 
 def read_file(path: Annotated[str, "File path relative to the workspace root."]) -> str:
     """Read a text file from the workspace, with line numbers."""
-    lines = _inside_workspace(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    target = _inside_workspace(path)
+    if _is_env_file(target):
+        raise ValueError(".env files hold keys and are never read.")
+    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     return "\n".join(f"{i:>5}  {line}" for i, line in enumerate(lines[:2000], 1))
 
 
@@ -447,7 +456,7 @@ def search_code(
     regex = re.compile(pattern)
     hits: list[str] = []
     for p in sorted(_inside_workspace(path).rglob("*")):
-        if not p.is_file() or _SKIP_DIRS.intersection(p.relative_to(_WORKING_DIR).parts):
+        if not p.is_file() or _is_env_file(p) or _SKIP_DIRS.intersection(p.relative_to(_WORKING_DIR).parts):
             continue
         try:
             for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
