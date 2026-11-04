@@ -2651,6 +2651,162 @@ def test_every_eval_set_exits_non_zero_when_a_case_fails(monkeypatch: Any) -> No
     assert [asyncio.run(run()) for run in sets] == [0, 0, 0, 0], "a passing set did not exit 0"
 
 
+class RaisingChatClient(ScriptedChatClient):
+    """The scripted client, raising an exception that is next in its script instead of replying (Ollama mid-run)."""
+
+    def _inner_get_response(self, **kwargs: Any) -> Any:
+        if self.replies and isinstance(self.replies[0], BaseException) and kwargs["options"].get("response_format") is None:
+            raise self.replies.pop(0)
+        return super()._inner_get_response(**kwargs)
+
+
+def _scripted_eval_runs(monkeypatch: Any, clients: list[ScriptedChatClient]) -> None:
+    """evals.py's own runs on scripted clients, one client per case, with no .env and no tracing set up."""
+    import evals
+
+    real = evals.run_steward
+
+    async def scripted(query: str, approve: set[str], **build: Any) -> Any:
+        return await real(query, approve, client=clients.pop(0), enable_shell=False, **build)
+
+    monkeypatch.setattr(evals, "run_steward", scripted)
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+
+
+EVAL_PLAN = '{"type": "approval", "questions": [{"message": "Do it."}], "steps": ["Do it"]}'
+EVAL_DONE = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "done"}]})
+README_ANSWER = "Added a README line on how to run the tests."
+
+
+def test_a_case_whose_run_raises_fails_with_its_reason_and_the_set_goes_on(monkeypatch: Any, capsys: Any) -> None:
+    """Live 2026-11-04, evals.py small: Ollama raised "error parsing tool call" in the first ask, the exception left the
+    set as an ExceptionGroup, and nothing was reported. A case whose run raises is that case's [fail], its reason the
+    exception's type and first line (run_completed); the sample project is put back as after any case; the next case
+    runs; the set exits 1."""
+    import ollama
+
+    import evals
+
+    project = steward._WORKING_DIR / "harness" / "steward" / "working" / "sample-project"
+    probe = project / "eval_raise_probe.txt"
+    write = Content.from_function_call(
+        call_id="w1", name="file_access_write",
+        arguments={"file_name": probe.relative_to(steward._WORKING_DIR).as_posix(), "content": "x"},
+    )
+    malformed = ollama.ResponseError("error parsing tool call: raw='{\"mode\":\"plan\"}We have a user request'\nsecond line")
+    raising = RaisingChatClient([EVAL_PLAN, write, malformed])
+    _scripted_eval_runs(monkeypatch, [raising, ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER])])
+    monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_NEW_CODE, evals.SMALL_ASK_README])
+    before = {p.name: p.read_bytes() for p in project.iterdir() if p.is_file()}
+    try:
+        code = evals.cli(["small"])
+    finally:
+        probe.unlink(missing_ok=True)
+    out = capsys.readouterr().out
+    assert len(raising.calls) == 2, "the write ran, then the model call raised"
+    assert code == 1, out
+    reason = "the run raised ResponseError: error parsing tool call: raw='{\"mode\":\"plan\"}We have a user request'"
+    assert f"      [fail] run_completed: {reason}\n" in out, out
+    assert "second line" not in out, "the first line only"
+    assert out.startswith("Small asks: 1/2 passed\n"), out
+    assert f"  [fail] {evals.SMALL_ASK_NEW_CODE[:70]}" in out and f"  [pass] {evals.SMALL_ASK_README[:70]}" in out, out
+    assert "run_completed: Not this case." not in out, "a case that ran adds no line"
+    assert {p.name: p.read_bytes() for p in project.iterdir() if p.is_file()} == before, "the sample project was put back"
+
+
+def test_every_eval_set_reports_a_raising_case_and_goes_on(monkeypatch: Any, capsys: Any) -> None:
+    """The regression set, memory and steps report a raising case (here one raised through a task group, as the workflow
+    raises it) as that case's [fail] with its reason, and run the rest. A cancellation is never taken for a failure."""
+    import contextlib
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+    from agent_framework import AgentResponse
+
+    ran: list[str] = []
+    reason = "the run raised RuntimeError: Ollama went away"
+
+    async def first_raises(query: str, approve: set[str], **build: Any) -> Any:
+        ran.append(query)
+        if len(ran) == 1:
+            raise ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("Ollama went away\nat line 2")])
+        return SimpleNamespace(name="Steward"), AgentResponse(messages=[])
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def workflow_raises(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("Ollama went away")])
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "run_steward", first_raises)
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", workflow_raises)
+    monkeypatch.setattr(wf, "build_steward", built)
+
+    assert asyncio.run(evals.main()) == 1
+    out = capsys.readouterr().out
+    assert ran == evals.STEWARD_EVAL_QUERIES and f"      run_completed: {reason}\n" in out, out
+    assert out.count("  [fail] ") == len(evals.STEWARD_EVAL_QUERIES), "every case is reported"
+
+    ran.clear()
+    assert asyncio.run(evals.memory_main()) == 1
+    out = capsys.readouterr().out
+    assert ran == evals.MEMORY_QUERIES and f"      [fail] run_completed: {reason}\n" in out, out
+    assert "Not this case." not in out, "the memory report keeps its lines"
+
+    assert asyncio.run(evals.steps_main()) == 1
+    out = capsys.readouterr().out
+    assert f"  overall: 0/1\n" in out and f"      [fail] {reason}\n" in out, out
+
+    async def cancelled(query: str, approve: set[str], **build: Any) -> Any:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(evals, "run_steward", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(evals.run_case("q", set()))
+    assert "q" not in evals.CASE_ERRORS
+    evals.CASE_ERRORS.clear()
+
+
+def test_a_named_settings_set_reaches_its_steps_call_and_heads_the_report(monkeypatch: Any, capsys: Any, tmp_path: Path) -> None:
+    """2026-11-04: Steward fumbled `VAR=x VAR=y python evals.py small`. evals.py --options NAME sets the named set's
+    step options (eval_options.json) before Steward is built, and the report's first line names the set and its values.
+    An unknown name, a key that is no step option or a bad value is a clear error and no run."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    for name in STEP_OPTION_NAMES:
+        monkeypatch.setenv(name, "")  # restored after the test, whatever --options sets
+    sets = json.loads(evals.EVAL_OPTIONS.read_text(encoding="utf-8"))
+    assert sets["baseline"] == {} and sets["plan_t0"] == {"STEWARD_PLAN_TEMPERATURE": "0"}, sets
+    client = ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER])
+    _scripted_eval_runs(monkeypatch, [client])
+    monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_README])
+    assert evals.cli(["small", "--options", "plan_t0"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[:2] == ["Settings set plan_t0: STEWARD_PLAN_TEMPERATURE=0", "Small asks: 1/1 passed"], out
+    assert client.calls[0]["options"]["response_format"] is wf.StewardPlan and client.calls[0]["options"]["temperature"] == 0.0
+    assert all("temperature" not in call["options"] for call in client.calls[1:]), "the plan's call only"
+
+    assert evals.cli(["small", "--options", "plan_hot"]) == 2
+    error = capsys.readouterr().err
+    assert "plan_hot" in error and "plan_t0" in error, error
+    assert evals.cli(["small", "--options"]) == 2, "--options with no name"
+    capsys.readouterr()
+    odd = tmp_path / "eval_options.json"
+    odd.write_text('{"typo": {"STEWARD_PLAN_TEMP": "0"}, "hot": {"STEWARD_PLAN_TEMPERATURE": "hot"}}', encoding="utf-8")
+    with pytest.raises(ValueError, match="STEWARD_PLAN_TEMP"):
+        evals.apply_options("typo", odd)
+    with pytest.raises(ValueError, match="STEWARD_PLAN_TEMPERATURE"):
+        evals.apply_options("hot", odd)
+
+
 def test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_comes_back_as_a_card(monkeypatch: Any) -> None:
     """Step 6, 6.3: a turn with {"steward_workflow": "improve"} runs the improvement loop on his host (the coder
     fixer, the gate, the review). The review comes back as MAF's request_info call; its answer, sent as

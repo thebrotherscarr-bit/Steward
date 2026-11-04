@@ -15,16 +15,21 @@ Steward must call) beside a check of the answer. A case stays here once it passe
 Beside that default set: ``small`` (step 4's small asks, with ``--gate`` the improvement loop's gate), ``steps``
 (each workflow step scored on its own) and ``memory`` (step 5: a note saved in one request is recalled in the next).
 
-Every set exits 1 when any case fails (``small --gate``: when the checks drop below the baseline), 0 otherwise.
+Every set exits 1 when any case fails (``small --gate``: when the checks drop below the baseline), 0 otherwise. A case
+whose run raises fails with the exception's type and first line (run_completed), and the set goes on to the next case.
+
+``--options NAME`` runs a set with a named settings set from eval_options.json (per-step model options, the
+STEWARD_<STEP>_THINK / _TEMPERATURE / _SEED that steward_workflow reads at build); the report's first line names it.
 
 Run:
-    python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory]
+    python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory] [--options NAME]
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import contextlib
@@ -252,6 +257,39 @@ def exit_code(results: Iterable[EvalResults]) -> int:
     return 0 if all(result.all_passed for result in results) else 1
 
 
+# Live 2026-11-04, evals.py small: Ollama raised "error parsing tool call" in the first ask (the malformed-call retry
+# gave up), the exception left the set through the workflow as an ExceptionGroup, and nothing was reported. A case
+# whose run raises is recorded here, by its query, and scored as failed by run_completed; the set goes on.
+CASE_ERRORS: dict[str, str] = {}
+
+
+def raised(error: BaseException) -> str:
+    """A raising run's reason: the exception's type and first line, from inside the task group it came through."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    first = next(iter(str(error).strip().splitlines()), "")
+    return f"the run raised {type(error).__name__}: {first}" if first else f"the run raised {type(error).__name__}"
+
+
+async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any] | None, AgentResponse[Any]]:
+    """One case of a set through run_steward. A run that raises (an Exception: a cancellation or Ctrl+C still stops the
+    set) is recorded in CASE_ERRORS and answered with an empty response, so the case is scored, and fails, with the rest."""
+    CASE_ERRORS.pop(query, None)
+    try:
+        return await run_steward(query, approve, **build)
+    except Exception as error:
+        CASE_ERRORS[query] = raised(error)
+        return None, AgentResponse(messages=[])
+
+
+@evaluator(name="run_completed")
+def run_completed(query: str) -> dict[str, object]:
+    """A case whose run raised fails with the exception; a case that ran is not this check's ("Not this case.")."""
+    if query not in CASE_ERRORS:
+        return {"passed": True, "reason": "Not this case."}
+    return {"passed": False, "reason": CASE_ERRORS[query]}
+
+
 async def main() -> int:
     """Run the local Steward evals; the exit code is exit_code's."""
     load_dotenv()
@@ -265,11 +303,14 @@ async def main() -> int:
         research_covers_topics,
         explorer_names_files,
         tool_call_args_match,
+        run_completed,
     )
     responses: list[AgentResponse[Any]] = []
+    steward = None
     with discount_bug_planted():
         for query in STEWARD_EVAL_QUERIES:
-            steward, response = await run_steward(query, set(), enable_shell=False, auto_approve_skill_scripts=True)
+            ran, response = await run_case(query, set(), enable_shell=False, auto_approve_skill_scripts=True)
+            steward = ran or steward
             responses.append(response)
     results = await evaluate_agent(
         agent=steward,
@@ -422,7 +463,12 @@ async def steps_main() -> int:
         )
         async with agent:
             with discount_bug_planted():
-                events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
+                CASE_ERRORS.pop(STEPS_QUERY, None)
+                try:
+                    events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
+                except Exception as error:  # the run raised: overall fails with it (run_completed); the bug is put back
+                    CASE_ERRORS[STEPS_QUERY] = raised(error)
+                    events = []
                 STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
     steps = step_conversations(events)
     outputs = [str(e.data) for e in events if e.type == "output"]
@@ -435,7 +481,7 @@ async def steps_main() -> int:
     scored = {
         wf.PLAN_STEP: await LocalEvaluator(plan_step).evaluate(items(steps.get(wf.PLAN_STEP, [])), eval_name="plan"),
         wf.EXECUTE_STEP: await LocalEvaluator(execute_step).evaluate(items(steps.get(wf.EXECUTE_STEP, [])), eval_name="execute"),
-        "overall": await LocalEvaluator(steps_overall).evaluate(report, eval_name="overall"),
+        "overall": await LocalEvaluator(steps_overall, run_completed).evaluate(report, eval_name="overall"),
     }
     code = exit_code(scored.values())
     print(f"Workflow steps: {'PASS' if code == 0 else 'FAIL'}")
@@ -443,7 +489,8 @@ async def steps_main() -> int:
         print(f"  {step}: {result.passed}/{result.total}")
         for item in result.items:
             for score in item.scores:
-                print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
+                if (score.sample or {}).get("reason") != "Not this case.":
+                    print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
     return code
 
 
@@ -628,7 +675,7 @@ def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BA
 
 SMALL_ASK_EVALUATORS = (
     plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
-    no_nudge_in_reply, answer_on_topic,
+    no_nudge_in_reply, answer_on_topic, run_completed,
 )
 
 
@@ -666,7 +713,8 @@ async def run_small_asks(
             with (around or contextlib.nullcontext)(query), (
                 discount_bug_planted() if query == SMALL_ASK_DISCOUNT else contextlib.nullcontext()
             ):
-                steward, response = await run_steward(query, approve, **build)
+                ran, response = await run_case(query, approve, **build)  # a raising run is a failed case; reset follows
+                steward = ran or steward
                 responses.append(response)
                 written = wf.written_python_files(response.messages)
                 SMALL_ASK_FILES[query] = {
@@ -738,7 +786,8 @@ async def memory_runs(**build: Any) -> tuple[Agent[Any] | None, list[AgentRespon
     async with AsyncExitStack() as stack:
         build.setdefault("memory_store", isolated_memory_store(stack))
         for query in MEMORY_QUERIES:
-            steward, response = await run_steward(query, set(), **build)
+            ran, response = await run_case(query, set(), **build)
+            steward = ran or steward
             responses.append(response)
     return steward, responses
 
@@ -752,21 +801,62 @@ async def memory_main() -> int:
         agent=steward,
         queries=MEMORY_QUERIES,
         responses=responses,
-        evaluators=LocalEvaluator(memory_recalled),
+        evaluators=LocalEvaluator(memory_recalled, run_completed),
         conversation_split=ConversationSplit.FULL,
     )
     print(f"Memory: {results[0].passed}/{results[0].total} passed")
     for item in results[0].items:
         print(f"  [{item.status}] {(item.input_text or '')[:70]}")
         for score in item.scores:
-            print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+            if (score.sample or {}).get("reason") != "Not this case.":
+                print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
     return exit_code(results)
+
+
+# Settings sets (2026-11-04): Steward fumbled an inline `VAR=x VAR=y python evals.py small`. A named set of per-step
+# model options is kept in eval_options.json and run with --options NAME.
+EVAL_OPTIONS = Path(__file__).resolve().with_name("eval_options.json")
+
+
+def apply_options(name: str, path: Path = EVAL_OPTIONS) -> str:
+    """Set the named settings set's STEWARD_<STEP>_* variables for this run, before Steward is built (steward_workflow
+    reads them at build), and return the report's line naming the set. An unknown name, a key that is no step option or
+    a bad value raises ValueError, before anything runs."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    sets = json.loads(path.read_text(encoding="utf-8"))
+    if name not in sets:
+        raise ValueError(f"no settings set {name!r} in {path.name}; its sets: {', '.join(sets)}")
+    values = {key: str(value) for key, value in sets[name].items()}
+    known = {f"STEWARD_{step.upper()}_{option}" for step in wf.STEP_OPTION_STEPS for option in ("THINK", "TEMPERATURE", "SEED")}
+    if unknown := sorted(set(values) - known):
+        raise ValueError(f"settings set {name!r} names {unknown}, which are not step options ({', '.join(sorted(known))})")
+    wf.step_options_from_env(values)  # a bad value raises here, naming its variable
+    os.environ.update(values)
+    return f"Settings set {name}: {', '.join(f'{key}={value}' for key, value in values.items()) or 'no step options'}"
+
+
+def cli(argv: list[str]) -> int:
+    """evals.py's command line, ``[small [--gate] | steps | memory] [--options NAME]``: the set's exit code, or 2 for a
+    settings set that cannot be used (the reason on stderr, and nothing run)."""
+    args = list(argv)
+    if "--options" in args:
+        at = args.index("--options")
+        name = args[at + 1] if at + 1 < len(args) else ""
+        del args[at : at + 2]
+        try:
+            line = apply_options(name)
+        except ValueError as error:
+            print(f"evals.py --options: {error}", file=sys.stderr)
+            return 2
+        print(line)
+    runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
+    if args[:1] == ["small"]:
+        return asyncio.run(small_main(use_gate="--gate" in args))
+    return asyncio.run(runs[args[0]]() if args and args[0] in runs else main())
 
 
 if __name__ == "__main__":
     # a reason can carry characters Windows' console code page cannot print (2026-10-30: U+2011)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
-    if sys.argv[1:2] == ["small"]:
-        sys.exit(asyncio.run(small_main(use_gate="--gate" in sys.argv)))
-    sys.exit(asyncio.run(runs[sys.argv[1]]() if sys.argv[1:] and sys.argv[1] in runs else main()))
+    sys.exit(cli(sys.argv[1:]))
