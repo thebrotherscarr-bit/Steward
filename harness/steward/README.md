@@ -216,8 +216,6 @@ From the SecondBrain note `maf-solved-patterns-checked-2026-11-02-d8d89a`; the d
   `CheckpointStoreProvider`, on loopback stays his host. `hosted.py` carries three local
   workarounds for it: a fixed `FOUNDRY_AGENT_SESSION_ID`, the short `AGENTSERVER_STATE_ROOT` `.as`,
   and dropping `additional_function_arguments` before the Ollama call.
-- **Missing to deploy locally.** A deployment package (`pyproject.toml` pins nothing and does not
-  list `agent-framework-hosting`, `agent-framework-hosting-mcp`, `mcp`, `starlette`, `uvicorn` or
-  `agent-framework-devui`, which the hosts import; the guide's step 4 folder has `requirements.txt`
-  and `.agentignore`); an eval gate in front of deploying; an eval case proving memory across requests; and the
+- **Missing to deploy locally.** (The deployment package is done, 2026-11-03: `pyproject.toml` pins every
+  package the hosts import, and the gate installs from it.) An eval gate in front of deploying; an eval case proving memory across requests; and the
   cookbook's improvement loop with approval at the merge.
