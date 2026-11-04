@@ -21,9 +21,11 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 import sys
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -229,6 +231,7 @@ async def steward_graph(request: HostedResponseRequest, client_factory: Callable
     background_providers = [p for p in agent.context_providers if isinstance(p, BackgroundAgentsProvider)]
     agent.middleware = [
         _release_background_per_request(background_providers),
+        _only_his_own_words,
         _host_identity_stays_with_tools,
         *(agent.middleware or []),
     ]
@@ -262,6 +265,37 @@ async def _host_identity_stays_with_tools(context: ChatContext, call_next: Calla
     client kwarg on to ollama's chat(), which refuses it. It is dropped here, before the model call."""
     context.kwargs.pop("additional_function_arguments", None)
     await call_next()
+
+
+@agent_middleware
+async def _only_his_own_words(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """The Agent tab shows his own words, not the harness loop's prompts to him (live 2026-11-03).
+
+    MAF's AgentLoopMiddleware streams each injected next_message ("Progress so far", the open-todo reminder) as a
+    user update between passes (_harness/_loop.py, _process_streaming: "yield self._message_to_update(message)"; its
+    return_final_only has "no effect on streaming runs"). EXECUTE's AgentExecutor yields every update as output, and
+    the Responses host's tracker does not read the role, so the nudges were glued into his message. MAF's own
+    WorkflowAgent forwards assistant updates only (_workflows/_agent.py, "Filter out non-assistant updates"); here the
+    user updates are dropped with ResponseStream.flat_map (zero or more updates per update), and his next pass gets a
+    new message_id, since a changed message_id "marks a new logical message" for the host (_responses.py,
+    _OutputItemTracker.handle). The run's final response is the loop's own, unchanged.
+    """
+    await call_next()
+    inner = context.result
+    if not context.stream or not isinstance(inner, ResponseStream):
+        return
+    message = {"id": uuid.uuid4().hex}
+
+    def his_own(update: AgentResponseUpdate) -> list[AgentResponseUpdate]:
+        if update.role == "user":
+            message["id"] = uuid.uuid4().hex  # a nudge ends his pass: the next one is a new message
+            return []
+        if update.message_id is None:
+            update = copy.copy(update)  # as AgentExecutor copies an update before changing it (_agent_executor.py)
+            update.message_id = message["id"]
+        return [update]
+
+    context.result = inner.flat_map(his_own, finalizer=lambda _: inner.get_final_response())
 
 
 async def steward_turn(request: HostedResponseRequest) -> WorkflowTurn[Any]:

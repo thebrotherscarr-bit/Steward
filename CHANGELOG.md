@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The Agent tab shows only his own words. MAF's AgentLoopMiddleware streams its nudges ("Progress so far", the
+  open-todo reminder) as user updates between passes, and the Responses host glued them into his message (live
+  2026-11-03, the Juniper answer). `hosted.py`'s `_only_his_own_words` drops them with `ResponseStream.flat_map`, as
+  MAF's `WorkflowAgent` does, and gives each pass its own message. The model still receives the nudges.
 - With automatic memory on, an approved `run_shell` no longer fails the hosted run. MemoryContextProvider's transcript
   save (msgspec) refused MAF's `_ShellResultText`, a str subclass, and the host reported only "Native workflow
   execution failed" (live 2026-11-03: the memory eval and the diagnosis both ended there). `steward_memory()` now
