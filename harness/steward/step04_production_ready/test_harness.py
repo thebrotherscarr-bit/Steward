@@ -1161,7 +1161,9 @@ def test_door_calls_stay_on_stewards_world() -> None:
 
 
 def test_devui_shows_stewards_runs_and_traces() -> None:
-    """ADR-0001 item 7: DevUI, run as devui_app.py runs it, serves Steward and streams his run's trace."""
+    """ADR-0001 item 7: DevUI, run as devui_app.py runs it, serves Steward and streams his run's trace; beside him his
+    workflow, which DevUI runs to its plan card (human in the loop)."""
+    import steward_workflow as wf
     from agent_framework.observability import configure_otel_providers
     from fastapi.testclient import TestClient
 
@@ -1171,21 +1173,47 @@ def test_devui_shows_stewards_runs_and_traces() -> None:
     stack = AsyncExitStack()
     client = ScriptedChatClient(["Hello from Steward."])
     agent = asyncio.run(steward.build_steward_agent(stack, client=client, enable_shell=False))
-    server = devui_app.build_dev_server(agent, "test-token")
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix the discount line"]}'
+    flow_client = ScriptedChatClient([plan])
+    _, workflow = asyncio.run(wf.build_steward(stack, client=flow_client, enable_shell=False))
+    server = devui_app.build_dev_server(agent, workflow, "test-token")
     # DevUI answers only requests addressed to its loopback host.
     with TestClient(server.get_app(), base_url=f"http://{devui_app.HOST}:{devui_app.PORT}") as http:
         auth = {"Authorization": "Bearer test-token"}
         assert http.get("/v1/entities").status_code == 401, "DevUI asks for its token"
         entities = http.get("/v1/entities", headers=auth).json()["entities"]
-        assert [e["name"] for e in entities] == ["Steward"]
-        entity = entities[0]["id"]
-        # The UI runs each chat in a conversation, which carries the session the harness needs.
-        conversation = http.post("/v1/conversations", json={"metadata": {"entity_id": entity}}, headers=auth).json()
-        body = {"metadata": {"entity_id": entity}, "input": "Hello", "stream": True, "conversation": conversation["id"]}
-        events = http.post("/v1/responses", json=body, headers=auth).text
+        assert [(e["name"], e["type"]) for e in entities] == [("Steward", "agent"), (wf.WORKFLOW_NAME, "workflow")]
+
+        def run(entity: str, text: str) -> str:
+            # The UI runs each chat in a conversation, which carries the session (and a workflow's checkpoints).
+            conversation = http.post("/v1/conversations", json={"metadata": {"entity_id": entity}}, headers=auth).json()
+            body = {"metadata": {"entity_id": entity}, "input": text, "stream": True, "conversation": conversation["id"]}
+            return http.post("/v1/responses", json=body, headers=auth).text
+
+        events = run(entities[0]["id"], "Hello")
+        flow_events = run(entities[1]["id"], "Fix the discount bug.")
     asyncio.run(stack.aclose())
     assert "Hello from Steward." in events, "the run's reply reaches DevUI"
     assert "response.trace.completed" in events and "invoke_agent Steward" in events, "and so does its trace"
+    assert wf.APPROVE_PLAN in flow_events and "Fix the discount line" in flow_events, "the workflow's plan card reaches DevUI"
+    assert len(flow_client.calls) == 1, "and nothing ran before the card"
+
+
+def test_stewards_workflow_graph_loops_back_to_plan_and_from_repair_to_execute() -> None:
+    """MAF's WorkflowViz draws the graph DevUI shows: an empty or mislabelled plan goes back to PLAN once, and a failed
+    check goes through REPAIR back to EXECUTE (the two loops; agent_framework/_workflows/_viz.py, to_mermaid)."""
+    import steward_workflow as wf
+    from agent_framework import WorkflowViz
+
+    async def _go() -> str:
+        async with AsyncExitStack() as stack:
+            _, workflow = await wf.build_steward(stack, client=ScriptedChatClient([]), enable_shell=False)
+            return WorkflowViz(workflow).to_mermaid()
+
+    lines = {line.strip() for line in asyncio.run(_go()).splitlines()}
+    assert f"{wf.READ_PLAN_STEP} --> {wf.PLAN_STEP};" in lines, "read_plan does not loop back to plan"
+    assert f"{wf.CHECK_STEP} -. conditional .-> {wf.REPAIR_STEP};" in lines, "a failed check does not go to repair"
+    assert f"{wf.REPAIR_STEP} --> {wf.EXECUTE_STEP};" in lines, "repair does not loop back to execute"
 
 
 def test_mcp_hosting_serves_steward_as_one_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1458,6 +1486,70 @@ def test_the_eval_gate_counts_only_applicable_checks_and_fails_a_drop(tmp_path: 
     assert evals.gate(11, 14, baselines=baselines) == 0
     assert evals.gate(10, 14) == 0, "the recorded baseline is 10 of 14"
     assert any("evals.py" in part for check in loop.GATE_CHECKS for part in check), "the loop's gate runs the evals"
+
+
+def test_every_eval_set_exits_non_zero_when_a_case_fails(monkeypatch: Any) -> None:
+    """Every set's exit code is MAF's EvalResults.all_passed: 1 when a case failed, 0 when all passed. Each set's runs
+    and scoring are canned here (no model); what is tested is the code each set's main hands to sys.exit."""
+    import contextlib
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+    from agent_framework import AgentResponse, EvalResults
+
+    def results(passed: int, failed: int) -> Any:
+        return EvalResults(provider="local", result_counts={"passed": passed, "failed": failed})
+
+    assert evals.exit_code([results(3, 0)]) == 0
+    assert evals.exit_code([results(3, 0), results(2, 1)]) == 1, "one failed case fails the set"
+    assert evals.exit_code([results(0, 0)]) == 1, "nothing scored is no pass"
+
+    outcome: list[Any] = []
+
+    async def evaluate(**kwargs: Any) -> list[Any]:
+        return outcome
+
+    async def ran(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(name="Steward"), [AgentResponse(messages=[])]
+
+    async def one_run(query: str, approve: set[str], **build: Any) -> Any:
+        return SimpleNamespace(name="Steward"), AgentResponse(messages=[])
+
+    async def scored_small(steward: Any, asks: list[str], responses: list[Any]) -> Any:
+        return outcome[0]
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def no_events(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        return []
+
+    class Scoring:
+        """LocalEvaluator's evaluate, canned (the steps set scores each step with its own)."""
+
+        def __init__(self, *checks: Any) -> None:
+            pass
+
+        async def evaluate(self, items: Any, eval_name: str = "") -> Any:
+            return outcome[0]
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "evaluate_agent", evaluate)
+    monkeypatch.setattr(evals, "run_steward", one_run)
+    monkeypatch.setattr(evals, "memory_runs", ran)
+    monkeypatch.setattr(evals, "run_small_asks", ran)
+    monkeypatch.setattr(evals, "score_small_asks", scored_small)
+    monkeypatch.setattr(evals, "LocalEvaluator", Scoring)
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", no_events)
+    monkeypatch.setattr(wf, "build_steward", built)
+    sets = (evals.main, evals.steps_main, evals.small_main, evals.memory_main)
+    outcome[:] = [results(1, 1)]
+    assert [asyncio.run(run()) for run in sets] == [1, 1, 1, 1], "a set with a failed case did not exit 1"
+    outcome[:] = [results(2, 0)]
+    assert [asyncio.run(run()) for run in sets] == [0, 0, 0, 0], "a passing set did not exit 0"
 
 
 def test_an_improve_turn_runs_the_improvement_loop_on_the_host_and_its_review_comes_back_as_a_card(monkeypatch: Any) -> None:

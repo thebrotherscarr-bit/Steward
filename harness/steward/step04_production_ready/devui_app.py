@@ -6,6 +6,12 @@ starts its own event loop, which would orphan Steward's MCP sessions, so DevServ
 on this loop. Tracing is on as configure_otel_providers sets it, with every span also written to
 halo_traces/traces.jsonl, as console_app.py does.
 
+Beside the agent, his workflow (steward_workflow.build_steward, the graph every host runs): DevUI shows its graph,
+runs it with its approval cards (human in the loop) and keeps a checkpoint per conversation
+(agent_framework_devui/_conversations.py, CheckpointConversationManager). The workflow wraps its own Steward, as
+MAF's workflow host builds one per request (hosted.steward_graph), because build_steward_workflow sets the plan
+step's middleware on the agent it wraps and the bare agent must not carry it.
+
 DevUI is a development tool ("not intended for production use"). It listens on loopback only and
 asks for DevUI's bearer token.
 
@@ -37,30 +43,34 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import build_steward_agent, steward_memory_store  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
+from steward_workflow import build_steward  # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = 8080  # DevUI's default
 
 
-def build_dev_server(agent: Any, auth_token: str) -> DevServer:
-    """DevUI's server with Steward registered in memory, as the sample registers its agent."""
+def build_dev_server(agent: Any, workflow: Any, auth_token: str) -> DevServer:
+    """DevUI's server with Steward and his workflow registered in memory, as the sample registers its agent (DevUI
+    tells a workflow from an agent by its executors: agent_framework_devui/_discovery.py, create_entity_info_from_object)."""
     server = DevServer(port=PORT, host=HOST, auth_enabled=True, auth_token=auth_token)
-    server.set_pending_entities([agent])
+    server.set_pending_entities([agent, workflow])
     return server
 
 
 async def main() -> None:
-    """Serve Steward in DevUI, on the loop that holds his MCP connections."""
+    """Serve Steward and his workflow in DevUI, on the loop that holds their MCP connections."""
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
 
     async with AsyncExitStack() as stack:
         agent = await stack.enter_async_context(await build_steward_agent(stack, memory_store=steward_memory_store()))
+        flow_agent, workflow = await build_steward(stack, memory_store=steward_memory_store())
+        await stack.enter_async_context(flow_agent)
         auth_token = os.getenv("DEVUI_AUTH_TOKEN") or secrets.token_urlsafe(32)
-        server = build_dev_server(agent, auth_token)
+        server = build_dev_server(agent, workflow, auth_token)
 
-        print(f"\nDevUI:        http://{HOST}:{PORT}  (entity: agent_{agent.name})")
+        print(f"\nDevUI:        http://{HOST}:{PORT}  (entities: agent {agent.name}, workflow {workflow.name})")
         print(f"Bearer token: {auth_token}")
         print("Press Ctrl+C to stop.\n")
 
