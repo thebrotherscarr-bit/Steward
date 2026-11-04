@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- His service's telemetry stays out of `steward.log` (192 MB on 2026-11-03). The host's default observability, the
+  microsoft-opentelemetry distro, printed every metric, span and log record as indented JSON on stdout. `hosted.py`
+  now passes the host's own `configure_observability` hook `steward_observability`: spans to HALO as before; metrics
+  and OTel log records through OpenTelemetry's console exporters into rotating files, `halo_traces/metrics.jsonl` and
+  `logs.jsonl` (10 MB, five kept). A swallowed workflow failure is logged with its traceback, as MAF's own
+  `_log_response_failure` does. Telemetry is named `steward`; OTLP is `http/protobuf`. Restart required.
 - The Agent tab shows only his own words. MAF's AgentLoopMiddleware streams its nudges ("Progress so far", the
   open-todo reminder) as user updates between passes, and the Responses host glued them into his message (live
   2026-11-03, the Juniper answer). `hosted.py`'s `_only_his_own_words` drops them with `ResponseStream.flat_map`, as
