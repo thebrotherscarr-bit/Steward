@@ -15,18 +15,13 @@ Steward's team on the live build (part 4, every host): Steward himself (the orch
 gpt-oss:20b: talks to the user, plans, uses tools) and two background agents on his model and client:
     * CodeExplorer     — explores one module read-only.
     * WebResearchAgent — searches the web with SecondBrain's web tools (only when SecondBrain is connected).
-The older path (part > 4, used by no host) also builds these, each on its own model:
-    * Coder     — STEWARD_CODER_MODEL (qwen2.5-coder:14b); the improvement loop's coder (step 6) is its own agent on
-                  that model, in improvement_loop_workflow.py.
-    * Reasoner  — STEWARD_REASONER_MODEL (deepseek-r1:14b): thinks through hard problems; no tools.
-    * Explainer — STEWARD_CONVERSATION_MODEL (gemma4:26b): explanations, docs and summaries.
+The improvement loop's coder (step 6) is its own agent on STEWARD_CODER_MODEL (qwen2.5-coder:14b), in
+improvement_loop_workflow.py.
 
 Environment variables:
     OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
     OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
     STEWARD_CODER_MODEL        — coder model (defaults to qwen2.5-coder:14b, the operator's choice 2026-11-03)
-    STEWARD_REASONER_MODEL     — reasoner model (defaults to deepseek-r1:14b)
-    STEWARD_CONVERSATION_MODEL — conversationalist model (defaults to gemma4:26b)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
                                  per ADR-0001 item 11: his own code is in reach; reads run without a
                                  card and writes ask, and the file store never reads, searches or
@@ -142,93 +137,22 @@ from subprocess_script_runner import subprocess_script_runner  # noqa: E402
 load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
-# Kyle, 2026-10-29: gemma4:26b replaces gemma4:12b (better reviewed; measured 60 tok/s vs 52 here).
 # The fixer's model (the operator, 2026-11-03): qwen2.5-coder:14b, the one coder that sits wholly on the 16 GB card
 # at the fixer's 32K window (12.1 GB). Measured that day, one model loaded at a time: it read 227 tok/s on a 2.7K
 # prompt and 49 on a 17K one, and wrote 28-46 tok/s. devstral-small-2:24b, the fixer of round 1, was dropped: at 32K
 # and at 24K 5-7 of its 41 layers stayed on the CPU, and it wrote 3.5 tok/s.
 _CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
-_REASONER_MODEL = os.environ.get("STEWARD_REASONER_MODEL", "deepseek-r1:14b")
-_CONVERSATION_MODEL = os.environ.get("STEWARD_CONVERSATION_MODEL", "gemma4:26b")
 # The context Ollama loads each model with (num_ctx, a chat option). Ollama's own default here is
 # 131,072, which put 4 GB of gpt-oss:20b in system RAM: 45.6 tok/s, against 84.6 at 65,536.
 # Steward's prompts already reach ~23k tokens, so he keeps 65,536, matching the harness budget below;
-# CodeExplorer shares his model and context so Ollama never reloads it between them. The rest of the
-# team works from shorter inputs: 32,768.
+# CodeExplorer shares his model and context so Ollama never reloads it between them.
 _STEWARD_CONTEXT = 65_536
-_TEAM_CONTEXT = 32_768
 
 # Startup diagnostics go through ``logging`` so every host decides where they appear.
 logger = logging.getLogger(__name__)
 # His telemetry source name (create_harness_agent's otel_provider_name, agent_framework/_harness/_agent.py:537 and :700):
 # his invoke_agent spans and metrics carry gen_ai.provider.name "steward", not MAF's "microsoft.agent_framework.harness".
 OTEL_PROVIDER_NAME = "steward"
-
-STEWARD_INSTRUCTIONS = """\
-## Steward: Engineering Assistant Instructions
-
-You are Steward, a software engineering and development assistant. You work inside the user's
-workspace: you map and understand codebases, review changes, fix bugs, run tests, and commit work
-when asked.
-
-### Working style
-
-- Read before you write. Use the file_access tools to open the relevant files (and grep for call
-  sites) before answering questions about the code or changing it. Never guess at file contents.
-- You have skills for code-review, codebase-map, evals (running your own evals), github (lines of
-  work, the send and pull requests), improve (fixing one eval failure in an improvement round),
-  run-tests and secondbrain-notes. When a request matches a skill,
-  load it and
-  follow its instructions (read its references, run its scripts) rather than improvising.
-- You lead a team of background agents, each on its own model. Delegate to them, then apply and
-  verify their output yourself. Start a task once, wait for it, then read its result with
-  get_task_results; never start the same task again while one is running or finished.
-  - CodeExplorer: explores one module or folder read-only. Use one per module, concurrently.
-  - Coder: writes and fixes code. Give it the task and the files involved; it returns the exact
-    edits, which you apply with the file_access tools and then test.
-  - Reasoner: thinks through hard debugging, root-cause and design questions. It cannot read
-    files, so include the relevant code, errors and test output in its input.
-  - Explainer: writes clear explanations, documentation, summaries and commit messages.
-- Use the run_shell tool to run tests, linters, builds and read-only git commands in the workspace.
-  Run the tests before and after a change, and report the actual output. Explain what a command
-  does before running anything that changes files.
-- Use CodeAct (Python) for any calculation instead of estimating.
-- Edit existing files with file_access_replace (exact old text to new text), one small edit per
-  call; use file_access_grep and file_access_read_lines to find the lines first. Never rewrite a
-  whole existing file with file_access_write: large writes break the tool call. Keep every tool
-  call's arguments under about 1,500 characters; split a bigger change into several edits, top
-  to bottom (for example the opening lines, then the middle, then the end).
-- CodeAct (execute_code) is for calculation only: it cannot see the file tools or the disk, so
-  never try to edit files from it.
-- An edit is applied only when file_access_replace returns "Replaced". If a tool fails, is refused
-  or is still waiting for approval, say so. Never report a change, or show file content, that a
-  tool result did not give you. Read the file back before saying it is done.
-- Make the smallest change that solves the problem, in the existing style of the file. A change is
-  done only when the tests that cover it pass.
-- To commit, use the git_commit tool with a clear, imperative message. The user will be asked to
-  approve it before it runs, so summarize what is being committed first.
-- When the secondbrain_* tools are available, SecondBrain's notes are your long-term memory: the
-  user's plans, rulings, laws and past work. Search them (secondbrain_search_notes, then
-  secondbrain_read_note) before answering about any of those, and cite the note you used. When
-  the user asks you to remember something, write it there with secondbrain_write_note or
-  secondbrain_append_to_note. secondbrain_git_commit goes through SecondBrain's door and is held
-  for the user's approval there; say so when you make one.
-- Learning loop: when you learn a durable fact about the work, make a decision with Kyle, or
-  find a lesson (a mistake not to repeat), record it with secondbrain_memory, target "memory",
-  action "add", in one short line. When the memory is full, consolidate with "replace" or
-  "remove" instead of adding. Facts about Kyle himself are kept for you automatically.
-- "About Kyle" and your long-term memory are put in front of you every turn. When Kyle asks about
-  himself, his preferences or how he works, answer from "About Kyle" first, then add what notes say.
-- Notes age. Give the date of every note you cite (its updated date), prefer the newest note on a
-  subject, and never report an older note's status, plans or priorities as current: say "as of"
-  that date.
-
-### Important
-
-Say plainly when you don't know something or haven't verified it. Never invent file contents,
-APIs or command output.
-"""
-
 
 # Part 1: the plan's step 1 (step01_meet_steward.py), as written there.
 PART1_INSTRUCTIONS = """\
@@ -553,70 +477,6 @@ def search_code(
         if len(hits) >= 200:
             break
     return "\n".join(hits) or "(no matches)"
-
-
-def _build_explorer_agent(client: OllamaChatClient) -> Any:
-    """Build the lean, read-only chat agent used to explore one module or question at a time."""
-    return Agent(
-        client=client,
-        name="CodeExplorer",
-        description="Explores one module, folder or question in the workspace (read-only) and summarizes it.",
-        tools=[list_files, read_file, search_code],
-        default_options={"num_ctx": _STEWARD_CONTEXT},
-        instructions=(
-            "You explore one part of a codebase. Use list_files, read_file and search_code to find out "
-            "what it does, its main entry points and functions, what it depends on, and anything that "
-            "looks wrong. Return a short, factual summary (4-6 bullet points) naming files and functions, "
-            "with no preamble. Only report what you read."
-        ),
-    )
-
-
-def _build_coder_agent() -> Any:
-    """Build the coding agent on the coder model; it reads the workspace and returns exact edits."""
-    return Agent(
-        client=OllamaChatClient(model=_CODER_MODEL),
-        name="Coder",
-        description="Writes and fixes code: reads the files involved and returns the exact edits to make.",
-        tools=[list_files, read_file, search_code],
-        default_options={"num_ctx": _TEAM_CONTEXT},
-        instructions=(
-            "You are an expert software engineer. Read the files involved with read_file and search_code "
-            "before writing anything. Return each change as: the file path, then the exact existing text "
-            "to replace and the new text, ready to apply. Keep the existing style and make the smallest "
-            "change that works. You cannot write files yourself, so never claim a change is applied. "
-            "Your final reply is only the edits, with no narration of the steps you took."
-        ),
-    )
-
-
-def _build_reasoner_agent() -> Any:
-    """Build the reasoning agent on the reasoner model; it has no tools and works from its input."""
-    return Agent(
-        client=OllamaChatClient(model=_REASONER_MODEL),
-        name="Reasoner",
-        description="Thinks through hard debugging, root-cause and design questions from the context it is given.",
-        default_options={"num_ctx": _TEAM_CONTEXT},
-        instructions=(
-            "You reason carefully about hard software problems: bugs, root causes, design trade-offs. "
-            "Work only from the code, errors and output in your input. Give your conclusion first, then "
-            "the key reasoning in a few short points, and say what evidence would confirm it."
-        ),
-    )
-
-
-def _build_conversation_agent() -> Any:
-    """Build the conversationalist agent on the conversation model, for prose for the user."""
-    return Agent(
-        client=OllamaChatClient(model=_CONVERSATION_MODEL),
-        name="Explainer",
-        description="Writes clear explanations, documentation, summaries and commit messages for the user.",
-        default_options={"num_ctx": _TEAM_CONTEXT},
-        instructions=(
-            "You write clear, friendly, accurate prose for a software engineer: explanations, docs, "
-            "summaries and commit messages. Use only the facts in your input and keep it concise."
-        ),
-    )
 
 
 # </background>
@@ -2278,55 +2138,6 @@ def whole_write_problem(file_name: str, content: str) -> str | None:
 # </code_punctuation>
 
 
-# <secondbrain>
-# Stage 1 starts small: the notes, git reads and a held commit. Notes writes ask in
-# Steward's console; door writes are held by SecondBrain's own gate, so they are not asked twice.
-_SECONDBRAIN_TOOLS = [
-    "search_notes", "read_note", "list_notes", "search_sessions", "write_note", "append_to_note",
-    "git", "git_diff", "notes", "git_commit",
-    "web_search", "web_fetch",  # Part 1: the web, through SecondBrain's own tools
-    "memory",  # Part 2: SecondBrain's long-term memory notes (agent-memory, user-profile)
-    "skill_save",  # Part 3: new skills are saved to SecondBrain, where they are served from
-    # SecondBrain's browser window and computer use (Kyle, 2026-10-28: "allow clicking and typing
-    # too", "computer use"): served while switched on in SecondBrain's Settings, never asked
-    "browser_open", "browser_read", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_back",
-    "computer_task", "screen_look",
-    *ESTATE_READS, *ESTATE_ASKS,  # the Estate (2026-11-04): its reads never ask, its writes always do
-]  # hold_list is left out: SecondBrain answers it only to Kyle's glass
-_SECONDBRAIN_ASKS = ["write_note", "append_to_note", "skill_save", *ESTATE_ASKS]
-# What an eval's build (eval_build) is given of them: reads only, no door, no writes, no clicks on his screen.
-_SECONDBRAIN_READS = ["search_notes", "read_note", "list_notes", "search_sessions", "web_search", "web_fetch", *ESTATE_READS]
-
-
-async def _connect_secondbrain(stack: AsyncExitStack, tools: list[str] = _SECONDBRAIN_TOOLS) -> MCPStreamableHTTPTool | None:
-    """Connect to SecondBrain's MCP endpoint, or return None when it is not configured or not up."""
-    url = os.environ.get("SECONDBRAIN_MCP_URL")
-    key = os.environ.get("SECONDBRAIN_MCP_KEY")
-    if not url or not key:
-        logger.info("SecondBrain not connected (SECONDBRAIN_MCP_URL / SECONDBRAIN_MCP_KEY not set).")
-        return None
-    secondbrain = MCPStreamableHTTPTool(
-        name="secondbrain",
-        url=url,
-        tool_name_prefix="secondbrain",  # the door's git_commit would clash with Steward's own
-        static_headers={"Authorization": f"Bearer {key}"},
-        allowed_tools=tools,
-        approval_mode={
-            "always_require_approval": [t for t in tools if t in _SECONDBRAIN_ASKS],
-            "never_require_approval": [t for t in tools if t not in _SECONDBRAIN_ASKS],
-        },
-        load_prompts=False,
-        request_timeout=60,
-    )
-    try:
-        await stack.enter_async_context(secondbrain)
-    except Exception as exc:  # SecondBrain down, sharing off or a wrong key: run without it
-        logger.warning("SecondBrain not connected (%s): %s", url, type(exc).__name__)
-        return None
-    logger.info("SecondBrain connected (%s).", url)
-    return secondbrain
-
-
 # <automatic_memory>
 # Step 5 (5.1, 5.2): MAF's MemoryContextProvider beside his conversation history: topic files under a MEMORY.md index,
 # written by him with its write_memory tool; before each turn the index and the three best-matching topics are put in
@@ -3100,77 +2911,7 @@ async def build_steward_agent(
         if part4 and not eval_build and not extra_tools:
             await write_tool_policy(agent, auto_approval_rules)
         return agent
-    client = _retry_malformed_tool_calls(client or OllamaChatClient())
-
-    tools: list[Any] = [get_repo_status, git_commit]
-    if enable_shell:
-        shell = await stack.enter_async_context(_build_shell())
-        tools.append(shell.as_function())
-        logger.info("Shell enabled (confined to %s).", _WORKING_DIR)
-    else:
-        logger.info("Shell disabled.")
-    secondbrain = await _connect_secondbrain(stack, _SECONDBRAIN_READS if eval_build else _SECONDBRAIN_TOOLS)
-    if secondbrain is not None:
-        tools.append(secondbrain)
-
-    access_store = LineEndingFileStore(str(_WORKING_DIR)) if enable_file_access else None
-    logger.info("File access %s.", f"enabled ({_WORKING_DIR})" if enable_file_access else "disabled")
-
-    # ``load_skill`` only reads a skill's own body, so it skips approval; ``run_skill_script``,
-    # which executes code, keeps it unless this is an unattended run.
-    # Skills come from two places, aggregated as in the guide's Part 3: Steward's own file skills
-    # (they carry runnable scripts) and SecondBrain's skill notes, served as MCP resources and
-    # discovered with MCPSkillsSource (centrally managed: a skill Kyle or Steward saves in
-    # SecondBrain is picked up without touching Steward).
-    skill_sources: list[Any] = [FileSkillsSource(str(_SKILLS_DIR), script_runner=subprocess_script_runner)]
-    if secondbrain is not None:
-        # The live client of the already-connected secondbrain tool (MAF exposes no public getter).
-        skill_sources.append(
-            MCPSkillsSource(session_provider=lambda: secondbrain._connection.client or secondbrain._connection.session)
-        )
-    skills_provider = SkillsProvider(
-        DeduplicatingSkillsSource(AggregatingSkillsSource(skill_sources)) if len(skill_sources) > 1 else skill_sources[0],
-        disable_load_skill_approval=True,
-    )
-    logger.info("Skills enabled: files (%s)%s.", _SKILLS_DIR, " and SecondBrain" if secondbrain is not None else "")
-
-    auto_approval_rules: list[Any] = [FileAccessProvider.read_only_tools_auto_approval_rule, small_commit_auto_approval_rule]
-    if auto_approve_skill_scripts:
-        auto_approval_rules.append(SkillsProvider.all_tools_auto_approval_rule)
-        logger.info("Skill script approval disabled (unattended run).")
-
-    # <create_agent>
-    return create_harness_agent(
-        client=client,
-        name="Steward",
-        description="Software engineering and development assistant.",
-        agent_instructions=STEWARD_INSTRUCTIONS,
-        tools=tools,
-        history_provider=history_provider or InMemoryHistoryProvider(),
-        file_access_store=access_store,
-        file_memory_store=file_memory_store,
-        skills_provider=skills_provider,
-        background_agents=[
-            _build_explorer_agent(client),
-            _build_coder_agent(),
-            _build_reasoner_agent(),
-            _build_conversation_agent(),
-        ],
-        auto_approval_rules=auto_approval_rules,
-        context_providers=[
-            MontyCodeActProvider(approval_mode="never_require"),
-            *([CharterProvider(secondbrain)] if secondbrain is not None else []),
-            *([steward_memory(memory_store)] if memory_store is not None else []),
-        ],
-        middleware=[record_written_files, *([memory_owner] if memory_store is not None else [])],
-        mode_provider=AgentModeProvider(default_mode="execute"),
-        max_context_window_tokens=_STEWARD_CONTEXT,
-        max_output_tokens=8_192,
-        default_options={"num_ctx": _STEWARD_CONTEXT},
-        disable_web_search=True,
-        otel_provider_name=OTEL_PROVIDER_NAME,
-    )
-    # </create_agent>
+    raise ValueError(f"Steward is built in parts 1 to 4, not part {part}.")
 
 
 # </build_steward_agent>
