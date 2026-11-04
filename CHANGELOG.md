@@ -69,6 +69,13 @@ was never merged and has no entry.
 
 ### Added
 
+- FIDES records what it would block, and blocks nothing (Learn, Agent Security). MAF's label tracker and enforcer in
+  its record-only branch (`block_on_violation=False`; the documented dry run builds no enforcer and records nothing),
+  last in his middleware: SecondBrain notes are labelled untrusted and the door trusted through `SecureMCPToolProxy`,
+  `git_commit` and `run_shell` are sinks, and each would-block entry goes to `halo_traces/fides.jsonl`.
+  `STEWARD_SAFETY_OBSERVE=off` turns it off. Agent Hooks stay off the live path: on 1.24.0 `evaluate_only` still
+  buffers streamed replies and a streamed run inside the harness loop fails (a test measures both). Not yet labelled:
+  web pages via WebResearchAgent's results and skill notes via `load_skill`; `fides.jsonl` has no size cap yet.
 - An improvement round cannot change what grades it. `edit_problem` refuses a hand-off to `evals.py`,
   `eval_baselines.json`, `diagnosis_feedback.json` or `.github/workflows/`, and `refuse_grader_writes` (MAF function
   middleware on the coder and the diagnoser) refuses a write there; `test_harness.py` takes only new test functions at

@@ -30,6 +30,8 @@ Environment variables:
                                  lists a .env file)
     SECONDBRAIN_MCP_URL        — SecondBrain's MCP endpoint, e.g. http://127.0.0.1:43110/mcp
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
+    STEWARD_SAFETY_OBSERVE     — "off" turns off MAF's FIDES in its record-only mode (default on); it only
+                                 records, to halo_traces/fides.jsonl, and never refuses or changes a call
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ import sys
 import uuid
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
@@ -91,6 +94,12 @@ from agent_framework import (
 from agent_framework.monty import MontyCodeActProvider
 from agent_framework_monty import FileMount
 from agent_framework.ollama import OllamaChatClient
+from agent_framework.security import (
+    IntegrityLabel,
+    LabelTrackingFunctionMiddleware,
+    PolicyEnforcementFunctionMiddleware,
+    SecureMCPToolProxy,
+)
 from agent_framework.tools import (
     LocalShellTool,
     ShellEnvironmentProvider,
@@ -341,7 +350,8 @@ def get_repo_status() -> dict[str, object]:
 
 
 # <git_commit>
-@tool(approval_mode="always_require")
+# A FIDES sink, declared as Learn's FIDES page declares write_file ("Annotating sink tools": accepts_untrusted False).
+@tool(approval_mode="always_require", additional_properties={"accepts_untrusted": False})
 def git_commit(
     message: Annotated[str, Field(min_length=1, description="Imperative commit message, e.g. 'Fix total rounding'.")],
 ) -> str:
@@ -1626,6 +1636,95 @@ def _build_governance_middleware() -> list[ChatMiddleware]:
 # </governance>
 
 
+# <safety_observe>
+# ADR-0001 item 8, observe only: MAF's FIDES (Learn, agents/security, Python pivot:
+# https://learn.microsoft.com/en-us/agent-framework/agents/security?pivots=programming-language-python) records what it
+# would have blocked, and refuses, delays or changes nothing.
+#   * The page's "Dry run" (enable_policy_enforcement=False) records nothing: SecureAgentConfig then builds no policy
+#     enforcer and get_audit_log returns [] (agent_framework/security.py:3465-3476, :3580-3581). The enforcer's own
+#     record-only branch is block_on_violation=False with approval_on_violation=False: each violation goes to its audit
+#     log (:3174-3175, :3330-3337), it warns "(allowed)" and calls the tool (:3206-3209). That is the one used.
+#   * The page's standalone classes ("exposed as standalone classes ... for advanced setups"), not SecureAgentConfig as a
+#     context provider: that one also adds quarantined_llm, inspect_variable and their instructions to every turn
+#     (:3537-3539), which would change what he is shown. auto_hide_untrusted=False ("the picture with
+#     auto_hide_untrusted=False"): no result is swapped for a variable. So no quarantine client either (no second model).
+#   * default_integrity TRUSTED: his repo and his own tools are the closed, vetted set the page names for it; untrusted
+#     content is labelled at its source, MAF's SecureMCPToolProxy on his notes (source_integrity "untrusted", Tier 2,
+#     security.py:4396). MAF's MCP labelling makes every MCP tool a sink (accepts_untrusted False, :4401), so the reads
+#     over MCP are the page's allow_untrusted_tools, the data fetchers that "must be callable in any context".
+#   * CodeAct: the page's warning is that FIDES does not see host-tool calls inside generated code. His Monty provider
+#     is given no host tools (MontyCodeActProvider(tools=None), agent_framework_monty/_provider.py:42) and mounts harness/
+#     read-only, so every sink stays a direct tool, the page's arrangement; nothing in Monty refuses FIDES beside it.
+#   * Not labelled, because MAF has no option for it yet (#7455 B1): harness-made tools. Web pages reach him through
+#     WebResearchAgent's background results (background_agents_get_task_results, _harness/_background_agents.py:585),
+#     and SecondBrain's skill notes through load_skill and read_skill_resource (SkillsProvider).
+# Agent Hooks (Learn, agents/agent-hooks) are not wired: their bundle buffers every streamed run in evaluate_only too
+# (_agent_hooks.py:1332 and :1462 set stream_buffer_updates whatever the mode), so the Agent tab would stop streaming;
+# the test test_agent_hooks_still_hold_back_a_streamed_reply measures it.
+SAFETY_OBSERVE_ENV = "STEWARD_SAFETY_OBSERVE"
+SAFETY_LOG_DIR = _WORKING_DIR / "halo_traces"  # gitignored, beside HALO's traces
+FIDES_LOG_NAME = "fides.jsonl"
+# The untrusted sources and the reads over MCP: FIDES's data fetchers (allow_untrusted_tools).
+_UNTRUSTED_NOTE_READS = frozenset(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes"))
+_DOOR_READS = frozenset(f"atlas_{name}" for name in ("git", "git_diff", "records"))
+
+
+def safety_observe_on() -> bool:
+    """Whether FIDES records (STEWARD_SAFETY_OBSERVE, on unless "off", "0", "false" or "no")."""
+    return os.environ.get(SAFETY_OBSERVE_ENV, "on").strip().lower() not in {"off", "0", "false", "no"}
+
+
+def fides_observer() -> list[Any]:
+    """FIDES in record-only mode, for the end of his middleware list: (recorder, MAF's label tracker, MAF's enforcer).
+
+    Last, so it sees only the calls that reach their tool (the plan-mode gate and the door's world check refuse first),
+    and the recorder outermost of the three, so it reads the enforcer's audit log after each call. Each entry is one line
+    of halo_traces/fides.jsonl, marked with whether the tool is one of his sinks (_CHANGES_THINGS), then the log is
+    cleared (PolicyEnforcementFunctionMiddleware.clear_audit_log), so it never grows in his session.
+    """
+    labels = LabelTrackingFunctionMiddleware(default_integrity=IntegrityLabel.TRUSTED, auto_hide_untrusted=False)
+    policy = PolicyEnforcementFunctionMiddleware(
+        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS), block_on_violation=False, approval_on_violation=False
+    )
+
+    async def record_would_block(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        try:
+            await call_next()
+        finally:
+            entries = policy.get_audit_log(context.session)
+            if entries:
+                policy.clear_audit_log(context.session)
+                session_id = getattr(context.session, "session_id", None)
+                stamp = datetime.now(timezone.utc).isoformat()
+                lines = [
+                    json.dumps(
+                        {"ts": stamp, "session_id": session_id, "sink": entry.get("function") in _CHANGES_THINGS, **entry},
+                        default=str,
+                    )
+                    for entry in entries
+                ]
+                try:
+                    SAFETY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+                    with (SAFETY_LOG_DIR / FIDES_LOG_NAME).open("a", encoding="utf-8") as log:
+                        log.write("\n".join(lines) + "\n")
+                except OSError as exc:  # a record that cannot be written never fails his call
+                    logger.warning("FIDES record not written: %s", exc)
+
+    return [record_would_block, labels, policy]
+
+
+async def labelled_mcp_tool(stack: AsyncExitStack, mcp_tool: MCPStreamableHTTPTool, integrity: IntegrityLabel) -> Any:
+    """Connect mcp_tool, under MAF's SecureMCPToolProxy when FIDES records: every function it loads, now or later, is
+    labelled with integrity (source_integrity) and marked a sink (security.py:4368-4403, :4882). Returns the MCP tool."""
+    if not safety_observe_on():
+        return await stack.enter_async_context(mcp_tool)
+    proxy = await stack.enter_async_context(SecureMCPToolProxy(mcp_tool, default_integrity=integrity))
+    return proxy.mcp_tool
+
+
+# </safety_observe>
+
+
 def _secondbrain_web_tools(client: Client) -> MCPStreamableHTTPTool:
     """SecondBrain's web_search and web_fetch over the shared client (Ollama has no hosted web search)."""
     return MCPStreamableHTTPTool(
@@ -1796,8 +1895,10 @@ async def build_steward_agent(
         # record are offered, the pieces of the branch-check-keep loop; steward_world_only keeps every
         # call on his own world.
         if secondbrain_client is not None:
+            # His own door: trusted reads; its branch, commit, push and PR are FIDES sinks (labelled_mcp_tool).
             part3_tools.append(
-                await stack.enter_async_context(
+                await labelled_mcp_tool(
+                    stack,
                     MCPStreamableHTTPTool(
                         name="atlas",
                         mcp_client=secondbrain_client,
@@ -1805,7 +1906,8 @@ async def build_steward_agent(
                         allowed_tools=list(_ATLAS_GIT_TOOLS),
                         approval_mode="never_require",
                         load_prompts=False,
-                    )
+                    ),
+                    IntegrityLabel.TRUSTED,
                 )
             )
         part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())]
@@ -1813,7 +1915,9 @@ async def build_steward_agent(
             # plan-steward-context-memory-reads, piece 2: his notes, to look up the plans and rulings
             # himself (reads, never a card), and his Charter, read through them and put in his
             # instructions before every turn (CharterProvider, design step 1).
-            notes = await stack.enter_async_context(
+            # What a note says is untrusted content to FIDES (labelled_mcp_tool); writing one is a sink.
+            notes = await labelled_mcp_tool(
+                stack,
                 MCPStreamableHTTPTool(
                     name="secondbrain_notes",
                     mcp_client=secondbrain_client,
@@ -1824,7 +1928,8 @@ async def build_steward_agent(
                         "never_require_approval": [t for t in _SECONDBRAIN_NOTES_TOOLS if t not in _SECONDBRAIN_NOTES_ASK],
                     },
                     load_prompts=False,
-                )
+                ),
+                IntegrityLabel.UNTRUSTED,
             )
             part3_tools.append(notes)
             part3_providers.append(CharterProvider(notes))
@@ -1842,7 +1947,10 @@ async def build_steward_agent(
             shell = await stack.enter_async_context(_build_shell())
             # Kyle, 2026-10-29: MAF's run_shell text never names the shell, so it is named here
             # (as_function's description), and Steward's own line-ending store keeps a CRLF file CRLF.
-            part3_tools.append(shell.as_function(description=shell.as_function().description + " The shell is bash (Git Bash on Windows)."))
+            run_shell = shell.as_function(description=shell.as_function().description + " The shell is bash (Git Bash on Windows).")
+            # A FIDES sink (Learn's "Annotating sink tools"); as_function takes no additional_properties, so it is set here.
+            run_shell.additional_properties = {**(run_shell.additional_properties or {}), "accepts_untrusted": False}
+            part3_tools.append(run_shell)
             # ADR-0001 item 2: MAF's ShellEnvironmentProvider tells Steward his shell, OS, working
             # directory and tool versions before each run. The harness factory adds it only through
             # shell_executor, which needs a client with SupportsShellTool, and OllamaChatClient has
@@ -1898,6 +2006,8 @@ async def build_steward_agent(
             context_providers=part3_providers,
             middleware=[
                 memory_owner, steward_world_only, *gate_middleware, repair_tool_names, recover_text_tool_calls, record_called_tools,
+                # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
+                *(fides_observer() if safety_observe_on() else []),
             ],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
