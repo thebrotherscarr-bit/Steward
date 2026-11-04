@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A tool call written as text whose keys fit several tools now runs as the one read-only tool among them, judged by
+  MAF's own read-only approval rules (`READ_ONLY_RULES`, shared with the build's approval rules); a write is never
+  chosen, and zero or several read-only fits stay text (live eval 2026-11-04: the discount ask's plan step wrote
+  `{"file_name": ...}`).
 - He never asks about committing in words (live evals 2026-11-04, three runs: "Do you approve this commit?" in prose,
   so no card). The commit step writes only the message: one structured-output call (`CommitMessage`, one line of at
   most 72 characters, at least two words), then the workflow raises his `git_commit` card itself; Approve commits,
