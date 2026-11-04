@@ -688,9 +688,10 @@ def test_agent_hooks_still_hold_back_a_streamed_reply() -> None:
     streamed reply until it is whole (_agent_hooks.py:1332, :1462), so the Agent tab would stop streaming; and where
     create_harness_agent puts a caller's middleware (after its loop, approval and injection, _harness/_agent.py:666-682)
     a streamed run fails (the 2026-10-30 defect). When this test fails, MAF has changed: measure again before wiring."""
+    # The hooks SDK is not one of his dependencies (hooks are not wired), so the gate's clean install skips this.
+    ALLOW = pytest.importorskip("agent_hooks").ALLOW
     from agent_framework import create_agent_hooks_middleware
     from agent_framework.exceptions import MiddlewareException
-    from agent_hooks import ALLOW
 
     class Allow:
         def intercept(self, context: Any) -> Any:
