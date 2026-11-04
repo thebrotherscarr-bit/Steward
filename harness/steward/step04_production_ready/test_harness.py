@@ -4703,3 +4703,29 @@ def test_check_and_repair_emit_progress_events_in_order(monkeypatch: pytest.Monk
     finally:
         wf._CHECK_PROGRESS.reset(token)
     assert said == ["checking: pytest -q b.py", "checking: pytest -q pkg"], said
+
+
+def test_a_call_cut_right_after_the_runner_is_unloaded_is_asked_again(monkeypatch: Any) -> None:
+    """Eval run 2026-11-04 21:46 (README ask): two malformed tool calls, the unload, then httpx's ReadError ended the run.
+    A call cut that way (ReadError, RemoteProtocolError) right after the unload is asked once more, so the run goes on
+    with the answer; the same error with no unload behind it is the run's error, as before."""
+    import httpx
+    import ollama
+
+    def parse_error() -> Exception:
+        return ollama.ResponseError("error parsing tool call: raw='{\"id\": 3???????}'", 500)
+
+    # malformed, malformed (the retries), malformed, the unload, ReadError, then the answer
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [*(parse_error() for _ in range(3)), httpx.ReadError("cut")])
+    assert _ask(client) == "ok", "the run completes with the answer"
+    assert len(unloads) == 1 and len(chats) == 5, (unloads, chats)
+    # Another call cut while the runner loads again (within the window after the unload) is asked once more too.
+    client, chats, unloads = _stale_runner_client(monkeypatch, [httpx.RemoteProtocolError("peer closed")])
+    assert _ask(client) == "ok" and unloads == [] and len(chats) == 2, (unloads, chats)
+    # With no unload behind it, a cut connection is the run's error.
+    monkeypatch.setattr(steward, "_RUNNER_UNLOADED_AT", None)
+    client, chats, unloads = _stale_runner_client(monkeypatch, [httpx.ReadError("cut")])
+    with pytest.raises(Exception, match="cut"):
+        _ask(client)
+    assert len(chats) == 1, chats
