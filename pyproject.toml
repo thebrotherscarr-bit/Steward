@@ -2,17 +2,43 @@
 name = "steward"
 version = "0.7.0"
 description = "STEWARD: a Microsoft Agent Framework agent on local Ollama"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
+# Every package the hosts import, pinned to the versions the harness suite passes on. The Microsoft Agent
+# Framework packages are upgraded together, in one step. The gate (.github/workflows/gate.yml) installs these.
 dependencies = [
-    "agent-framework",
-    "agent-framework-ollama",
-    "agent-framework-tools",
-    "agent-framework-monty",
-    "agent-framework-foundry",
-    "agent-framework-foundry-hosting",
-    "python-dotenv",
-    "textual>=6.2.1",
-    "rich>=13.7.1",
+    "agent-framework==1.24.0",
+    "agent-framework-core==1.24.0",
+    "agent-framework-ollama==1.0.0b261030",
+    "agent-framework-tools==1.0.0b261030",
+    "agent-framework-monty==1.0.0b261030",
+    "agent-framework-foundry==1.16.0",
+    "agent-framework-foundry-hosting==1.0.0b261030",
+    "agent-framework-devui==1.0.0b261030",
+    "agent-framework-hosting==1.0.0a261030",
+    "agent-framework-hosting-mcp==1.0.0a261030",
+    "azure-ai-agentserver-responses==2.4.0",
+    "ollama==0.5.3",
+    "mcp==2.3.0",
+    "httpx2==2.16.0",
+    "starlette==1.10.0",
+    "uvicorn==0.54.0",
+    "opentelemetry-api==1.45.2",
+    "opentelemetry-sdk==1.45.2",
+    "pydantic==2.14.2",
+    "python-dotenv==1.2.4",
+    "textual==8.2.8",
+    "rich==15.0.0",
+]
+
+[project.optional-dependencies]
+# Opt-in features, imported only when turned on (agent.py): automatic memory (Mem0 on Ollama) and the
+# Presidio screen (PRESIDIO_ENTITIES; it also needs a spaCy English model).
+memory = [
+    "agent-framework-mem0==1.0.0b261030",
+    "mem0ai==2.2.1",
+]
+governance = [
+    "presidio-analyzer==2.2.366",
 ]
 
 [build-system]

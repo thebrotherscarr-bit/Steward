@@ -34,6 +34,15 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 4, piece 4.1: Microsoft Agent Framework 1.24.0 (from 1.23.0; ollama, tools, monty, foundry-hosting and
+  devui 1.0.0b261030, foundry 1.16.0), upgraded together. `pyproject.toml` now pins every package the hosts import,
+  the MAF packages exactly, the rest at the versions the suite passed on; Mem0 and Presidio are the `memory` and
+  `governance` extras. The gate installs the project (`pip install . pytest`) instead of its own list, so the pins are
+  defined once. No code changed: the harness suite (52) and the sample project's tests (4) pass as they were. None of
+  `hosted.py`'s workarounds is fixed in 1.24.0: the workflow host still hands `additional_function_arguments` to
+  every agent and the Ollama client still passes it on, `prepare_options` still applies to every agent in the graph,
+  the session id is resolved as before, and the host still releases no background tasks. `requires-python` is now
+  `>=3.11`, MAF 1.24.0's baseline, and the README's "missing to deploy locally" line no longer lists the package.
 - Step 4, piece 4.4: background agents finish. MAF's `background_tasks_running` and
   `background_tasks_running_message` are in his harness loop (`plan_reply_loop`, checked after its other conditions):
   while a background task (CodeExplorer, WebResearchAgent) is still running, the turn does not end, and the loop tells
