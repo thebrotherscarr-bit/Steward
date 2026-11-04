@@ -42,6 +42,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
@@ -57,6 +58,8 @@ from agent_framework import (
     ChatContext,
     ChatMiddleware,
     ChatResponse,
+    ChatResponseUpdate,
+    Content,
     ContextProvider,
     DeduplicatingSkillsSource,
     FileAccessProvider,
@@ -67,6 +70,7 @@ from agent_framework import (
     InMemoryHistoryProvider,
     MCPSkillsSource,
     FunctionInvocationContext,
+    FunctionTool,
     MCPStreamableHTTPTool,
     MemoryContextProvider,
     MemoryFileStore,
@@ -777,6 +781,131 @@ async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaita
             fix(message.contents)
 
 
+# Live 2026-11-03 (the diagnosis traces): gpt-oss sometimes ends a turn with a tool call's arguments written as its
+# reply, e.g. {"directory":"steward/working","glob_pattern":""} (file_access_ls's), so nothing ran and nothing was
+# written. MAF's place for it is chat middleware overriding the result (Learn, agents/middleware/chat-middleware and
+# result-overrides): chat middleware runs inside the function-invocation loop (OllamaChatClient's layers,
+# FunctionInvocationLayer over ChatMiddlewareLayer: agent_framework_ollama/_chat_client.py:295), and the loop runs the
+# calls in the response the middleware hands back (_tools.py, _process_model_function_calls; streamed, the stream's
+# final response, _tools.py:6168). So a reply that is one JSON object whose keys fit exactly one offered tool (its
+# required parameters <= the keys <= its parameters) becomes that call. Everything else is left as it is: two tools
+# that fit ({"file_name": ...} fits file_access_read and file_access_delete), none, an empty object, or a call that
+# asked for structured output (the plan's JSON). Arguments are only ever the model's own.
+_FENCED_JSON = re.compile(r"\A```(?:json)?\s*(.*?)\s*```\Z", re.S | re.I)
+
+
+def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, Any]] | None:
+    """(tool name, arguments) when text is one JSON object that fits exactly one of the tools, else None."""
+    body = (text or "").strip()
+    if fenced := _FENCED_JSON.match(body):
+        body = fenced.group(1)
+    if not body.startswith("{"):
+        return None
+    try:
+        arguments = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(arguments, dict) or not arguments:
+        return None
+    keys = set(arguments)
+    fits = set()
+    for offered in tools:
+        if isinstance(offered, FunctionTool):
+            schema = offered.parameters() or {}
+            if set(schema.get("required") or ()) <= keys <= set(schema.get("properties") or {}):
+                fits.add(offered.name)
+    return (fits.pop(), arguments) if len(fits) == 1 else None
+
+
+def recovered_tool_call(response: ChatResponse[Any], tools: Sequence[Any]) -> ChatResponse[Any] | None:
+    """The response with its text-only tool call made a real one (a fresh call_id), or None when it holds none."""
+    if any(c.type in ("function_call", "function_approval_request") for m in response.messages for c in m.contents):
+        return None
+    spoken = [m for m in response.messages if m.role == "assistant" and (m.text or "").strip()]
+    if len(spoken) != 1 or (found := tool_call_in_text(spoken[0].text, tools)) is None:
+        return None
+    name, arguments = found
+    logger.info("Tool call recovered from the reply's text: %s", name)
+    call = Content.from_function_call(call_id=f"call_{uuid.uuid4().hex}", name=name, arguments=arguments)
+    spoken[0].contents = [*(c for c in spoken[0].contents if c.type != "text"), call]
+    return response
+
+
+def _could_be_a_call(text: str) -> bool:
+    """Whether a reply's opening text could be one tool call's arguments: a JSON object, or a fence around one."""
+    return text.lstrip().startswith(("{", "```"))
+
+
+def held_back_when_it_could_be_a_call(inner: ResponseStream[Any, Any], tools: Sequence[Any]) -> ResponseStream[Any, Any]:
+    """The model's stream, released as it comes unless its first text could be a call's arguments.
+
+    MAF's stream hooks cannot do this: buffering is fixed before the first update is read (ResponseStream
+    _ensure_content_configuration_mutable, _types.py:4929), an update transform cannot hold an update back (None keeps
+    it, _types.py:4555), and flat_map has no end of stream to release held updates at (Ollama's last update need not
+    carry a finish_reason, agent_framework_ollama/_chat_client.py:656). So the stream is read inside a new
+    ResponseStream, as MAF's own MessageInjectionMiddleware reads its inner stream (_sessions.py:1520-1541). Updates
+    before any text (his reasoning) and every update of a reply that opens with prose or a call pass at once. A reply
+    that opens with "{" or a fence is held to its end: then it is released as it came, or, when it was one tool's
+    arguments, as that call (its other contents, such as usage, kept). The final response is the inner one, so MAF's
+    function loop and history middleware see the same response as before (rewritten in place when recovered).
+    """
+    finals: list[ChatResponse[Any]] = []
+
+    async def released() -> Any:
+        held: list[Any] = []
+        text = ""
+        holding: bool | None = None  # None until the reply's first text or call decides it
+        async for update in inner:
+            if holding is None:
+                if any(c.type in ("function_call", "function_approval_request") for c in update.contents):
+                    holding = False
+                else:
+                    text += update.text or ""
+                    if text.strip():
+                        holding = _could_be_a_call(text)
+            if holding:
+                held.append(update)
+            else:
+                yield update
+        final = await inner.get_final_response()
+        finals.append(final)
+        if not holding:
+            return
+        if recovered_tool_call(final, tools) is None:
+            for update in held:
+                yield update
+            return
+        for update in held:
+            if rest := [c for c in update.contents if c.type != "text"]:
+                kept = copy.copy(update)
+                kept.contents = rest
+                yield kept
+        call = next(c for m in final.messages for c in m.contents if c.type == "function_call")
+        yield ChatResponseUpdate(contents=[call], role="assistant")
+
+    return ResponseStream(released(), finalizer=lambda updates: finals[-1])
+
+
+async def recover_text_tool_calls(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Chat middleware: a reply that is only a tool call's arguments runs as that call, streamed or not."""
+    options = context.options or {}
+    tools = list(options.get("tools") or [])
+    await call_next()
+    if not tools or options.get("response_format") is not None or options.get("tool_choice") == "none":
+        return
+    if isinstance(context.result, ResponseStream):
+        # On the stream itself, as MAF's PerServiceCallHistoryPersistingMiddleware does (_sessions.py:1802): streamed,
+        # MAF's MessageInjectionMiddleware runs the rest of the chain only when its stream is read (_sessions.py:1580),
+        # after the pipeline has applied the context's stream_* lists (_middleware.py:1669), so those would be lost.
+        # Only a reply that opens like a call is held back (held_back_when_it_could_be_a_call): the call has to reach
+        # the caller's transcript, and a streamed update cannot be taken back; prose streams as before. MAF's history
+        # middleware, inner to this one, persists the reply first; his hosts' InMemoryHistoryProvider keeps that same
+        # Message, rewritten here.
+        context.result = held_back_when_it_could_be_a_call(context.result, tools)
+    elif context.result is not None:
+        recovered_tool_call(context.result, tools)
+
+
 # Session state set when the harness returns him to plan mode because every todo is done; read once by plan_reply_loop.
 RETURNED_TO_PLAN_KEY = "steward_returned_to_plan"
 
@@ -1108,6 +1237,10 @@ TOOL_CALLS: dict[str, Any] = {
 
 
 # <tool_call_retry>
+# Not chat middleware (checked 2026-11-03): streamed, the model call starts only when MAF's loop iterates the stream
+# (_tools.py:6111), after the chat middleware pipeline has returned it (_middleware.py:1669), and Ollama's mid-stream
+# "error parsing tool call" comes from that iteration unwrapped (agent_framework_ollama/_chat_client.py:398; only the
+# opening call is wrapped, :393). A try/except around call_next never sees it, so the retry stays on the Ollama client.
 _TOOL_CALL_RETRIES = 2
 
 
@@ -1742,7 +1875,9 @@ async def build_steward_agent(
             background_agents=background_agents,
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
-            middleware=[memory_owner, steward_world_only, *gate_middleware, repair_tool_names, record_called_tools],
+            middleware=[
+                memory_owner, steward_world_only, *gate_middleware, repair_tool_names, recover_text_tool_calls, record_called_tools,
+            ],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
             # The compaction budget is the window he asks Ollama for (OLLAMA_OPTIONS), so the two cannot drift.
