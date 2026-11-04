@@ -1,21 +1,37 @@
 ---
 name: estate
-description: The map of Kyle's estate (Neiro) - Manjuel, SecondBrain (Jesster), Atlas (Aurora), Ollama and you - what each part is, how they connect, their ports and logs, and what you may and may not touch. Use when a request names a part of the estate, a port, a server, a log or a record; when you must say which part does what; or before any step that would reach beyond your own workspace.
+description: Run Kyle's estate (Neiro) - Manjuel, SecondBrain (Jesster), Atlas (Aurora), Ollama and you - its servers, logs, models, SecondBrain's update and the approvals history, on Kyle's card for every change. Use when a request names a part of the estate, a server, a port, a log, a model in memory, an update or a past card; when something is down, slow or stuck; or before any step that reaches beyond your own workspace.
 ---
 
 ## Usage
 
-1. Read `references/map.md` for the part the request names: what it is, how it connects to you, where its logs and
-   records are, and who starts it.
-2. Answer from the map and from what your tools show. If the map and a tool disagree, say so and report what the tool
-   showed (evidence first).
-3. Before any step that would reach outside your workspace (worlds/steward), stop and check the map's **Your reach**
-   section. Today you work in your own repository only; anything else goes to Kyle as a plain request or a card.
-4. Never touch Manjuel (the ground) while Kyle's sitting is open, and never change Aurora's look.
+Read first, every time. Then change one thing, on the card, and read again.
+
+1. **Look.** Call `secondbrain_estate_status`: every server (name, port, up, pid), SecondBrain's build, Ollama's
+   loaded models, and whether a Manjuel sitting is open. Report what it shows in one or two lines.
+2. **Find the cause.** For a server that is down or misbehaving, call `secondbrain_estate_logs` with its `service`
+   name from the status (and `lines`, at most 400). Quote the lines that show the fault. Never guess past the log.
+3. **Name the part.** Read `references/map.md` for what the part is, its port and who starts it.
+4. **Change one thing**, only when the user asks for it or agrees to it, and say what and why before the call:
+   - Restart, start or stop a server: `secondbrain_service_control` with `service` and `action`
+     (`start`, `stop` or `restart`). It waits on the user's card.
+   - A model stuck in memory, or two chat models loaded at once: `secondbrain_ollama_unload` with its `model`
+     name from the status. It waits on the user's card.
+   - SecondBrain's update: `secondbrain_app_update` with `action="check"` first and report the two builds. Only
+     on the user's word, `action="apply"`: it restarts SecondBrain and ends your connection, so say so first.
+     Both ask the user's card.
+5. **Check.** Call `secondbrain_estate_status` again and report what changed, as the tool shows it.
+
+What the user has approved or denied: `secondbrain_approvals_history` (`limit`, newest first). Use it before
+asking again for something the user has just refused.
 
 Rules:
-- You cannot read files outside your workspace. For the ground's records, his notes or the door's state, use the
-  tools you have (notes, `atlas_git`, `atlas_records`, `pr_checks`) or ask Kyle.
+- Every change asks the user's card. A refused or unanswered card means stop; never try another way round it.
+- Never SecondBrain itself: it serves these tools. SecondBrain refuses it by name.
+- RULE 9: while a Manjuel sitting is open (`sitting.open` in the status), nothing in the ground (Desktop\Research)
+  is edited, committed or sent, and the door is not stopped or restarted. Say the sitting is open and wait.
+- Never Desktop\Archive: not read, not written, not named in a git call.
 - Never read or print a `.env` file or a key, wherever it is.
-- Restarting or updating a part of the estate is Kyle's or the operator's hand today, not yours. Say what would need
-  restarting and why.
+- Never change Aurora's look.
+- One chat model at a time on the GPU. Unload the one not in use rather than loading a second.
+- For git across the estate's repositories, follow the `github` skill.

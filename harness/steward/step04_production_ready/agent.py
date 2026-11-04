@@ -122,6 +122,7 @@ from agent_framework.tools import (
     ShellEnvironmentProviderOptions,
     ShellFamily,
     ShellPolicy,
+    ShellRequest,
 )
 from dotenv import load_dotenv
 from mcp import Client
@@ -796,24 +797,101 @@ def code_search_tool(index: CodeIndex | None = None) -> FunctionTool:
 # Kyle's Approve like every other write, so a change goes from his line to main through the door alone.
 _ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "git_pr", "records")
 _STEWARD_WORLD = "steward"
+# The Estate's repositories, by the names the door addresses them (2026-11-04, Kyle: Steward is the agent of the Estate).
+# The door carries research, atlas, secondbrain and steward (SecondBrain electron/door/index.cjs worldsFor); neiro is
+# the Estate lock's repository, which the door does not carry yet, so the door itself refuses it by name until it does.
+ESTATE_WORLDS: dict[str, str] = {
+    "research": "Manjuel, the ground (Desktop\\Research)",
+    "atlas": "Aurora, Atlas (atlas/ in the ground)",
+    "secondbrain": "Jesster, SecondBrain (worlds/jesster)",
+    "steward": "Steward, your own repository (worlds/steward)",
+    "neiro": "Neiro, the Estate lock (worlds/neiro)",
+}
+# The Estate as SecondBrain runs it, served on its MCP to him (SecondBrain electron/estate.cjs, 2026-11-04). The reads
+# never ask; the writes always ask the user's card. app_update always asks: one name covers its check and its apply.
+ESTATE_READS = ("estate_status", "estate_logs", "approvals_history")
+ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
 
 
-async def steward_world_only(
+def estate_approval(tools: Sequence[str]) -> dict[str, Any]:
+    """MAF's per-tool approval_mode for SecondBrain's Estate tools (MCPSpecificApproval): the writes always ask, the
+    reads never do, and any other name asks (default "always_require"), so a tool added later is never let through."""
+    return {
+        "always_require_approval": [t for t in tools if t not in ESTATE_READS],
+        "never_require_approval": [t for t in tools if t in ESTATE_READS],
+        "default": "always_require",
+    }
+# Hard refusals, at run time, whatever card would follow (the ground's RULE 1, RULE 6 and RULE 12; never the Archive).
+# One list for both ways he reaches git: his shell (ShellPolicy's denylist, _build_shell) and the door (estate_door_gate,
+# which reads the same patterns, and the door's flag pattern, over each argument but a commit message). A pattern is a
+# plain str: MAF compiles it on the regex engine, case-insensitively, with a one-second bound (ShellPolicy, _policy.py).
+ARCHIVE_PATH = r"(?:Desktop[\\/]+Archive|(?:\.\.[\\/]+)+Archive)(?![\w-])"
+ESTATE_GIT_REFUSALS: tuple[tuple[str, str], ...] = (
+    (r"\bgit\s+push\b", "a push outside the door (pushes go through atlas_git_push, on the user's card)"),
+    (r"\bgit\s+tag\b|\bgit_tag\b", "a tag (tags are the user's)"),
+    (r"\bgh\s+release\b|\brelease_step\b", "a release (releases are the user's)"),
+    (r"\bgit\s+(?:rebase|filter-branch|filter-repo|replace|update-ref)\b|\bgit\s+commit\b[^|;&]*--amend\b", "a history rewrite"),
+    (r"\bgit\s+branch\b[^|;&]*\s-(?:d|D|-delete)\b[^|;&]*\b(?:main|master)\b", "deleting the main line"),
+    (ARCHIVE_PATH, "a path under Desktop\\Archive (never reached, never sent)"),
+)
+# Door tools that are refused by name even if a later change offered them: a tag and a release are the user's alone.
+_DOOR_REFUSED = frozenset({"atlas_git_tag", "atlas_release_step"})
+_MAIN_LINES = frozenset({"main", "master"})
+# The door's git tools take no flags, so one passed in an argument is refused. Not in the shell's list (rm -f, ls --all).
+_DOOR_FLAGS = (r"(?:^|\s)(?:--force(?:-with-lease)?|--mirror|--all|--tags|--delete|-f)(?![\w-])", "a force, mirror, all, tags or delete flag")
+_DOOR_REFUSALS = (*ESTATE_GIT_REFUSALS, _DOOR_FLAGS)
+_DOOR_POLICY = ShellPolicy(denylist=[pattern for pattern, _ in _DOOR_REFUSALS])
+
+
+def estate_git_refusal(text: str) -> str | None:
+    """The reason a door argument is refused (ESTATE_GIT_REFUSALS and the door's flags, matched by MAF's ShellPolicy as
+    his shell matches its own), or None."""
+    if not str(text).strip():
+        return None  # ShellPolicy denies an empty command; an empty argument carries nothing to refuse
+    decision = _DOOR_POLICY.evaluate(ShellRequest(command=str(text)))
+    if decision.decision == "allow":
+        return None
+    return next((why for pattern, why in _DOOR_REFUSALS if decision.reason.endswith(pattern)), decision.reason)
+
+
+async def estate_door_gate(
     context: FunctionInvocationContext,
     call_next: Callable[[], Awaitable[None]],
 ) -> None:
-    """Keep every door call on Steward's own world: MAF's middleware gating (controlling tool availability).
+    """Keep every door call on an Estate repository, and refuse what is never his: MAF's middleware gating.
 
-    The door's tools fall back to its default world (research) when no project is named, so a door call
-    that names another world, or none, is answered with corrective feedback and never reaches the door.
+    The door's tools fall back to its default world (research) when no project is named, so a door call that names
+    no Estate repository, or none, is answered with corrective feedback and never reaches the door. A tag or a
+    release, closing the main line, and any argument but a commit message that carries a force, mirror, all, tags or
+    delete flag or a path under Desktop\\Archive are refused here, before any card (ESTATE_GIT_REFUSALS).
     """
-    if context.function.name.startswith("atlas_"):
-        project = context.arguments.get("project") if hasattr(context.arguments, "get") else None
-        if project != _STEWARD_WORLD:
+    name = context.function.name
+    if name.startswith("atlas_"):
+        arguments = context.arguments
+        arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+        project = str(arguments.get("project") or "").strip().lower()
+        if project not in ESTATE_WORLDS:
             context.result = (
-                f"Error: Atlas's door tools work only on your own repository. Call {context.function.name} "
-                f"again with project=\"{_STEWARD_WORLD}\"."
+                f"Error: Atlas's door tools work only on the Estate's repositories ({', '.join(ESTATE_WORLDS)}). Call "
+                f"{name} again with project set to one of them; your own is project=\"{_STEWARD_WORLD}\"."
             )
+            return
+        refusal: str | None = None
+        if name in _DOOR_REFUSED:
+            refusal = "a tag or a release (the user's alone)"
+        elif (
+            name == "atlas_git_branch"
+            and str(arguments.get("action") or "").strip().lower() in {"close", "delete", "remove"}
+            and str(arguments.get("name") or "").strip().lower() in _MAIN_LINES
+        ):
+            refusal = "closing the main line"
+        else:
+            refusal = next(
+                (why for key, value in arguments.items() if key != "message" and (why := estate_git_refusal(str(value)))),
+                None,
+            )
+        if refusal:
+            context.result = f"Refused: {name} would be {refusal}. Nothing was sent to the door; this is never done."
             return
     await call_next()
 
@@ -851,8 +929,9 @@ def pr_checks_tool(door: Any) -> FunctionTool:
     async def pr_checks(
         line: Annotated[str, Field(description="The line of work (branch) the pull request is from, e.g. 'fix-discount'.")] = "",
         number: Annotated[int, Field(description="The pull request's number, when you know it; 0 to find it by line.")] = 0,
+        project: Annotated[str, Field(description="The Estate repository, as the door names it; your own is 'steward'.")] = _STEWARD_WORLD,
     ) -> str:
-        """Wait for a pull request on your repository to be opened and for its checks to finish, then return the result.
+        """Wait for a pull request on an Estate repository to be opened and for its checks to finish, then return the result.
 
         Read-only: it never approves, opens or merges anything. Call it after atlas_git_pr action="open" (it waits for
         the user's Approve to open it) and before you report. It returns JSON: status "passed" or "failed" (the checks
@@ -861,11 +940,14 @@ def pr_checks_tool(door: Any) -> FunctionTool:
         """
         if not line.strip() and number <= 0:
             return "Error: name the pull request's line of work (line) or its number."
+        project = (project or _STEWARD_WORLD).strip().lower()
+        if project not in ESTATE_WORLDS:
+            return f"Error: project is one of the Estate's repositories ({', '.join(ESTATE_WORLDS)})."
         clock = asyncio.get_running_loop()
         started = clock.time()
         seen: dict[str, Any] | None = None
         while True:
-            text = await _door_text(door, "git_pr", action="list", project=_STEWARD_WORLD)
+            text = await _door_text(door, "git_pr", action="list", project=project)
             try:
                 listed = json.loads(text).get("pull_requests") or []
             except (ValueError, AttributeError):
@@ -916,6 +998,8 @@ _CHANGES_THINGS = frozenset({
     *(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr")),
     # His notes' writes (the secondbrain-notes skill, 2026-11-02): they ask too, so plan mode leaves them alone.
     *(f"secondbrain_{name}" for name in ("write_note", "append_to_note")),
+    # The Estate's writes (2026-11-04): a server started, stopped or restarted, a model unloaded, SecondBrain updated.
+    *(f"secondbrain_{name}" for name in ESTATE_ASKS),
 })
 PLAN_MODE_TOOL_POLICY = (
     "\n\nTool policy in plan mode: you have the tools that change things ("
@@ -1640,7 +1724,8 @@ def _build_shell() -> LocalShellTool:
                 r"\brm\s+-[a-z]*r",
                 r"\bRemove-Item\b.*-Recurse",
                 r"\bdel\s+/s\b",
-                r"\bgit\s+push\b",
+                # A push, a tag, a release, a history rewrite, deleting main, the Archive (ESTATE_GIT_REFUSALS).
+                *(pattern for pattern, _ in ESTATE_GIT_REFUSALS),
                 r"\bgit\s+reset\s+--hard\b",
                 r"\bgit\s+clean\b",
                 r"\bsudo\b",
@@ -1944,10 +2029,11 @@ _SECONDBRAIN_TOOLS = [
     # too", "computer use"): served while switched on in SecondBrain's Settings, never asked
     "browser_open", "browser_read", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_back",
     "computer_task", "screen_look",
+    *ESTATE_READS, *ESTATE_ASKS,  # the Estate (2026-11-04): its reads never ask, its writes always do
 ]  # hold_list is left out: SecondBrain answers it only to Kyle's glass
-_SECONDBRAIN_ASKS = ["write_note", "append_to_note", "skill_save"]
+_SECONDBRAIN_ASKS = ["write_note", "append_to_note", "skill_save", *ESTATE_ASKS]
 # What an eval's build (eval_build) is given of them: reads only, no door, no writes, no clicks on his screen.
-_SECONDBRAIN_READS = ["search_notes", "read_note", "list_notes", "search_sessions", "web_search", "web_fetch"]
+_SECONDBRAIN_READS = ["search_notes", "read_note", "list_notes", "search_sessions", "web_search", "web_fetch", *ESTATE_READS]
 
 
 async def _connect_secondbrain(stack: AsyncExitStack, tools: list[str] = _SECONDBRAIN_TOOLS) -> MCPStreamableHTTPTool | None:
@@ -2206,6 +2292,7 @@ FIDES_LOG_NAME = "fides.jsonl"
 # The untrusted sources and the reads over MCP: FIDES's data fetchers (allow_untrusted_tools).
 _UNTRUSTED_NOTE_READS = frozenset(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes"))
 _DOOR_READS = frozenset({*(f"atlas_{name}" for name in ("git", "git_diff", "records")), PR_CHECKS_TOOL})
+_ESTATE_READ_TOOLS = frozenset(f"secondbrain_{name}" for name in ESTATE_READS)  # the Estate's reads fetch data too
 
 
 def safety_observe_on() -> bool:
@@ -2223,7 +2310,7 @@ def fides_observer() -> list[Any]:
     """
     labels = LabelTrackingFunctionMiddleware(default_integrity=IntegrityLabel.TRUSTED, auto_hide_untrusted=False)
     policy = PolicyEnforcementFunctionMiddleware(
-        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS), block_on_violation=False, approval_on_violation=False
+        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS | _ESTATE_READ_TOOLS), block_on_violation=False, approval_on_violation=False
     )
 
     async def record_would_block(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
@@ -2284,7 +2371,9 @@ _PROVIDER_SOURCES: tuple[tuple[type, str], ...] = (
     (TodoProvider, "todos"),
     (AgentModeProvider, "modes"),
 )
-_MCP_SOURCES = {"secondbrain_notes": "mcp:secondbrain", "secondbrain": "mcp:secondbrain", "atlas": "mcp:door"}
+_MCP_SOURCES = {
+    "secondbrain_notes": "mcp:secondbrain", "secondbrain": "mcp:secondbrain", "secondbrain_estate": "mcp:secondbrain", "atlas": "mcp:door"
+}
 _TOOL_SOURCES = {"get_repo_status": "built-in", "git_commit": "git", "run_shell": "shell", "search_code": "search_code", PR_CHECKS_TOOL: "mcp:door"}
 
 
@@ -2370,6 +2459,8 @@ async def tool_policy(agent: Agent[Any], rules: Sequence[Any], scratch: Path) ->
             notes.append("refused without a card in plan mode (the plan-mode gate)")
         if source == "mcp:door" and name != PR_CHECKS_TOOL:
             notes.append("SecondBrain's door holds its writes for approval there")
+        if name in {f"secondbrain_{t}" for t in ESTATE_ASKS}:
+            notes.append("an Estate write: SecondBrain serves it only while it allows writes (Settings, Share)")
         if notes:
             row["notes"] = "; ".join(notes)
         rows.append(row)
@@ -2571,8 +2662,8 @@ async def build_steward_agent(
         # the operator), and the door carries his repository as the world `steward`. So the door is one
         # more MCPStreamableHTTPTool on that client, with allowed_tools, as MAF's local-MCP page shows.
         # The door keeps its own authorization, as MAF says host tools must. Only the git tools and the
-        # record are offered, the pieces of the branch-check-keep loop; steward_world_only keeps every
-        # call on his own world. An eval's build has no door (eval_build): live 2026-11-04 an eval's commit through
+        # record are offered, the pieces of the branch-check-keep loop; estate_door_gate keeps every
+        # call on an Estate repository (ESTATE_WORLDS) and refuses what is never his. An eval's build has no door (eval_build): live 2026-11-04 an eval's commit through
         # it parked a real hold card in the user's SecondBrain.
         if secondbrain_client is not None and not eval_build:
             # His own door: trusted reads; its branch, commit, push and PR are FIDES sinks (labelled_mcp_tool).
@@ -2615,6 +2706,24 @@ async def build_steward_agent(
             )
             part3_tools.append(notes)
             part3_providers.append(CharterProvider(notes))
+            # The Estate (2026-11-04, Kyle: Steward is the agent of the Estate): SecondBrain's estate tools on the same
+            # client, MAF's allowed_tools and per-tool approval_mode (estate_approval): the reads never ask, the writes
+            # always ask the user's card. An eval's build gets the reads only. A server's log is untrusted to FIDES.
+            estate_tools = list(ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS))
+            part3_tools.append(
+                await labelled_mcp_tool(
+                    stack,
+                    MCPStreamableHTTPTool(
+                        name="secondbrain_estate",
+                        mcp_client=secondbrain_client,
+                        tool_name_prefix="secondbrain",
+                        allowed_tools=estate_tools,
+                        approval_mode=estate_approval(estate_tools),
+                        load_prompts=False,
+                    ),
+                    IntegrityLabel.UNTRUSTED,
+                )
+            )
         # plan-steward-context-memory-reads, piece 3: MAF's file memory with one explicit scope, so what
         # he saves in one session is in front of him in the next ("Pass an explicit scope to group
         # memories differently ... across sessions"); the factory's per-session one is switched off.
@@ -2685,7 +2794,7 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[
-                memory_owner, steward_world_only, *gate_middleware, refuse_unicode_punctuation_in_code,
+                memory_owner, estate_door_gate, *gate_middleware, refuse_unicode_punctuation_in_code,
                 repair_tool_names, recover_text_tool_calls, record_called_tools,
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if safety_observe_on() else []),

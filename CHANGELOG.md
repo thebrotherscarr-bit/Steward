@@ -13,6 +13,26 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Added
+
+- Steward runs the Estate (Neiro), on Kyle's ruling of 2026-11-04. SecondBrain's Estate tools are on his live build
+  as one more `MCPStreamableHTTPTool` (`secondbrain_estate`) with MAF's per-tool `approval_mode`: `estate_status`,
+  `estate_logs` and `approvals_history` never ask; `service_control`, `ollama_unload` and `app_update` (one name for
+  its check and its apply) always ask the user's card, and plan mode leaves them alone. Any other name asks
+  (`default: always_require`). The tool-policy shelf reports each with its source and approval. An eval's build gets
+  the reads only.
+- The `estate` skill is the Estate's operations: read `estate_status` and `estate_logs` first, then restart a
+  server, unload a model or check and apply SecondBrain's update, one change on the card, and read again. RULE 9
+  holds (no edit, send or door restart in the ground while a Manjuel sitting is open). Its map lists the tools and
+  the five repositories as the door names them.
+- The door's git tools and the `github` skill reach the Estate's five repositories (`research`, `atlas`,
+  `secondbrain`, `steward`, `neiro`), every write still on the card; `pr_checks` takes the `project`.
+  `estate_door_gate` replaces `steward_world_only`. A tag, a release, closing main, and a force, mirror, all, tags
+  or delete flag or a path under `Desktop\Archive` in a door argument are refused before any card. The same
+  patterns (`ESTATE_GIT_REFUSALS`) are in his shell's `ShellPolicy` denylist: no push, tag, release, history rewrite
+  (rebase, amend, filter-branch), deleting main, or Archive path. The door does not carry `neiro` yet and refuses it
+  by name.
+
 ### Fixed
 
 - The background CodeExplorer's own `read_file`, `search_code` and `list_files` never read, search or list a `.env`
