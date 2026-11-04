@@ -15,6 +15,13 @@ was never merged and has no entry.
 
 ### Fixed
 
+- Evals never reach the owner's door (live 2026-11-04: the eval's Steward committed through the door and parked a real
+  card in his window). An eval's Steward is built with `eval_build=True`: no Atlas door tool, no `pr_checks`, no note
+  write; note reads, the Charter, skills and the web stay.
+- A `.py` write with Unicode dashes, curly quotes or a no-break space outside a string or comment is refused with its
+  line, column and the ASCII character to use (live 2026-11-04: gpt-oss wrote U+2011 into code, a SyntaxError).
+  `refuse_unicode_punctuation_in_code`, function middleware on Steward's and the coder's write tools; nothing is
+  rewritten for him.
 - An eval case whose run raises fails, and the set goes on (live 2026-11-04: Ollama's "error parsing tool call" in
   one ask aborted the whole `small` set with a traceback). The case is scored "the run raised <Type>: <first line>"
   (`run_completed`), the sample project is put back, and the exit code is 1. `--options NAME` runs a set with a named
