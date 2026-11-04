@@ -72,6 +72,8 @@ from agent_framework import (
     ResponseStream,
     SkillsProvider,
     TodoProvider,
+    background_tasks_running,
+    background_tasks_running_message,
     create_harness_agent,
     get_agent_mode,
     set_agent_mode,
@@ -924,8 +926,13 @@ def denied_by_user(messages: Any) -> bool:
 def plan_reply_loop(
     mode_provider: AgentModeProvider, plan_reply_check: Callable[[str], Any] | None, todo_provider: TodoProvider | None = None
 ) -> tuple[Callable[..., Awaitable[Any]], Callable[..., Awaitable[str | None]]]:
-    """The harness loop's (should_continue, next_message): the todos and the plan asked for again, then MAF's todo loop."""
+    """The harness loop's (should_continue, next_message): the todos and the plan asked for again, then MAF's todo loop,
+    then MAF's background-task loop."""
     todo_loop = todos_remaining(looping_modes=[_EXECUTE_MODE])
+    # Step 4, 4.4: a turn could end while a background agent (CodeExplorer, WebResearchAgent) still ran. MAF's
+    # background_tasks_running keeps the loop going while one does, and background_tasks_running_message names the
+    # running tasks; checked last, so with no task running the loop is exactly as before. loop_max_iterations bounds it.
+    background_loop = background_tasks_running()
 
     async def plan_missing(session: Any, last_result: Any, iteration: int) -> str | None:
         """'todos' or 'plan' when a plan-mode reply lacks them, else None."""
@@ -992,6 +999,8 @@ def plan_reply_loop(
             return True
         if required_missing(session, last_result):
             return (True, "required")
+        if background_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
+            return (True, "background")
         return False
 
     async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> str | None:
@@ -1002,6 +1011,8 @@ def plan_reply_loop(
         if feedback == "required":
             lines = "\n".join(f"- {pair[0]}" for pair in unmet_requirements(session))
             return f"{REQUIRED_TOOLS_NUDGE}\n{lines}"
+        if feedback == "background":
+            return background_tasks_running_message(session=session, **kwargs)
         return await todos_remaining_message(feedback=feedback, session=session, **kwargs)
 
     return should_continue, next_message
