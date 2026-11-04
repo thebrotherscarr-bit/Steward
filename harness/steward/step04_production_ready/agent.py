@@ -2009,6 +2009,57 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
 
 # </tool_call_retry>
 
+# <ollama_timings>
+# Ollama's chat response carries its own timings (ollama/_types.py, BaseGenerateResponse: load_duration,
+# prompt_eval_duration and eval_duration in nanoseconds, eval_count in tokens), and MAF's OllamaChatClient keeps only
+# the token counts (agent_framework_ollama/_chat_client.py:658-713). MAF's UsageDetails is open for a provider's own
+# fields ("any specific provider fields can be added as needed", agent_framework/_types.py:553-557) and names them by
+# provider ("openai.cached_input_tokens", observability.py:382-392). So each chat call's timings go into its usage as
+# "ollama.<field>", and onto the call's chat span under the same names: the span is current while Ollama answers
+# (observability.py: _get_span's trace.use_span, and the stream's pull context manager, _activate_span).
+OLLAMA_TIMINGS = ("load_duration", "prompt_eval_duration", "eval_count", "eval_duration")
+
+
+def ollama_timings(response: Any) -> dict[str, int]:
+    """The timings an Ollama chat response carries, as "ollama.<field>": int (absent fields left out)."""
+    values = {field: getattr(response, field, None) for field in OLLAMA_TIMINGS}
+    return {f"ollama.{k}": v for k, v in values.items() if isinstance(v, int) and not isinstance(v, bool)}
+
+
+def _record_ollama_timings(client: OllamaChatClient) -> OllamaChatClient:
+    """Each chat call's Ollama timings in its usage details and on its chat span, streamed or not."""
+    from agent_framework import Content, UsageDetails  # noqa: PLC0415
+    from opentelemetry import trace  # noqa: PLC0415
+
+    parse = client._parse_response_from_ollama  # noqa: SLF001 - MAF's parsers, wrapped and called as they are
+    parse_update = client._parse_streaming_response_from_ollama  # noqa: SLF001
+
+    def parse_response(response: Any, **kwargs: Any) -> Any:
+        result = parse(response, **kwargs)
+        if timings := ollama_timings(response):
+            result.usage_details = UsageDetails(**{**(result.usage_details or {}), **timings})
+            trace.get_current_span().set_attributes(timings)
+        return result
+
+    def parse_streaming_response(response: Any) -> Any:
+        update = parse_update(response)
+        if getattr(response, "done", False) and (timings := ollama_timings(response)):
+            usage = next((c for c in update.contents if c.type == "usage"), None)
+            if usage is not None:
+                usage.usage_details = UsageDetails(**{**(usage.usage_details or {}), **timings})
+            else:
+                update.contents.append(Content.from_usage(UsageDetails(**timings), merge_mode="replace"))
+            trace.get_current_span().set_attributes(timings)
+        return update
+
+    client._parse_response_from_ollama = parse_response  # type: ignore[method-assign]  # noqa: SLF001
+    client._parse_streaming_response_from_ollama = parse_streaming_response  # type: ignore[method-assign]  # noqa: SLF001
+    return client
+
+
+# </ollama_timings>
+
+
 
 # <file_store>
 class LineEndingFileStore(FileSystemAgentFileStore):
@@ -2778,6 +2829,8 @@ async def build_steward_agent(
             # Gate run 3 (2026-11-01): a todos_add call Ollama could not parse ("error parsing tool call") ended
             # the whole run. The retry written for that gpt-oss fault was only on the old path; Parts 3 and 4 get it.
             part3_client = _retry_malformed_tool_calls(part3_client)
+            # Each chat call's Ollama timings (load, prompt and generation) in its usage and on its span.
+            part3_client = _record_ollama_timings(part3_client)
         # Step 4, 4.3: MAF's own tool-call settings on the one client he, his team and the fixer use.
         part3_client.function_invocation_configuration.update(TOOL_CALLS)
         explorer_agent = Agent(

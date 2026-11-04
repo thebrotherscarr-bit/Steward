@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Added
 
+- Ollama's timings on every chat call: `load_duration`, `prompt_eval_duration`, `eval_count` and `eval_duration`
+  (nanoseconds; tokens for the count), which MAF's `OllamaChatClient` drops, are added to the call's usage as
+  `ollama.<field>` (MAF's `UsageDetails` is open for provider fields, `_types.py:553-557`) and set on its chat span
+  under the same names, streamed or not (`_record_ollama_timings` on the live build's client). Test:
+  `test_each_ollama_chat_call_records_its_timings_in_usage_and_on_its_span`.
 - Progress from CHECK and REPAIR: MAF custom workflow events (`ctx.add_event`, `StewardProgress`, type `progress`),
   in order: "checking: pytest -q <folder>" before each folder's tests (the check reports from its worker thread through
   `check_progress`), "check passed" or "check failed", and "repair attempt n/3". A caller streaming the workflow reads
