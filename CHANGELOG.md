@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- With automatic memory on, an approved `run_shell` no longer fails the hosted run. MemoryContextProvider's transcript
+  save (msgspec) refused MAF's `_ShellResultText`, a str subclass, and the host reported only "Native workflow
+  execution failed" (live 2026-11-03: the memory eval and the diagnosis both ended there). `steward_memory()` now
+  passes MAF's `history_message_filter`, `plain_tool_results`, which saves tool results as plain text. The hosted tests
+  keep their response records in a temp folder, not `storage/responses`.
 - Step 5: his automatic memory saves facts, not the harness's chatter. The first live recall (2026-11-03) saved six
   memories with MAF's default extraction prompt; only one was a fact. Extraction reads each run's input, which in his
   workflow's later steps is the harness's own text ("The user approved your plan", todo reminders, plan cards), so it
