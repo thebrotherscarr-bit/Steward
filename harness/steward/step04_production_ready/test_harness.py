@@ -496,6 +496,83 @@ def test_a_clearly_misspelled_tool_name_is_repaired_and_an_unclear_one_is_not() 
     assert steward.repaired_tool_name("mod_x", {"mode_set", "mode_get"}) is None
 
 
+# Live 2026-11-03 (the diagnosis traces): his reply was file_access_ls's arguments as text, and nothing ran.
+LISTED_AS_TEXT = '{"directory": "harness/steward/working", "glob_pattern": ""}'
+
+
+def test_a_tool_call_written_as_text_runs_and_an_unclear_one_is_left_as_it_is() -> None:
+    """recover_text_tool_calls: a reply that is only one tool's arguments runs as that tool, streamed or not, fenced or
+    not, and the loop goes on to his answer. Arguments that fit two tools, or none, stay his text."""
+    client, _, response = run_steward([LISTED_AS_TEXT, "It holds the sample project."], "What is in harness/steward/working?")
+    assert len(client.calls) == 2, "the recovered call ran and he was called again"
+    assert any("sample-project" in r for r in function_results(client.calls[1])), "file_access_ls listed the folder"
+    assert response.text == "It holds the sample project."
+
+    def transcript(call: dict[str, Any]) -> list[tuple[str, str]]:
+        return [(c.type, c.name or c.text or "") for m in call["messages"] for c in m.contents if m.role == "assistant"]
+
+    assert transcript(client.calls[1]) == [("function_call", "file_access_ls")], "his transcript holds the call, not the text"
+
+    async def _streamed(reply: str) -> tuple[ScriptedChatClient, Any]:
+        c = ScriptedChatClient([reply, "It holds the sample project."])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=c, enable_shell=False)
+            async with agent:
+                stream = agent.run("What is in harness/steward/working?", session=agent.create_session(), stream=True)
+                return c, await stream.get_final_response()
+
+    c, streamed = asyncio.run(_streamed(f"```json\n{LISTED_AS_TEXT}\n```"))
+    assert any("sample-project" in r for r in function_results(c.calls[1])), "streamed and fenced too"
+    assert streamed.text == "It holds the sample project.", "the arguments never reach his answer"
+    assert transcript(c.calls[1]) == [("function_call", "file_access_ls")]
+    assert [x.name for m in streamed.messages for x in m.contents if x.type == "function_call"] == ["file_access_ls"], (
+        "the streamed run's own updates carry the call (the buffered stream released the rewritten reply)"
+    )
+
+    # {"file_name": ...} fits file_access_read and file_access_delete (and the memory's two): which one is a guess.
+    for unclear in ('{"file_name": "x.py"}', '{"no_such_parameter": 1}', "{}", f"Here: {LISTED_AS_TEXT}"):
+        client, _, response = run_steward([unclear, "never"], "Read x.py.")
+        assert len(client.calls) == 1 and response.text == unclear, unclear
+    tools = client.calls[0]["options"]["tools"]
+    assert steward.tool_call_in_text('{"todos": [{"title": "Write it"}]}', tools) == ("todos_add", {"todos": [{"title": "Write it"}]})
+    assert steward.tool_call_in_text('{"file_name": "x.py", "start_line": 1}', tools) == (
+        "file_access_read_lines", {"file_name": "x.py", "start_line": 1}
+    )
+
+
+def test_a_tool_call_written_as_text_runs_through_the_hosted_workflow(monkeypatch: Any) -> None:
+    """The live fault where it happened: EXECUTE, streamed on his host. The recovered file_access_ls runs, the loop goes
+    on to the todo and his answer, and the Agent tab shows his answer, not the arguments."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    plan = '{"type": "approval", "questions": [{"message": "List it."}], "steps": ["List harness/steward/working"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "listed"}]})
+    replies: list[Any] = [plan, LISTED_AS_TEXT, done, "It holds the sample project."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        turn = http.post("/responses", json={"input": "What is in harness/steward/working?", "store": True}).json()
+        [card] = [o for o in turn["output"] if o["type"] == "mcp_approval_request"]
+        answer = {"type": "mcp_approval_response", "approval_request_id": card["id"], "approve": True}
+        turn = http.post("/responses", json={"previous_response_id": turn["id"], "store": True, "input": [answer]}).json()
+    state.cleanup()
+    assert turn["status"] == "completed", turn.get("error")
+    assert len(calls) == 4, "plan, the recovered call, the todo, his answer"
+    assert any("sample-project" in r for r in function_results(calls[2])), "file_access_ls ran"
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["It holds the sample project."], texts
+
+
 def test_work_that_skips_the_tool_its_request_needs_is_asked_once_and_hints_outlive_the_approve() -> None:
     """The evidence check: a count finished without CodeAct is asked once; a hint is kept through the Approve turn."""
     from agent_framework import AgentModeProvider, set_agent_mode
