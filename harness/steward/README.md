@@ -99,8 +99,8 @@ tab is Steward's console.
 ### The Agent tab: a MAF workflow (`steward_workflow.py`, served by `hosted.py`)
 
 SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF workflow on MAF's own
-`ResponsesHostServer(workflow=...)`, a fresh Steward per request. His work in execute and commit
-streams to the tab as it happens (MAF's `intermediate_output_from`):
+`ResponsesHostServer(workflow=...)`, a fresh Steward per request. His work in execute streams to
+the tab as it happens (MAF's `intermediate_output_from`):
 
 ```
 request -> plan -> read_plan -> ask_approval (approve_plan card) -> execute -> check
@@ -121,9 +121,11 @@ nothing changed, or attempts spent -> report
    `STEWARD_CHECK_RUNNING`, so a workflow run inside those tests does not start the check again.
 5. **Repair:** failing, the output goes back to him in execute mode, with "Fix the failing
    checks" (`REPAIR_TODO`) as his todo, and the check runs again; at most 3 attempts.
-6. **Commit:** only after passing checks on changed code. The tab shows "Checks passed", he is
-   asked to commit his work (`COMMIT_TODO`), and his `git_commit` comes to you on its own card.
-   Execute is told not to commit; failing work never reaches this step.
+6. **Commit:** only after passing checks on changed code. The tab shows "Checks passed", the model
+   writes only the message (structured output, `CommitMessage`: one line of at most 72 characters),
+   and the workflow raises his `git_commit` card with it; Approve commits, Deny commits nothing. A
+   message that fails to parse twice is replaced by one built from the request and the changed
+   files. Execute is told not to commit; failing work never reaches this step.
 7. **Report:** when nothing changed, or the attempts are spent, the run ends with the checks'
    result. His answer has already streamed, so it is not repeated.
 

@@ -1318,7 +1318,8 @@ def _run_every_step(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> tup
         monkeypatch.setenv(name, value)
     plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
     done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
-    task = ScriptedChatClient([plan, done, "First.", done, "Fixed.", done, "Committed."])
+    # The commit step's one reply is its message (CommitMessage), no longer a turn of his that may call git_commit.
+    task = ScriptedChatClient([plan, done, "First.", done, "Fixed.", '{"message": "Fix x in the module"}'])
     question = ScriptedChatClient([ANSWERED], routes=['{"kind": "answer"}'])
     results = [(False, "1 failed"), (True, "1 passed")]
 
@@ -1327,16 +1328,19 @@ def _run_every_step(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> tup
             async with AsyncExitStack() as stack:
                 agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
                 async with agent:
-                    workflow = wf.build_steward_workflow(agent, checks=lambda _messages: results.pop(0))
+                    workflow = wf.build_steward_workflow(agent, checks=lambda _messages: results.pop(0), changes=lambda: ["x.py"])
                     events = [e async for e in workflow.run("Fix x." if client is task else QUESTION, stream=True)]
                     if client is task:
                         card = next(e for e in events if e.type == "request_info")
                         answer = {card.request_id: card.data.to_function_approval_response(True)}
-                        assert said([e async for e in workflow.run(stream=True, responses=answer)])[-1] == "Committed."
+                        resumed = [e async for e in workflow.run(stream=True, responses=answer)]
+                        assert said(resumed)[-1] == "Checks passed:\n1 passed", said(resumed)
+                        # The git_commit card is left unanswered: nothing is committed here.
+                        assert [e.data.function_call.name for e in resumed if e.type == "request_info"] == [wf.GIT_COMMIT]
 
     asyncio.run(_go())
-    # plan; execute's two calls; the repair's two (on EXECUTE's executor); the commit's two
-    assert len(task.calls) == 7 and len(question.calls) == 1, (len(task.calls), len(question.calls))
+    # plan; execute's two calls; the repair's two (on EXECUTE's executor); the commit message's one
+    assert len(task.calls) == 6 and len(question.calls) == 1, (len(task.calls), len(question.calls))
     return task, question
 
 
@@ -1358,7 +1362,9 @@ def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and
     [routed] = task.route_calls
     assert routed["options"] == {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.Route}, routed
     unset = [{k: v for k, v in c["options"].items() if k not in ("tools", "instructions")} for c in task.calls + question.calls]
-    assert unset == [{**base, "response_format": wf.StewardPlan}, *[base] * 7], "with nothing set, today's options"
+    # The commit message's call carries the router's options (his window and keep-alive) and CommitMessage.
+    commit = {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.CommitMessage}
+    assert unset == [{**base, "response_format": wf.StewardPlan}, *[base] * 4, commit, base], "with nothing set, today's options"
 
     env = {
         "STEWARD_ROUTE_THINK": "false", "STEWARD_ROUTE_TEMPERATURE": "0",
@@ -1376,7 +1382,6 @@ def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and
         {"think": True},  # repair, on EXECUTE's executor and session
         {"think": True},
         {},  # commit: no step options
-        {},
         {"think": "medium", "seed": 11},  # answer
     ]
     calls = set_task.calls + set_question.calls
@@ -1469,11 +1474,10 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
 
         return asyncio.run(_go()), client.calls, seen
 
-    committed = Content.from_function_call(call_id="k1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "asked"}]})
     # A repair's todo (REPAIR_TODO) is his one open item until he marks it done, as any approved step.
     fixed = Content.from_function_call(call_id="f1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
     outputs, calls, seen = run(
-        [plan, done, "First try.", fixed, "Fixed it.", committed, "Committed."],
+        [plan, done, "First try.", fixed, "Fixed it.", '{"message": "Fix the discount line in inventory.py"}'],
         [(False, "1 failed: test_discount"), (True, "1 passed")],
     )
     assert len(seen) == 2, "checked after each attempt; repaired once"
@@ -1483,16 +1487,17 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
     assert calls[3]["options"].get("response_format") is None, "the repair was asked for a plan, not a fix"
     assert wf.REPAIR_TODO in " ".join(m.text or "" for m in calls[3]["messages"]), "the repair's todo is not in front of him"
     assert "Do not commit" in " ".join(m.text or "" for m in calls[1]["messages"]), "EXECUTE is told the commit comes later"
-    # Passing on changed code: the commit step asks him to commit (his git_commit raises the card), then REPORT.
-    assert "Commit your work now" in " ".join(m.text or "" for m in calls[5]["messages"]), "the commit came after the pass"
-    assert len(calls) == 7, len(calls)
-    assert outputs == ["First try.", "Fixed it.", "Checks passed:\n1 passed", "Committed."], outputs
+    # Passing on changed code: the commit step writes the message (structured output); the git_commit card follows.
+    assert calls[5]["options"].get("response_format") is wf.CommitMessage, "the commit message came after the pass"
+    assert "Write its commit message" in " ".join(m.text or "" for m in calls[5]["messages"])
+    assert len(calls) == 6, len(calls)
+    assert outputs == ["First try.", "Fixed it.", "Checks passed:\n1 passed"], outputs
 
     failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
     outputs, calls, seen = run([plan, done, "a", fixed, "b", fixed, "c", "never"], failing)
     # plan, then EXECUTE's two calls, then each repair's two (its todo marked done, then his answer)
     assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 3 + 2 * (wf.MAX_ATTEMPTS - 1), "stopped at the attempt limit; no commit asked"
-    assert not any("Commit your work now" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
+    assert not any("Write its commit message" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
     assert outputs == ["a", "b", "c", f"Checks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
 
     def call(name: str, file_name: str) -> Message:
@@ -1566,8 +1571,9 @@ def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> N
 
     plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix x"]}'
     done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
-    commit = Content.from_function_call(call_id="g1", name="git_commit", arguments={"message": "Fix x"})
-    client = ScriptedChatClient([plan, done, "Fixed x.", commit, "The commit was not approved, so nothing was committed."])
+    # 2026-11-04: the commit step's reply is its message (CommitMessage) and the workflow raises the card, so the
+    # scripted git_commit call and his "not approved" turn became the message and the workflow's own refusal.
+    client = ScriptedChatClient([plan, done, "Fixed x.", '{"message": "Fix x in the module"}'])
     head = steward._git("rev-parse", "HEAD").stdout
 
     async def _go() -> tuple[list[str], list[Any]]:
@@ -1588,7 +1594,100 @@ def test_the_commit_comes_after_passing_checks_on_his_own_git_commit_card() -> N
     cards, outputs = asyncio.run(_go())
     assert cards == [wf.APPROVE_PLAN, "git_commit"], "the commit asked on its own card, after the checks"
     assert steward._git("rev-parse", "HEAD").stdout == head, "the denied commit did not run"
-    assert outputs == ["Fixed x.", "Checks passed:\n1 passed", "The commit was not approved, so nothing was committed."], outputs
+    assert outputs == ["Fixed x.", "Checks passed:\n1 passed", wf.COMMIT_NOT_APPROVED], outputs
+    assert len(client.calls) == 4, "plan, execute's two, the commit message's one"
+
+
+def test_the_commit_step_writes_only_the_message_and_the_workflow_raises_the_git_commit_card() -> None:
+    """Live evals 2026-11-04, three runs: at the commit step gpt-oss wrote "Do you approve this commit?" in words and
+    never called git_commit, so no card came (commit_by_tool, commit_message_specific failed). The model now only
+    writes the message (structured output, CommitMessage); the workflow raises git_commit's card with it. Approve runs
+    git_commit once; Deny commits nothing and says so; a message that fails twice gives the built one."""
+    import evals
+    import steward_workflow as wf
+    from agent_framework import tool
+
+    plan = '{"type": "approval", "questions": [{"message": "Add item_count."}], "steps": ["Add item_count"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "added"}]})
+    prose = "Proposed commit message: Add item_count. Do you approve this commit? If yes, I'll run git_commit."
+    files = ["harness/steward/working/sample-project/inventory.py"]
+
+    def run(commit_replies: list[Any], answer: bool) -> tuple[ScriptedChatClient, list[str], list[str], list[str]]:
+        client = ScriptedChatClient([plan, done, "Added item_count.", *commit_replies])
+        committed: list[str] = []
+
+        @tool(name="git_commit", approval_mode="always_require")
+        def recording_commit(message: str) -> str:
+            """Stands in for his git_commit: records the message, commits nothing."""
+            committed.append(message)
+            return f"Committed abc1234: {message}"
+
+        async def _go() -> tuple[list[str], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    tools = agent.default_options["tools"]
+                    agent.default_options["tools"] = [recording_commit if getattr(t, "name", "") == "git_commit" else t for t in tools]
+                    workflow = wf.build_steward_workflow(agent, checks=lambda _m: (True, "1 passed"), changes=lambda: files)
+                    events = [e async for e in workflow.run(evals.SMALL_ASK_NEW_CODE, stream=True)]
+                    shown, messages, answers = said(events), [], [True, answer]
+                    while pending := [e for e in events if e.type == "request_info"]:
+                        messages += [str(c.data.function_call.parse_arguments().get("message")) for c in pending if c.data.function_call.name == "git_commit"]
+                        reply = {c.request_id: c.data.to_function_approval_response(answers.pop(0)) for c in pending}
+                        events = [e async for e in workflow.run(stream=True, responses=reply)]
+                        shown += said(events)
+                    return messages, shown
+
+        messages, shown = asyncio.run(_go())
+        return client, messages, shown, committed
+
+    # The prose reply is no CommitMessage: asked again once, with the error; the second reply is the card's message.
+    client, messages, shown, committed = run([prose, '{"message": "Add item_count to inventory.py"}'], answer=True)
+    assert [c["options"].get("response_format") for c in client.calls[3:]] == [wf.CommitMessage] * 2, "a structured call"
+    assert "not a valid commit message" in client.calls[4]["messages"][-1].text and len(client.calls) == 5
+    assert messages == ["Add item_count to inventory.py"], "the card carries the parsed message"
+    assert committed == ["Add item_count to inventory.py"], "approved: git_commit ran once"
+    assert shown[-1] == "Committed abc1234: Add item_count to inventory.py", shown
+
+    _, messages, shown, committed = run(['{"message": "Add item_count to inventory.py"}'], answer=False)
+    assert messages == ["Add item_count to inventory.py"] and committed == [], "denied: nothing committed"
+    assert shown[-1] == wf.COMMIT_NOT_APPROVED, shown
+
+    # Twice unparseable (prose, then a bare word the schema's check refuses): the built message, never empty.
+    _, messages, _, committed = run([prose, '{"message": "Update"}'], answer=True)
+    assert messages == [wf.fallback_commit_message(evals.SMALL_ASK_NEW_CODE, files)] and committed == messages
+    summary = messages[0].splitlines()[0]
+    assert summary and len(summary) <= 72 and "item_count" in summary and "Files: inventory.py" in messages[0], messages
+    assert wf.fallback_commit_message("", []) == "Commit the checked work" and wf.fallback_commit_message("", files).startswith("Change inventory.py\n")
+    assert wf.commit_message_in('{"message": "Fix x"}') == ("Fix x", "")
+    assert wf.commit_message_in('{"message": "x' + "y" * 80 + ' z"}')[0] is None, "a summary line over 72"
+
+    # The evals' own checks find the card on a run driven as they drive it (workflow.as_agent, git_commit denied).
+    async def _as_agent() -> Any:
+        client = ScriptedChatClient([plan, done, "Added item_count.", prose, '{"message": "Add item_count to inventory.py"}'])
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda _m: (True, "1 passed"), changes=lambda: files)
+                return await evals._run_answering_cards(workflow.as_agent(name="Steward"), None, evals.SMALL_ASK_NEW_CODE, {wf.APPROVE_PLAN})
+
+    head = steward._git("rev-parse", "HEAD").stdout
+    conversation = list(asyncio.run(_as_agent()).messages)
+    assert steward._git("rev-parse", "HEAD").stdout == head, "the denied card committed nothing"
+    for check in (evals.commit_by_tool, evals.commit_message_specific):
+        result = scored(check, evals.SMALL_ASK_NEW_CODE, conversation)
+        assert result.passed, (check, result.reason)
+
+    # A Steward built without git_commit cannot be given a commit step: the build says so.
+    async def _without() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=ScriptedChatClient(), enable_shell=False)
+            async with agent:
+                agent.default_options["tools"] = [t for t in agent.default_options["tools"] if getattr(t, "name", "") != "git_commit"]
+                wf.build_steward_workflow(agent)
+
+    with pytest.raises(ValueError, match="git_commit"):
+        asyncio.run(_without())
 
 
 def test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo() -> None:

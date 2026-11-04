@@ -11,7 +11,8 @@ Pieces 1 to 4 of the build order:
     plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
             -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
             -> (failed, attempts left) repair -> execute -> check ...
-            -> (passed on changed code) ask_commit ("Checks passed") -> commit (his git_commit, on the user's card)
+            -> (passed on changed code) ask_commit ("Checks passed") -> commit (one structured-output call writes the
+               message: CommitMessage; the workflow raises his git_commit's card with it, and runs it on Approve)
             -> (nothing changed, or attempts spent) report
 
 * ROUTE comes first (live 2026-11-03: a question came back as an approval card, "No further action needed"). Learn,
@@ -35,6 +36,11 @@ Pieces 1 to 4 of the build order:
   their folders run. Failing with attempts left, REPAIR hands EXECUTE the output; passing, or after MAX_ATTEMPTS,
   REPORT gives his answer with the checks' result. Nothing written, nothing run. The attempt count is workflow
   state, so it is in the checkpoint across a write card's pause.
+* COMMIT does not leave the tool call to the model (live evals 2026-11-04, three runs: gpt-oss asked "Do you approve
+  this commit?" in words and never called git_commit; Ollama's tool_choice takes only auto or none). The model only
+  writes the message, as structured output (CommitMessage, as ROUTE's Route), and the workflow raises git_commit's
+  card itself with it (ctx.request_info, as ASK_APPROVAL's approve_plan); Approve runs his git_commit, Deny commits
+  nothing. A message that fails to parse is asked again once, then a fixed one is built from the request and files.
 * Hosting (MAF native, Kyle's choice 2026-11-01): ResponsesHostServer(workflow=factory) builds a fresh graph and a
   fresh Steward for every request ("Native workflow requests cannot share workflows, executors, agents, clients,
   or providers", _workflow_source.py), so the factory is in hosted.py.
@@ -82,7 +88,7 @@ from agent_framework import (
 )
 from agent_framework._workflows._message_utils import normalize_messages_input
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -113,16 +119,26 @@ APPROVE_PLAN = "approve_plan"
 APPROVED_PLAN_KEY = "steward_approved_plan"
 NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to change and I will plan again."
 # The commit comes after the checks pass (the cookbook's improvement loop: "the system proposes the change set and a
-# developer approves the diff before merge"); he commits his own work, on the user's card (the guide's Part 2).
-COMMIT_TODO = "Commit the checked work with git_commit"
+# developer approves the diff before merge"); his git_commit runs on the user's card (the guide's Part 2). The model
+# writes only the message (CommitMessage); the workflow raises the card (Commit).
 # A repair's one step: the message carries it as his plan, so approved_plan_turn puts EXECUTE back in execute mode with
 # it as the todo (live 2026-11-02: his finished todos had returned him to plan mode, and each repair came back a plan).
 REPAIR_TODO = "Fix the failing checks"
-COMMIT_NOW = (
-    "The checks passed:\n{output}\n\nCommit your work now: call git_commit once, with a clear, imperative message "
-    "that says what you changed. The user approves it before it runs. Then mark the todo complete and say whether it "
-    "was committed."
+# The commit message's structured call: COMMIT_PROMPT as its instruction, COMMIT_NOW as the change it describes.
+COMMIT_PROMPT = (
+    "Write the git commit message for the change below: one line of at most 72 characters, imperative, naming what "
+    "changed (the function, file or behaviour), e.g. 'Add item_count to inventory.py'. Never a bare word such as "
+    "'Update' or 'Fix'."
 )
+COMMIT_NOW = "The checks passed on this change. Write its commit message.\n\nRequest: {request}\n\nChanged files:\n{files}\n\nChecks:\n{output}"
+# Sent once when the message did not parse (the cookbook's "Validate JSON ... in code": a bad reply is asked again).
+COMMIT_AGAIN = "That is not a valid commit message ({error}). Reply with the JSON object only."
+COMMIT_NOT_APPROVED = "The commit was not approved, so nothing was committed."
+# The card's tool: his own git_commit (agent.py), found by name on the agent the graph is built over.
+GIT_COMMIT = "git_commit"
+_COMMIT_SUMMARY_MAX = 72
+# The approved request and plan, kept in the workflow's state (so in its checkpoint) for the commit message.
+_APPROVED_REQUEST_KEY = "steward_approved_request"
 # Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
 PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
 _PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
@@ -287,7 +303,7 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
 
 
 def approved_steps(messages: Sequence[Message] | None) -> list[str] | None:
-    """The approved plan's steps carried on a message of this run (execute_message, Repair, AskCommit), or None."""
+    """The approved plan's steps carried on a message of this run (execute_message, Repair), or None."""
     return next(
         (
             m.additional_properties[APPROVED_PLAN_KEY]
@@ -434,6 +450,19 @@ def changed_python_files(workspace: Path) -> list[str]:
     return sorted(set(done.stdout.split())) if done.returncode == 0 else []
 
 
+def changed_files(workspace: Path | None = None) -> list[str]:
+    """The files under the workspace that differ from the committed state (changed, new or deleted), as git lists
+    them: what his git_commit would stage (git add --all -- .). The commit message is written from them."""
+    if workspace is None:
+        from agent import _WORKING_DIR as workspace  # noqa: PLC0415 - the folder his git_commit commits in
+
+    done = subprocess.run(
+        ["git", "ls-files", "--modified", "--deleted", "--others", "--exclude-standard", "--", "."],
+        cwd=workspace, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    return sorted(set(done.stdout.split())) if done.returncode == 0 else []
+
+
 def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None = None) -> tuple[bool, str] | None:
     """The tests in the folder of each changed .py file (pytest). None when no code changed (a docs-only change).
 
@@ -533,6 +562,7 @@ class AskApproval(Executor):
             return
         plan = original_request.function_call.parse_arguments() or {}
         ctx.set_state(_ATTEMPT_KEY, 0)
+        ctx.set_state(_APPROVED_REQUEST_KEY, {"request": str(plan.get("request", "")), "plan": str(plan.get("plan", ""))})
         message = execute_message(str(plan.get("request", "")), str(plan.get("plan", "")), list(plan.get("steps") or []))
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
@@ -571,21 +601,125 @@ def ready_for_report(report: Any) -> bool:
 
 
 class AskCommit(Executor):
-    """After passing checks, says so, then asks Steward to commit his work: his git_commit raises the user's card.
-
-    The message carries one step as his approved plan, so approved_plan_turn puts the commit's own session in execute
-    mode with that step as its todo (a todo list at all times). His commit answer streams from COMMIT.
-    """
+    """After passing checks, says so, then hands the passing report to COMMIT, which raises the git_commit card."""
 
     def __init__(self, id: str = "ask_commit") -> None:
         super().__init__(id=id)
 
     @handler
-    async def ask(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest, Any]) -> None:
+    async def ask(self, report: CheckReport, ctx: WorkflowContext[CheckReport, Any]) -> None:
         await ctx.yield_output(checks_text(report))
-        text = COMMIT_NOW.format(output=report.output[-_OUTPUT_TAIL:])
-        message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [COMMIT_TODO]})
-        await ctx.send_message(AgentExecutorRequest(messages=[message]))
+        await ctx.send_message(report)
+
+
+class CommitMessage(BaseModel):
+    """The commit step's structured output: the message alone, so whether to commit is never the model's choice."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    # Ollama's structured output enforces the schema's own terms (StewardPlan's note above); the rest is checked here.
+    message: str = Field(
+        min_length=1,
+        max_length=_COMMIT_SUMMARY_MAX,
+        description="One imperative line naming what changed, e.g. 'Add item_count to inventory.py'.",
+    )
+
+    @field_validator("message")
+    @classmethod
+    def _names_the_change(cls, message: str) -> str:
+        if "\n" in message:
+            raise ValueError("one line only")
+        if len(message.split()) < 2:
+            raise ValueError("name what changed, not one word")
+        return message
+
+
+def commit_message_in(text: str) -> tuple[str | None, str]:
+    """The CommitMessage a reply holds, read in code as ROUTE reads its Route: (message, "") or (None, the error)."""
+    try:
+        return CommitMessage.model_validate_json((text or "").strip()).message, ""
+    except ValueError as error:
+        return None, str(error).splitlines()[0] if str(error).strip() else type(error).__name__
+
+
+def fallback_commit_message(request: str, files: Sequence[str]) -> str:
+    """A message built from the request and the changed files' names, never empty: the request's first sentence cut at
+    a word to fit the summary line, and the files below it."""
+    first = next((line.strip() for line in (request or "").splitlines() if line.strip()), "")
+    sentence = first.split(". ")[0].rstrip(".").strip()
+    names = ", ".join(sorted({Path(f).name for f in files}))
+    summary = sentence or (f"Change {names}" if names else "Commit the checked work")
+    if len(summary) > _COMMIT_SUMMARY_MAX:
+        summary = summary[: _COMMIT_SUMMARY_MAX + 1].rsplit(" ", 1)[0].rstrip(" ,;:") or summary[:_COMMIT_SUMMARY_MAX]
+    return f"{summary}\n\nFiles: {names}" if names else summary
+
+
+class Commit(Executor):
+    """Writes the commit message (one structured-output call, CommitMessage), then raises his git_commit's card with it.
+
+    The card is MAF's human input as the plan's is (ctx.request_info with a function_approval_request), named
+    git_commit and carrying the message, so every host shows it as his git_commit's card and the evals find it
+    (evals._cards_named). Approved, his own git_commit tool runs with the card's arguments; denied, nothing is
+    committed and the run says so. The message rides in the card, so it is in the checkpoint while the run waits.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        options: dict[str, Any],
+        git_commit: Any,
+        changes: Callable[[], list[str]] = changed_files,
+        id: str = COMMIT_STEP,
+    ) -> None:
+        super().__init__(id=id)
+        self._client = client
+        self._options = options
+        self._git_commit = git_commit
+        self._changes = changes
+
+    @handler
+    async def write(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
+        approved = ctx.get_state(_APPROVED_REQUEST_KEY, None) or {}
+        request = str(approved.get("request", ""))
+        files = await asyncio.to_thread(self._changes)
+        message = await self._message(request, files, report.output)
+        call_id = f"{GIT_COMMIT}-{uuid.uuid4().hex[:12]}"
+        call = Content.from_function_call(call_id=call_id, name=GIT_COMMIT, arguments={"message": message})
+        # The card's id is the request's id, as AskApproval's (WorkflowAgent keys answers by the approval's id).
+        await ctx.request_info(
+            request_data=Content.from_function_approval_request(id=call_id, function_call=call),
+            response_type=Content,
+            request_id=call_id,
+        )
+
+    async def _message(self, request: str, files: Sequence[str], output: str) -> str:
+        """The structured call, asked again once on a reply that is no CommitMessage; then the built message."""
+        listed = "\n".join(files) or "(none listed)"
+        messages = [
+            Message(role="system", contents=[Content.from_text(COMMIT_PROMPT)]),
+            Message(role="user", contents=[Content.from_text(COMMIT_NOW.format(request=request, files=listed, output=output[-_OUTPUT_TAIL:]))]),
+        ]
+        for attempt in range(2):
+            reply = await self._client.get_response(messages, options={**self._options, "response_format": CommitMessage})
+            message, error = commit_message_in(reply.text or "")
+            if message is not None:
+                return message
+            logger.info("Steward commit message, attempt %d, did not parse: %s", attempt + 1, error)
+            messages += [
+                Message(role="assistant", contents=[Content.from_text(reply.text or "")]),
+                Message(role="user", contents=[Content.from_text(COMMIT_AGAIN.format(error=error))]),
+            ]
+        return fallback_commit_message(request, files)
+
+    @response_handler
+    async def on_answer(self, original_request: Content, response: Content, ctx: WorkflowContext[Any, Any]) -> None:
+        if not getattr(response, "approved", False):
+            await ctx.yield_output(COMMIT_NOT_APPROVED)
+            return
+        arguments = original_request.function_call.parse_arguments() or {}
+        # His git_commit itself (agent.py), run as the tool runs it once approved (FunctionTool.invoke).
+        result = await self._git_commit.invoke(arguments=arguments, skip_parsing=True)
+        await ctx.yield_output(str(result))
 
 
 class Repair(Executor):
@@ -627,9 +761,12 @@ def checks_text(report: CheckReport) -> str:
     return f"Checks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
 
 
-def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_changes) -> Workflow:
+def build_steward_workflow(
+    agent: Agent[Any], checks: Checks = python_tests_for_changes, changes: Callable[[], list[str]] = changed_files
+) -> Workflow:
     """The graph over one build_steward_agent Steward: route, then answer, or plan, read_plan, ask_approval, execute,
-    check, repair, then ask_commit and commit when the checks passed on changed code, else report."""
+    check, repair, then ask_commit and commit when the checks passed on changed code, else report. ``changes`` lists
+    the changed files the commit message is written from."""
     from agent import OLLAMA_OPTIONS  # noqa: PLC0415
 
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
@@ -659,18 +796,23 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
     check = Check(checks)
     repair = Repair()
     ask_commit = AskCommit()
-    commit = AgentExecutor(agent, id=COMMIT_STEP)
+    # His own git_commit, the copy this build gave him (agent.py): a build without it has nothing to commit with.
+    git_commit = next((t for t in (agent.default_options or {}).get("tools") or [] if getattr(t, "name", None) == GIT_COMMIT), None)
+    if git_commit is None:
+        raise ValueError(f"Steward has no {GIT_COMMIT} tool, so the workflow's commit step cannot commit.")
+    # The message's call on his own client with the router's options (his window and keep-alive).
+    commit = Commit(agent.client, base, git_commit, changes)
     report = Report()
-    # The run's output is the steps' own (a reply, a clarification, a refusal, the report). EXECUTE's and COMMIT's work
-    # streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and the Responses
-    # host both forward it), so every host shows his work as it happens; PLAN's streamed text is the plan's raw JSON,
-    # which the card shows, so it stays hidden. ANSWER's words stream as EXECUTE's do.
+    # The run's output is the steps' own (a reply, a clarification, a refusal, the report, the commit's result).
+    # EXECUTE's work streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and
+    # the Responses host both forward it), so every host shows his work as it happens; PLAN's streamed text is the
+    # plan's raw JSON, which the card shows, so it stays hidden. ANSWER's words stream as EXECUTE's do.
     return (
         WorkflowBuilder(
             name=WORKFLOW_NAME,
             start_executor=route,
-            output_from=[read_plan, ask_approval, ask_commit, report],
-            intermediate_output_from=[answer, execute, commit],
+            output_from=[read_plan, ask_approval, ask_commit, commit, report],
+            intermediate_output_from=[answer, execute],
         )
         .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=plan)])
         .add_edge(plan, read_plan)
