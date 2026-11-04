@@ -47,6 +47,15 @@ def _his_memory_is_never_the_real_one(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("STEWARD_AUTOMATIC_MEMORY", "off")
     monkeypatch.setattr(steward, "MEMORY_DIR", tmp_path / "agent-memory")
 
+
+@pytest.fixture(autouse=True)
+def _his_response_records_are_never_the_real_ones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted tests' response records go to a throwaway folder, never the repo's storage/responses
+    (hosted.steward_server reads _STORAGE_DIR when it builds the host)."""
+    import hosted
+
+    monkeypatch.setattr(hosted, "_STORAGE_DIR", tmp_path / "responses")
+
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
 for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
     os.environ.pop(_name, None)
@@ -953,6 +962,56 @@ def test_an_approved_shell_command_runs_through_the_hosted_workflow(monkeypatch:
     texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
     assert texts == ["Echoed."], texts
     assert "hi" in " ".join(str(m.text or "") + str([c.result for c in m.contents if c.type == "function_result"]) for m in calls[2]["messages"])
+
+
+def test_an_approved_shell_command_runs_through_the_hosted_workflow_with_automatic_memory_on(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Live 2026-11-03: with automatic memory on, as his service runs, every approved run_shell failed the hosted run:
+    the memory's transcript save could not encode MAF's shell text ("Encoding objects of type _ShellResultText is
+    unsupported"). His memory's history_message_filter (agent.plain_tool_results) saves it as plain text."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    monkeypatch.delenv("STEWARD_AUTOMATIC_MEMORY")
+    monkeypatch.setattr(steward, "MEMORY_DIR", tmp_path / "agent-memory")
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    plan = '{"type": "approval", "questions": [{"message": "Echo."}], "steps": ["Echo hi"]}'
+    shell = Content.from_function_call(call_id="s1", name="run_shell", arguments={"command": "echo hi"})
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "echoed"}]})
+    replies: list[Any] = [plan, shell, done, "Echoed."]
+    calls: list[Any] = []
+
+    class Remembering(ScriptedChatClient):
+        """His replies from the script; each memory extraction call answered "nothing to remember" beside it."""
+
+        def _inner_get_response(self, *, messages: Sequence[Message], **kwargs: Any) -> Any:
+            if messages and (messages[0].text or "").startswith("You extract durable"):
+                return ScriptedChatClient(['{"memories": []}'])._inner_get_response(messages=messages, **kwargs)
+            return super()._inner_get_response(messages=messages, **kwargs)
+
+    def fresh_client() -> ScriptedChatClient:
+        client = Remembering([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    names: list[str] = []
+    with TestClient(hosted.steward_server(client_factory=fresh_client)) as http:
+        turn = http.post("/responses", json={"input": "Echo hi.", "store": True}).json()
+        while cards := [o for o in turn["output"] if o["type"] == "mcp_approval_request"]:
+            names += [c["name"] for c in cards]
+            answers = [{"type": "mcp_approval_response", "approval_request_id": c["id"], "approve": True} for c in cards]
+            turn = http.post("/responses", json={"previous_response_id": turn["id"], "store": True, "input": answers}).json()
+    state.cleanup()
+    assert names == ["approve_plan", "run_shell"], names
+    assert turn["status"] == "completed", turn.get("error")
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == ["Echoed."], texts
+    saved = " ".join(p.read_text(encoding="utf-8") for p in (tmp_path / "agent-memory").rglob("*") if p.is_file())
+    assert "echo hi" in saved, "the approved command's turn is in his memory's transcript"
 
 
 def test_the_steps_eval_scores_each_workflow_step_by_its_own_evaluator() -> None:
