@@ -89,7 +89,7 @@ at 100 MB, newest kept), and a failed check prints its reason.
 
 Defined once (the guide's Part 4): `build_steward_agent` is the guide's harness agent, and
 `steward_workflow.build_steward(stack, **build)` builds it with the workflow below and returns
-`(agent, workflow)`. The Agent tab's service (`hosted.py`), `evals.py` (its default and `steps` runs) and the tests run
+`(agent, workflow)`. The Agent tab's service (`hosted.py`), `evals.py` (its default, `small`, `steps` and `memory` runs) and the tests run
 the workflow from that one builder; `test_every_host_builds_the_same_steward_workflow` checks that the service's
 graph is the builder's. `console_app.py` runs the same harness agent on
 its own, as the guide's console ships: a workflow's cards resume from checkpoints, which MAF's

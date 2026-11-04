@@ -562,28 +562,32 @@ def scored(check: Any, query: str, conversation: list[Any]) -> Any:
     return asyncio.run(check(item))
 
 
-def test_a_plan_that_does_not_name_the_work_fails_the_plan_eval() -> None:
-    """Run 15: a bug-fix plan that planned a new inventory.py passed; the plan must name the discount line's file and fix."""
+def test_a_plan_that_does_not_name_the_work_fails_the_plan_step_eval() -> None:
+    """Run 15: a bug-fix plan that planned a new inventory.py passed; the plan must name the discount line's file and
+    fix. Moved in step 5 (5.3) from the retired plan set's plan_before_act to the steps set's plan_step."""
+    import json
+
     import evals
 
-    query = evals.PLAN_BEFORE_ACT_QUERIES[1]
+    def run(steps: list[str], message: str) -> bool:
+        reply = '{"type": "approval", "questions": [{"message": "%s"}], "steps": %s}' % (message, json.dumps(steps))
+        return scored(evals.plan_step, evals.STEPS_QUERY, [Message(role="assistant", contents=[Content.from_text(reply)])]).passed
 
-    def run(todo: str, plan: str) -> bool:
-        add = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": todo}]})
-        reply = '{"type": "approval", "questions": [{"message": "%s"}]}' % plan
-        conversation = [Message(role="assistant", contents=[add]), Message(role="assistant", contents=[Content.from_text(reply)])]
-        return scored(evals.plan_before_act, query, conversation).passed
-
-    assert run("Add inventory.py re-exporting the functions", "Add a new file.") is False
-    assert run("Fix the discount in inventory.py", "Divide discount_percent by 100.") is True
+    assert run(["Add inventory.py re-exporting the functions"], "Add a new file.") is False
+    assert run(["Fix the discount in inventory.py"], "Divide discount_percent by 100.") is True
 
 
-def test_the_walkthrough_denies_a_commit_card_and_nothing_is_committed() -> None:
-    """The walkthrough's commit step: the card is answered Deny, so git_commit never runs and HEAD stays."""
+def test_the_small_asks_deny_a_commit_card_and_nothing_is_committed() -> None:
+    """A small ask's commit card is answered Deny (git_commit is never in the approved tools), so git_commit never runs,
+    HEAD stays and the run goes on; commit_by_tool and commit_message_specific read that card. Moved in step 5 (5.3)
+    from the retired walkthrough set's commit step."""
     import evals
+    from agent_framework import FileAccessProvider
 
-    commit = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": "checkpoint"})
+    message = "Add item_count to inventory.py"
+    commit = Content.from_function_call(call_id="c1", name="git_commit", arguments={"message": message})
     client = ScriptedChatClient([commit, "The commit was not approved."])
+    approve = set(FileAccessProvider._WRITE_TOOL_NAMES)  # what small_main approves
 
     async def _go() -> Any:
         async with AsyncExitStack() as stack:
@@ -594,17 +598,18 @@ def test_the_walkthrough_denies_a_commit_card_and_nothing_is_committed() -> None
                 modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
                 session = agent.create_session()
                 set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
-                return await evals._run_answering_cards(agent, session, evals.WALKTHROUGH_COMMIT, set())
+                return await evals._run_answering_cards(agent, session, evals.SMALL_ASK_NEW_CODE, approve)
 
-    head = evals._head()
-    evals.WALKTHROUGH_HEAD[0] = head
+    head = steward._git("rev-parse", "HEAD").stdout
     response = asyncio.run(_go())
     conversation = list(response.messages)
-    assert evals._cards(conversation) == ["git_commit"], "the commit asked for approval"
-    assert evals._head() == head, "the denied commit did not run"
+    assert [c.function_call.name for c in evals._cards_named(conversation, "git_commit")] == ["git_commit"], "the commit asked"
+    assert steward._git("rev-parse", "HEAD").stdout == head, "the denied commit did not run"
     assert len(client.calls) == 2, "the run continued after the Deny"
-    result = scored(evals.walkthrough, evals.WALKTHROUGH_COMMIT, conversation)
-    assert result.passed, result.reason
+    checks_passed = Message(role="assistant", contents=[Content.from_text("Checks passed:\n1 passed")])
+    for check in (evals.commit_by_tool, evals.commit_message_specific):
+        result = scored(check, evals.SMALL_ASK_NEW_CODE, [checks_passed, *conversation])
+        assert result.passed, result.reason
 
 
 def said(events: list[Any]) -> list[str]:
@@ -1636,6 +1641,52 @@ def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_p
     assert "Juniper" in texts(4), "a new conversation starts with what he learned"
     [index] = (tmp_path / "memory").rglob("MEMORY.md")
     assert "codename is Juniper" in index.read_text(encoding="utf-8")
+
+
+def test_the_memory_eval_recalls_in_a_new_conversation_what_the_first_one_saved() -> None:
+    """Step 5 (5.3): evals.py memory runs two requests through his workflow (run_steward), each a new conversation, on
+    one throwaway memory. What the first request's extraction saved is in front of him in the second, memory_recalled
+    scores the recall, and his real memory folders are untouched."""
+    import evals
+
+    class Remembering(ScriptedChatClient):
+        """His replies from the script; each extraction call (MAF's "durable memory" prompt) from its own list."""
+
+        def __init__(self, replies: list[Any], extractions: list[str]) -> None:
+            super().__init__(replies)
+            self.extractions = list(extractions)
+
+        def _inner_get_response(self, *, messages: Sequence[Message], **kwargs: Any) -> Any:
+            if "durable memory" in " ".join(m.text or "" for m in messages):
+                self.replies.insert(0, self.extractions.pop(0) if self.extractions else '{"memories": []}')
+            return super()._inner_get_response(messages=messages, **kwargs)
+
+    plan = '{"type": "approval", "questions": [{"message": "Note it."}], "steps": ["Note it"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "noted"}]})
+    fact = f"The sample project's next release is codenamed {evals.MEMORY_FACT}."
+    client = Remembering(
+        [plan, done, "Noted.", plan, done, f"It is {evals.MEMORY_FACT}."],
+        ['{"memories": [{"topic": "releases", "memory": "%s"}]}' % fact],
+    )
+    real = [steward._WORKING_DIR / name for name in ("agent-memory", "agent-file-memory", "storage")]
+
+    def listing() -> dict[Path, list[Path]]:
+        return {folder: sorted(folder.rglob("*")) if folder.exists() else [] for folder in real}
+
+    def text(call: dict[str, Any]) -> str:
+        return " ".join(m.text or "" for m in call["messages"])
+
+    before = listing()
+    _, responses = asyncio.run(evals.memory_runs(client=client, enable_shell=False))
+    assert evals.MEMORY_FACT not in evals.MEMORY_RECALL, "the recall request does not carry the fact itself"
+    recall = next(c for c in client.calls if evals.MEMORY_RECALL in text(c) and "durable memory" not in text(c))
+    assert evals.MEMORY_REMEMBER not in text(recall), "the second request is a new conversation"
+    assert evals.MEMORY_FACT in text(recall), "what the first request saved is in front of him in the second"
+    assert listing() == before, "his real memory folders are untouched"
+    assert scored(evals.memory_recalled, evals.MEMORY_RECALL, list(responses[1].messages)).passed
+    forgot = [Message(role="assistant", contents=[Content.from_text("I do not know the codename.")])]
+    assert not scored(evals.memory_recalled, evals.MEMORY_RECALL, forgot).passed
+    assert scored(evals.memory_recalled, evals.MEMORY_REMEMBER, forgot).passed, "not the recall case"
 
 
 def test_without_a_memory_store_nothing_is_extracted_and_hosts_pass_his_store() -> None:

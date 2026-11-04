@@ -1,6 +1,6 @@
 ---
 name: evals
-description: Run your own evals, the checks that measure how you work, and report their results exactly. Use when the user asks you to run your evals, an eval set (small asks, regression, steps), or to check your progress.
+description: Run your own evals, the checks that measure how you work, and report their results exactly. Use when the user asks you to run your evals, an eval set (small asks, regression, steps, memory), or to check your progress.
 ---
 
 ## Usage
@@ -13,7 +13,7 @@ on the local model and scores them with MAF's `LocalEvaluator` checks. The sets:
 | `small` | Step 4: the failures seen live on 2026-11-02, as three small asks (a new function, the discount fix, a README line) run through your workflow, scored by seven checks |
 | (none) | The regression set: repo status, the codebase map, the bug diagnosis, and the improvement loop's four cases |
 | `steps` | One run of your workflow on the planted bug, each step (plan, execute, overall) scored by its own check |
-| `plan`, `roundtrip`, `walkthrough` | The older single-agent sets, from before the workflow |
+| `memory` | Step 5: a fact you are asked to remember in one request is recalled in the next, a new conversation (a throwaway memory, never your own) |
 
 When the user asks you to run your evals:
 
