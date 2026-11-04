@@ -283,7 +283,7 @@ def test_file_read_runs_without_approval_when_attended() -> None:
     assert any("def order_total" in r for r in function_results(client.calls[1]))
 
 
-def test_env_is_never_read_searched_or_listed(tmp_path: Path) -> None:
+def test_env_is_never_read_searched_or_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Piece 1: the store keeps .env out, so a read that runs without a card never reaches a key."""
     (tmp_path / ".env").write_text("SECONDBRAIN_MCP_KEY=planted-secret\n")
     (tmp_path / "a.txt").write_text("hello\n")
@@ -300,6 +300,12 @@ def test_env_is_never_read_searched_or_listed(tmp_path: Path) -> None:
 
     refused, hits, names = asyncio.run(_go())
     assert refused and not hits and names == ["a.txt"]
+    # The background CodeExplorer's own tools keep it out too (audit 2026-11-04: they had no check).
+    monkeypatch.setattr(steward, "_WORKING_DIR", tmp_path.resolve())
+    with pytest.raises(ValueError, match="never read"):
+        steward.read_file(".env")
+    assert "planted-secret" not in steward.search_code("planted-secret")
+    assert steward.list_files(".") == "a.txt"
     # Through Steward's own tool, in an attended run: no card, and no key.
     read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": ".env"})
     client, _, response = run_steward([read, "Refused."], "Read .env.")
