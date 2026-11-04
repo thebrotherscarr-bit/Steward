@@ -1637,6 +1637,8 @@ def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_p
         return " ".join(m.text or "" for m in client.calls[call]["messages"])
 
     assert "durable memory" in texts(1), "after a turn, the extraction call on his own client"
+    assert client.calls[1]["messages"][0].text == steward.MEMORY_EXTRACTION_PROMPT, "with his extraction rules"
+    assert "harness's own messages" in steward.MEMORY_EXTRACTION_PROMPT and "the assistant itself" in steward.MEMORY_EXTRACTION_PROMPT
     assert "The release codename is Juniper." in texts(2) and "Noted." in texts(2), "his history within a conversation"
     assert "Juniper" in texts(4), "a new conversation starts with what he learned"
     [index] = (tmp_path / "memory").rglob("MEMORY.md")

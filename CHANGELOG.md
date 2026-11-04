@@ -15,6 +15,14 @@ was never merged and has no entry.
 
 ### Fixed
 
+- Step 5: his automatic memory saves facts, not the harness's chatter. The first live recall (2026-11-03) saved six
+  memories with MAF's default extraction prompt; only one was a fact. Extraction reads each run's input, which in his
+  workflow's later steps is the harness's own text ("The user approved your plan", todo reminders, plan cards), so it
+  was taken as the user's words, and one memory was wrong ("The assistant's name is Juniper"). MAF's
+  `extraction_prompt` now carries his rules (`MEMORY_EXTRACTION_PROMPT`, the cookbook's: only facts the user states;
+  never about the assistant, never the harness's messages, tasks, plans or answers), built once in `steward_memory()`.
+  The five junk topics moved to `agent-file-memory/attic/2026-11-03-memory-extraction-junk`.
+  `test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next` checks the rules are sent.
 - A request hint requires only the work's tools, never `load_skill`. In his workflow he reads a skill while
   planning and the work is checked in the execute step's own session, so the required-tools check read the skill
   as never loaded and sent him back: live 2026-11-02 he ran the whole eval set twice, and the nudge's text leaked
