@@ -105,6 +105,10 @@ was never merged and has no entry.
 
 ### Added
 
+- The `estate` skill: the map of Kyle's estate, Neiro (Manjuel, SecondBrain/Jesster, Atlas/Aurora, Ollama and
+  Steward): what each part is, how it connects to him (Responses on 43120, MCP on 43121, SecondBrain's MCP on 43110,
+  the door on 43111), who starts what, his own records, and his reach (his repository only, for now). The Charter
+  (v4.3) names the parts and points to it.
 - Data for SecondBrain's shelves. Every eval set appends one JSON line to `storage/evals/history.jsonl` (newest 500
   kept; a failed write is only a warning; the report and exit code are unchanged). The live build writes
   `storage/tool-policy.json`: each tool's approval (always, never, or a rule, named) read off the built agent and its
