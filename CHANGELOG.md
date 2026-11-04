@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A stale Ollama runner recovers by itself. When both malformed-call retries fail, Steward unloads the model once
+  (`keep_alive` 0) and asks again on a fresh runner, at most once per 10 minutes per process. Measured 2026-11-04: a
+  runner past 141,000 tasks wrote garbage into tool calls and failed a whole eval; a fresh one on the same settings
+  made 20 of 20 valid calls.
 - Evals never reach the owner's door (live 2026-11-04: the eval's Steward committed through the door and parked a real
   card in his window). An eval's Steward is built with `eval_build=True`: no Atlas door tool, no `pr_checks`, no note
   write; note reads, the Charter, skills and the web stay.

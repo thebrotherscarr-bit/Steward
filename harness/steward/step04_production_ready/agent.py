@@ -51,6 +51,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tokenize
 import unicodedata
 import uuid
@@ -1652,6 +1653,23 @@ TOOL_CALLS: dict[str, Any] = {
 # "error parsing tool call" comes from that iteration unwrapped (agent_framework_ollama/_chat_client.py:398; only the
 # opening call is wrapped, :393). A try/except around call_next never sees it, so the retry stays on the Ollama client.
 _TOOL_CALL_RETRIES = 2
+# Measured 2026-11-04: a long-lived Ollama runner (141,000+ tasks) returned garbage tool calls (raw='{"id": 3???????}')
+# and "error parsing tool call" stormed through a whole eval, while a fresh runner on the same settings gave 20/20 valid
+# calls. So when the retries are spent, the model is unloaded once (keep_alive 0 on a generate with no prompt, ollama
+# AsyncClient.generate, ollama/_client.py:732-776) and the call asked once more, which starts a fresh runner. At most one
+# unload per _RUNNER_UNLOAD_WINDOW_SECONDS per process, so a model that truly cannot write the call never thrashes.
+_RUNNER_UNLOAD_WINDOW_SECONDS = 600.0
+_RUNNER_UNLOADED_AT: float | None = None  # time.monotonic() of this process's last unload
+
+
+def _may_unload_runner() -> bool:
+    """Claim this process's one unload in the window: True (and the window starts now) when none was made in it."""
+    global _RUNNER_UNLOADED_AT
+    now = time.monotonic()
+    if _RUNNER_UNLOADED_AT is not None and now - _RUNNER_UNLOADED_AT < _RUNNER_UNLOAD_WINDOW_SECONDS:
+        return False
+    _RUNNER_UNLOADED_AT = now
+    return True
 
 
 def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
@@ -1660,6 +1678,7 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
     gpt-oss sometimes emits invalid JSON for a tool call that carries code; Ollama then raises
     "error parsing tool call" mid-stream and the whole turn dies. The model samples again on a
     retry, so the same request is re-asked (without streaming) up to _TOOL_CALL_RETRIES times.
+    When those fail too, the runner may be stale: the model is unloaded and asked once more.
     """
     from ollama import ResponseError
 
@@ -1675,7 +1694,18 @@ def _retry_malformed_tool_calls(client: OllamaChatClient) -> OllamaChatClient:
                 if "error parsing tool call" not in str(exc):
                     raise
                 error = exc
-        raise error
+        if not _may_unload_runner():
+            raise error
+        model = kwargs.get("model") or client.model  # MAF puts the model in the call's options (_chat_client.py:477-480)
+        logger.warning(
+            "Ollama's runner looks stale after repeated malformed tool calls; unloading %s for a fresh runner.", model
+        )
+        try:
+            await client.client.generate(model=model, keep_alive=0)
+        except Exception as exc:  # noqa: BLE001 - an unload that fails leaves the parse error as the run's error
+            logger.warning("Unloading %s failed (%s); giving up on the malformed tool call.", model, type(exc).__name__)
+            raise error from exc
+        return await chat(**{**kwargs, "stream": False})
 
     async def chat_with_retry(*args: Any, **kwargs: Any) -> Any:
         if not kwargs.get("stream"):
