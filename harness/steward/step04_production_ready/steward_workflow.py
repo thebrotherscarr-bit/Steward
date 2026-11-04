@@ -6,12 +6,17 @@ are such stages, so their order is the graph's, not the model's choice.
 
 Pieces 1 to 4 of the build order:
 
-    request -> plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
+    request -> route (one structured-output call: Route) -> (answer) answer (AgentExecutor, plain words; plan mode,
+            so reads run and writes are refused) | (task, or no Route: Default) plan
+    plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
             -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
             -> (failed, attempts left) repair -> execute -> check ...
             -> (passed on changed code) ask_commit ("Checks passed") -> commit (his git_commit, on the user's card)
             -> (nothing changed, or attempts spent) report
 
+* ROUTE comes first (live 2026-11-03: a question came back as an approval card, "No further action needed"). Learn,
+  Workflows > Edges, switch-case (python pivot): a classifier with structured output gives a typed message and
+  add_switch_case_edge_group routes it, with a Default branch. One short call on Steward's own client.
 * PLAN and EXECUTE are MAF AgentExecutors, so evaluate_workflow can score each step ("Ensure the workflow uses
   AgentExecutor-based agents", agent_framework/_evaluation.py). Each keeps its own session, which MAF saves in
   the workflow's checkpoint at the pause and restores on the answer.
@@ -49,7 +54,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agent_framework import (
     Agent,
@@ -58,7 +63,9 @@ from agent_framework import (
     AgentExecutorRequest,
     AgentExecutorResponse,
     AgentModeProvider,
+    Case,
     Content,
+    Default,
     Executor,
     FileAccessProvider,
     Message,
@@ -72,16 +79,19 @@ from agent_framework import (
     response_handler,
     set_agent_mode,
 )
+from agent_framework._workflows._message_utils import normalize_messages_input
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
-from hosted import planning_response_in, plan_mode_turns  # noqa: E402
+from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 
 # A fixed name: the host checks a reply's rebuilt graph against the stored one by name and signature.
 WORKFLOW_NAME = "steward"
+ROUTE_STEP = "route"
+ANSWER_STEP = "answer"
 PLAN_STEP = "plan"
 READ_PLAN_STEP = "read_plan"
 ASK_APPROVAL_STEP = "ask_approval"
@@ -124,6 +134,68 @@ PLAN_IS_APPROVAL = (
     "question, and your steps. If you need an answer first, reply with a clarification whose question lists the "
     "choices."
 )
+# The router's one instruction, and the line the answer step is given with a question: short, since the graph routes.
+ROUTE_PROMPT = (
+    'Classify the user\'s request. "answer": a question to answer in words, reading files at most. "task": it asks '
+    "to change, create, run, fix, commit or send something."
+)
+ANSWER_IN_WORDS = "Answer this question in plain words. Read what you need; change nothing; no plan."
+
+
+class Route(BaseModel):
+    """The router's structured output: the classifier's typed result the switch-case edge group routes on."""
+
+    kind: Literal["answer", "task"]
+
+
+@dataclass
+class RoutedRequest(AgentExecutorRequest):
+    """The request with its route, as the AgentExecutorRequest both branches take. kind is None when the router's
+    reply was no Route, which falls to the Default branch (the plan)."""
+
+    kind: str | None = None
+
+
+def routed_to_answer(request: Any) -> bool:
+    """The switch-case's one Case: the router said this is a question to answer in words."""
+    return isinstance(request, RoutedRequest) and request.kind == "answer"
+
+
+class Router(Executor):
+    """The classifier before the plan (Learn, Workflows > Edges, switch-case; _workflow_builder.py
+    add_switch_case_edge_group): one call on Steward's own client with Route as response_format. Its input handlers
+    are AgentExecutor's own (str, Message, list[Message]), so every host starts the graph as it started PLAN."""
+
+    def __init__(self, client: Any, options: dict[str, Any], id: str = ROUTE_STEP) -> None:
+        super().__init__(id=id)
+        self._client = client
+        self._options = options
+
+    @handler
+    async def from_str(self, text: str, ctx: WorkflowContext[RoutedRequest]) -> None:
+        await self._route(normalize_messages_input(text), ctx)
+
+    @handler
+    async def from_message(self, message: Message, ctx: WorkflowContext[RoutedRequest]) -> None:
+        await self._route(normalize_messages_input(message), ctx)
+
+    @handler
+    async def from_messages(self, messages: list[str | Message], ctx: WorkflowContext[RoutedRequest]) -> None:
+        await self._route(normalize_messages_input(messages), ctx)
+
+    async def _route(self, messages: list[Message], ctx: WorkflowContext[RoutedRequest]) -> None:
+        request = next((m.text for m in reversed(messages) if m.role == "user" and (m.text or "").strip()), "")
+        reply = await self._client.get_response(
+            [Message(role="system", contents=[Content.from_text(ROUTE_PROMPT)]), Message(role="user", contents=[Content.from_text(request)])],
+            options={**self._options, "response_format": Route},
+        )
+        try:
+            kind: str | None = Route.model_validate_json((reply.text or "").strip()).kind
+        except ValueError:
+            kind = None  # no Route: the Default branch, the plan as before
+        if kind == "answer":
+            messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
+        await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
 
 
 class StewardPlan(PlanningResponse):
@@ -456,8 +528,10 @@ def checks_text(report: CheckReport) -> str:
 
 
 def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_changes) -> Workflow:
-    """The graph over one build_steward_agent Steward: plan, read_plan, ask_approval, execute, check, repair, then
-    ask_commit and commit when the checks passed on changed code, else report."""
+    """The graph over one build_steward_agent Steward: route, then answer, or plan, read_plan, ask_approval, execute,
+    check, repair, then ask_commit and commit when the checks passed on changed code, else report."""
+    from agent import OLLAMA_OPTIONS  # noqa: PLC0415
+
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
     agent.middleware = [
@@ -465,6 +539,13 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
         plan_mode_turns(modes, response_format=StewardPlan),
         *(agent.middleware or []),
     ]
+    # His own window and keep-alive on the router's call, so Ollama answers it with the model as loaded.
+    route = Router(agent.client, {k: v for k, v in (agent.default_options or {}).items() if k in OLLAMA_OPTIONS})
+    # The answer step's own session says it answers in words: plan_mode_turns asks it for no StewardPlan. The session,
+    # with its state, is in the workflow's checkpoint (AgentExecutor.on_checkpoint_save).
+    answer_session = agent.create_session()
+    answer_session.state[IN_WORDS_KEY] = True
+    answer = AgentExecutor(agent, session=answer_session, id=ANSWER_STEP)
     plan = AgentExecutor(agent, id=PLAN_STEP)
     read_plan = ReadPlan()
     ask_approval = AskApproval()
@@ -477,14 +558,15 @@ def build_steward_workflow(agent: Agent[Any], checks: Checks = python_tests_for_
     # The run's output is the steps' own (a reply, a clarification, a refusal, the report). EXECUTE's and COMMIT's work
     # streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and the Responses
     # host both forward it), so every host shows his work as it happens; PLAN's streamed text is the plan's raw JSON,
-    # which the card shows, so it stays hidden.
+    # which the card shows, so it stays hidden. ANSWER's words stream as EXECUTE's do.
     return (
         WorkflowBuilder(
             name=WORKFLOW_NAME,
-            start_executor=plan,
+            start_executor=route,
             output_from=[read_plan, ask_approval, ask_commit, report],
-            intermediate_output_from=[execute, commit],
+            intermediate_output_from=[answer, execute, commit],
         )
+        .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=plan)])
         .add_edge(plan, read_plan)
         .add_edge(read_plan, plan)  # an empty plan reply, asked again once
         .add_edge(read_plan, ask_approval)

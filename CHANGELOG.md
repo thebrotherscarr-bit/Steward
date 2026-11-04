@@ -57,6 +57,10 @@ was never merged and has no entry.
 
 ### Added
 
+- His workflow routes before it plans (live 2026-11-03: a plain question came back as an approval card, "No further
+  action needed"). A classifier step, `route`, makes one structured-output call (`Route`, answer or task) and MAF's
+  switch-case edge group sends a question to `answer`, which replies in words with reads only, and a task, or an
+  unclear route (`Default`), to the plan card as before (Learn, Workflows > Edges, switch-case).
 - Every eval set exits 1 when a case fails (MAF's `EvalResults.all_passed`, `evals.exit_code`); `small --gate` keeps
   its baseline gate. The evals skill says an exit code of 1 is the result, not a broken run.
 - DevUI serves Steward's workflow beside the agent, with its approval cards and a checkpoint per conversation; a test

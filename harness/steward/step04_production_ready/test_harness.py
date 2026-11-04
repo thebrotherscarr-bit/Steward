@@ -67,18 +67,29 @@ SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "eval
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
-    """MAF's MockBaseChatClient composition, replying from a script: text, or one function call."""
+    """MAF's MockBaseChatClient composition, replying from a script: text, or one function call.
 
-    def __init__(self, replies: list[Any] | None = None) -> None:
+    The workflow's router call (response_format Route) is answered from its own script, ``routes`` ({"kind": "task"}
+    when it runs out), and recorded in ``route_calls``, so a script and its call count stay Steward's own steps."""
+
+    def __init__(self, replies: list[Any] | None = None, routes: list[str] | None = None) -> None:
         super().__init__(middleware=[])
         self.replies = list(replies or [])
         self.calls: list[dict[str, Any]] = []
+        self.routes = list(routes or [])
+        self.route_calls: list[dict[str, Any]] = []
 
     def _inner_get_response(
         self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
-        self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
-        reply = self.replies.pop(0) if self.replies else "done"
+        import steward_workflow as wf
+
+        if options.get("response_format") is wf.Route:
+            self.route_calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
+            reply = self.routes.pop(0) if self.routes else '{"kind": "task"}'
+        else:
+            self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
+            reply = self.replies.pop(0) if self.replies else "done"
         content = reply if isinstance(reply, Content) else Content.from_text(reply)
         if stream:
             # As MockBaseChatClient._get_streaming_response: the reply as one update, finalized from updates.
@@ -719,6 +730,49 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
     assert question["outputs"] == ["Which file? (a.py / b.py)"] and len(question["calls"]) == 1, "a real clarification ends the run"
 
 
+QUESTION = "What does order_total do in harness/steward/working/sample-project?"
+ANSWERED = "order_total adds up each item's price times its quantity."
+
+
+def test_a_question_is_answered_in_words_and_a_task_or_an_unclear_route_is_planned() -> None:
+    """Live 2026-11-03: a plain question came back as an approval card ("No further action needed"), because every
+    request entered PLAN with StewardPlan as its format. ROUTE classifies first (one call on his client, Route as its
+    format); MAF's switch-case edge group sends a question to ANSWER, which replies in words (plan mode: reads run,
+    writes are refused), and a task, or a reply that is no Route (Default), to PLAN as before."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix the discount line"]}'
+    write = Content.from_function_call(
+        call_id="w1", name="file_access_write", arguments={"file_name": "test_harness_answer_probe.txt", "content": "x"}
+    )
+
+    def run(route: str, replies: list[Any]) -> tuple[ScriptedChatClient, list[Any]]:
+        client = ScriptedChatClient(replies, routes=[route])
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent).run(QUESTION, stream=True)]
+
+        return client, asyncio.run(_go())
+
+    client, events = run('{"kind": "answer"}', [write, ANSWERED])
+    [routed] = client.route_calls
+    assert routed["options"]["response_format"] is wf.Route and QUESTION in " ".join(m.text or "" for m in routed["messages"])
+    assert routed["options"].get("num_ctx") == steward.OLLAMA_OPTIONS["num_ctx"], "the router asks for his own window"
+    assert said(events) == [ANSWERED], said(events)
+    assert not [e for e in events if e.type == "request_info"], "a question asks no approve_plan card"
+    assert [c["options"].get("response_format") for c in client.calls] == [None, None], "ANSWER is asked for no plan"
+    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1])), "and writes nothing"
+    assert not (steward._WORKING_DIR / "test_harness_answer_probe.txt").exists()
+
+    for route in ('{"kind": "task"}', "It is a question."):  # a task, and a reply that is no Route (Default)
+        client, events = run(route, [plan])
+        assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], route
+        assert client.calls[0]["options"].get("response_format") is wf.StewardPlan, route
+
+
 def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_they_pass_or_attempts_run_out() -> None:
     """Piece 4: CHECK runs after EXECUTE, model-free. Failing with attempts left, REPAIR hands EXECUTE the output in
     its own session; passing, REPORT gives his answer with the result; after MAX_ATTEMPTS, REPORT says they still
@@ -926,6 +980,36 @@ def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(mo
     # The host's tool-only identity never reaches the model call: Ollama's chat() refuses an unknown keyword.
     assert not any("additional_function_arguments" in c["kwargs"] for c in calls), "the host's identity reached the model"
     state.cleanup()
+
+
+def test_the_hosted_workflow_answers_a_question_as_a_message_with_no_card(monkeypatch: Any) -> None:
+    """Live 2026-11-03, on the Agent tab: a plain question is routed to ANSWER and comes back as his message, with no
+    approve_plan card (mcp_approval_request), whatever response_format the tab sends."""
+    import tempfile
+
+    import hosted
+    from starlette.testclient import TestClient
+
+    state = tempfile.TemporaryDirectory(prefix="as")
+    monkeypatch.setenv("AGENTSERVER_STATE_ROOT", state.name)
+    replies: list[Any] = [ANSWERED]
+    routes: list[str] = ['{"kind": "answer"}']
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls, client.routes = replies, calls, routes
+        return client
+
+    with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
+        tab = {"store": True, "response_format": {"type": "object"}}
+        turn = http.post("/responses", json={"input": QUESTION, **tab}).json()
+    state.cleanup()
+    assert turn["status"] == "completed", turn.get("error")
+    assert not [o for o in turn["output"] if o["type"] == "mcp_approval_request"], "a question got a card"
+    texts = [c["text"] for o in turn["output"] if o["type"] == "message" for c in o["content"]]
+    assert texts == [ANSWERED], turn["output"]
+    assert not routes and [c["options"].get("response_format") for c in calls] == [None], "routed, then answered in words"
 
 
 def test_an_approved_shell_command_runs_through_the_hosted_workflow(monkeypatch: Any) -> None:
@@ -1329,8 +1413,9 @@ def test_devui_shows_stewards_runs_and_traces() -> None:
 
 
 def test_stewards_workflow_graph_loops_back_to_plan_and_from_repair_to_execute() -> None:
-    """MAF's WorkflowViz draws the graph DevUI shows: an empty or mislabelled plan goes back to PLAN once, and a failed
-    check goes through REPAIR back to EXECUTE (the two loops; agent_framework/_workflows/_viz.py, to_mermaid)."""
+    """MAF's WorkflowViz draws the graph DevUI shows: ROUTE starts it and goes to ANSWER or PLAN, an empty or
+    mislabelled plan goes back to PLAN once, and a failed check goes through REPAIR back to EXECUTE (the two loops;
+    agent_framework/_workflows/_viz.py, to_mermaid)."""
     import steward_workflow as wf
     from agent_framework import WorkflowViz
 
@@ -1340,6 +1425,8 @@ def test_stewards_workflow_graph_loops_back_to_plan_and_from_repair_to_execute()
             return WorkflowViz(workflow).to_mermaid()
 
     lines = {line.strip() for line in asyncio.run(_go()).splitlines()}
+    assert f'{wf.ROUTE_STEP}["{wf.ROUTE_STEP} (Start)"];' in lines, "the router is not the start"
+    assert {f"{wf.ROUTE_STEP} --> {wf.ANSWER_STEP};", f"{wf.ROUTE_STEP} --> {wf.PLAN_STEP};"} <= lines, "route: answer | plan"
     assert f"{wf.READ_PLAN_STEP} --> {wf.PLAN_STEP};" in lines, "read_plan does not loop back to plan"
     assert f"{wf.CHECK_STEP} -. conditional .-> {wf.REPAIR_STEP};" in lines, "a failed check does not go to repair"
     assert f"{wf.REPAIR_STEP} --> {wf.EXECUTE_STEP};" in lines, "repair does not loop back to execute"

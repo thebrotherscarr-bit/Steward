@@ -72,6 +72,8 @@ AGENT_MODE_KEY = "agent_mode"
 IMPROVE_KEY = "steward_workflow"
 IMPROVE = "improve"
 PLAN_MODE = "plan"
+# A session whose state holds this answers in words: plan_mode_turns asks it for no plan (the workflow's answer step).
+IN_WORDS_KEY = "steward_answers_in_words"
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
 # The host's own state (the workflow's checkpoints, sessions, approvals) defaults to ~/.agentserver
@@ -204,7 +206,8 @@ def plan_mode_turns(
         if context.session is not None:
             if switch_to:
                 set_agent_mode(context.session, str(switch_to), **modes)
-            if get_agent_mode(context.session, default_mode=mode_provider.default_mode, **modes) == PLAN_MODE:
+            in_words = context.session.state.get(IN_WORDS_KEY, False)
+            if not in_words and get_agent_mode(context.session, default_mode=mode_provider.default_mode, **modes) == PLAN_MODE:
                 options["response_format"] = response_format
         context.options = options
         await call_next()
@@ -432,9 +435,10 @@ def steward_server(
         parse_response=steward_turn,
         prepare_options=steward_options,
         response_store=FileResponseStore(_STORAGE_DIR),
-        # The plan's structured output (PLAN's response) and a check's report (CHECK -> REPAIR | REPORT) are in the
-        # checkpoint; MAF's decoder admits named types only.
+        # The routed request (ROUTE -> ANSWER | PLAN), the plan's structured output (PLAN's response) and a check's
+        # report (CHECK -> REPAIR | REPORT) are in the checkpoint; MAF's decoder admits named types only.
         checkpoint_store_provider=CheckpointStoreProvider(allowed_checkpoint_types=[
+            "steward_workflow:RoutedRequest",
             "steward_workflow:StewardPlan",
             "steward_workflow:CheckReport",
             # An approved run_shell's result (agent._shell_text_copies: the text is rebuilt from its ShellResult).

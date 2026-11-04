@@ -167,10 +167,13 @@ async def generate_traces(questions: list[str]) -> tuple[list[TraceRecord], dict
 
 
 def serialize_agent_config(steward: Any) -> dict[str, Any]:
-    """The harness that ran, for HALO's config span: his workflow's steps and the agent its steps run (the start
-    step's), with its instructions, model, tools and providers, and the approvals the runs were given."""
+    """The harness that ran, for HALO's config span: his workflow's steps and the agent its steps run (its first
+    AgentExecutor's; the start step is the router), with its instructions, model, tools and providers, and the
+    approvals the runs were given."""
+    from agent_framework import AgentExecutor
+
     workflow = steward.workflow
-    agent = workflow.get_start_executor().agent
+    agent = next(e.agent for e in workflow.get_executors_list() if isinstance(e, AgentExecutor))
     revision = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=_REPO_DIR, capture_output=True, text=True)
     tools = [getattr(t, "name", type(t).__name__) for t in (agent.default_options or {}).get("tools", [])]
     return {
