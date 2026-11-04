@@ -35,6 +35,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The answer given twice in a non-streaming run (the MCP door). After #93 the Agent tab showed it once, but MAF's
+  loop returns a non-streaming run as one combined response (`_aggregate_response`: every pass plus the injected
+  nudges), so the text carried the answer, the open-todo reminder and the answer again. `answer_once`, outside the
+  loop, drops the loop's own user messages and the text of a passage after a nudge that repeats what is already given
+  (`repeats_what_was_shown`, moved from hosted.py to agent.py so both share it); his tool calls stay. Test:
+  `test_a_non_streaming_answer_after_the_todo_nudge_is_given_once`.
 - A read routed to the plan (live 2026-11-04 13:41, "What is the estate status right now? Read it with
   estate_status and list each service with up or down."): the router's model called it a task, so it got a plan card
   and todos. `ROUTE_PROMPT` now counts read-only tools, status, logs, history, "what is", "show", "list" and "how

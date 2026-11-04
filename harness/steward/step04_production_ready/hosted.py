@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
-import difflib
 import json
 import logging
 import os
@@ -73,7 +72,7 @@ from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent, steward_memory_store  # noqa: E402
+from agent import build_steward_agent, repeats_what_was_shown, steward_memory_store  # noqa: E402
 from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import HALO_TRACE_PATH, setup_halo_tracing  # noqa: E402
 
@@ -359,19 +358,8 @@ async def _only_his_own_words(context: AgentContext, call_next: Callable[[], Awa
     context.result = ResponseStream(his_own(), finalizer=lambda _: inner.get_final_response())
 
 
-# A passage after a nudge is a repeat when at least this share of it is runs of at least this many characters
-# already shown (whitespace collapsed). Live 2026-11-04: the repeated table was most of the second passage.
-_REPEAT_SHARE = 0.5
-_REPEAT_MIN_RUN = 20
-
-
-def repeats_what_was_shown(shown: str, words: str) -> bool:
-    """Whether ``words`` (his passage after a loop nudge) mostly repeats ``shown`` (what the tab already shows)."""
-    new, old = " ".join(words.split()), " ".join(shown.split())
-    if not new or not old:
-        return False
-    blocks = difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks()
-    return sum(b.size for b in blocks if b.size >= _REPEAT_MIN_RUN) >= _REPEAT_SHARE * len(new)
+# repeats_what_was_shown lives in agent.py since 2026-11-04, so a non-streaming run's combined response keeps the
+# same rule (agent.answer_once); it is imported above under its own name.
 
 
 async def steward_turn(request: HostedResponseRequest) -> WorkflowTurn[Any]:
