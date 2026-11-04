@@ -34,6 +34,21 @@ was never merged and has no entry.
 
 ### Added
 
+- Step 5, pieces 5.1 and 5.2: memory across conversations, MAF's way. MAF's `MemoryContextProvider` sits beside his
+  history (not in its place: as the history provider it drops the conversation's own messages, tested 2026-11-03).
+  After each turn one call on his own model extracts at most five durable facts into topic files under a `MEMORY.md`
+  index; before each turn the index and the three best-matching topics are in front of him; transcripts are kept and
+  topics consolidated over time. Store: `steward_memory_store()` (MAF's `MemoryFileStore` under `agent-memory/`, one
+  owner "steward", set on every session by the `memory_owner` middleware). Hosts pass it (the Agent tab's service,
+  the improvement loop, the MCP door, the console, DevUI); evals pass a throwaway one (`isolated_memory_store`); the
+  harness tests turn the default off (`STEWARD_AUTOMATIC_MEMORY=off`). His MCP door keeps each session in MAF's
+  `FileSessionStore` (`storage/mcp-sessions`), so Manjuel's sessions survive a restart. His file memory now lives
+  under his workspace, not the host's working folder (that made a second memory root). The unused Mem0 path and the
+  `memory` extra are removed; old per-session memory and the Mem0 store moved to
+  `agent-file-memory/attic/2026-11-03-old-session-memory` (329 empty folders deleted). The response store has no
+  expiry option, so it is left as it is. `test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next`,
+  `test_without_a_memory_store_nothing_is_extracted_and_hosts_pass_his_store`,
+  `test_the_mcp_doors_sessions_are_kept_on_disk`.
 - Step 4, piece 4.1: Microsoft Agent Framework 1.24.0 (from 1.23.0; ollama, tools, monty, foundry-hosting and
   devui 1.0.0b261030, foundry 1.16.0), upgraded together. `pyproject.toml` now pins every package the hosts import,
   the MAF packages exactly, the rest at the versions the suite passed on; Mem0 and Presidio are the `memory` and

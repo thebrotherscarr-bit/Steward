@@ -31,12 +31,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Opt-in features, imported only when turned on (agent.py): automatic memory (Mem0 on Ollama) and the
-# Presidio screen (PRESIDIO_ENTITIES; it also needs a spaCy English model).
-memory = [
-    "agent-framework-mem0==1.0.0b261030",
-    "mem0ai==2.2.1",
-]
+# Opt-in: the Presidio screen, imported only when turned on (PRESIDIO_ENTITIES; it also needs a spaCy English
+# model). Automatic memory is MAF core's own MemoryContextProvider (step 5), so it needs no extra.
 governance = [
     "presidio-analyzer==2.2.366",
 ]

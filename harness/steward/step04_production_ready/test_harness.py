@@ -37,6 +37,15 @@ from agent_framework.observability import ChatTelemetryLayer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent as steward  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _his_memory_is_never_the_real_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 5: hosts pass steward_memory_store(); in the tests its default store is off (an extraction call would take
+    a scripted reply), and in any case it would never be his real memory folder."""
+    monkeypatch.setenv("STEWARD_AUTOMATIC_MEMORY", "off")
+    monkeypatch.setattr(steward, "MEMORY_DIR", tmp_path / "agent-memory")
 
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
 for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
@@ -1080,12 +1089,14 @@ def test_devui_shows_stewards_runs_and_traces() -> None:
     assert "response.trace.completed" in events and "invoke_agent Steward" in events, "and so does its trace"
 
 
-def test_mcp_hosting_serves_steward_as_one_tool() -> None:
+def test_mcp_hosting_serves_steward_as_one_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ADR-0001 item 10: mcp_app.py serves Steward as one MCP tool; a reused session_id continues his conversation."""
     from agent_framework import InMemoryHistoryProvider
     from starlette.testclient import TestClient
 
     import mcp_app
+
+    monkeypatch.setattr(mcp_app, "MCP_SESSIONS_DIR", tmp_path / "mcp-sessions")  # step 5: never the real sessions
 
     stack = AsyncExitStack()
     client = ScriptedChatClient(["First answer.", "Second answer."])
@@ -1253,18 +1264,21 @@ def test_the_small_asks_check_each_of_todays_failures() -> None:
 def test_an_eval_run_never_touches_stewards_real_memory() -> None:
     """Live 2026-11-02: eval runs saved plans into his real memory (agent-file-memory/steward) and a later run's commit
     message described them. run_steward gives each run a throwaway memory store, so a memory written in an eval stays
-    out of the folder every real session reads."""
+    out of the folder every real session reads. Step 5: his automatic memory is a throwaway store in an eval too."""
     import evals
 
-    real = Path.cwd() / "agent-file-memory" / "steward" / "eval-leak-check.md"
+    real = steward._WORKING_DIR / "agent-file-memory" / "steward" / "eval-leak-check.md"
     write = Content.from_function_call(
         call_id="m1", name="file_memory_write", arguments={"file_name": "eval-leak-check.md", "content": "leak"}
     )
     client = ScriptedChatClient([write, "Saved."])
     try:
         asyncio.run(evals.run_steward("Remember the word leak.", set(), client=client, enable_shell=False))
-        assert len(client.calls) == 2, "the memory write ran"
+        his_calls = [c for c in client.calls if "durable memory" not in " ".join(m.text or "" for m in c["messages"])]
+        assert len(his_calls) == 2, "the memory write ran"
+        assert len(client.calls) > len(his_calls), "his automatic memory ran in the eval, on its throwaway store"
         assert not real.exists(), "an eval's memory write must not reach his real memory"
+        assert not steward.MEMORY_DIR.exists(), "nor his real automatic memory"
     finally:
         real.unlink(missing_ok=True)
         real.with_name("eval-leak-check_description.md").unlink(missing_ok=True)
@@ -1588,3 +1602,92 @@ def test_reading_a_skill_asks_no_card_and_running_its_script_still_does() -> Non
     client, _, response = run_steward([script], "Map the codebase.", mode="execute")
     assert [r.function_call.name for r in approval_requests(response)] == ["run_skill_script"]
     assert len(client.calls) == 1, "nothing ran before the approval"
+
+
+def test_what_he_learns_in_one_conversation_is_in_front_of_him_in_the_next(tmp_path: Path) -> None:
+    """Step 5 (5.1): MAF's MemoryContextProvider beside his history. After a turn, one call on his own client extracts
+    a durable fact; a new conversation starts with it in front of him; within a conversation his history is intact."""
+    client = ScriptedChatClient([
+        "Noted.",
+        '{"memories": [{"topic": "releases", "memory": "The release codename is Juniper."}]}',
+        "You told me the codename.",
+        '{"memories": []}',
+        "Juniper.",
+        '{"memories": []}',
+    ])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, memory_store=steward.steward_memory_store(tmp_path / "memory")
+            )
+            first = agent.create_session()
+            await agent.run("The release codename is Juniper.", session=first)
+            await agent.run("What did I just tell you?", session=first)
+            await agent.run("What is the release codename?", session=agent.create_session())
+
+    asyncio.run(_go())
+
+    def texts(call: int) -> str:
+        return " ".join(m.text or "" for m in client.calls[call]["messages"])
+
+    assert "durable memory" in texts(1), "after a turn, the extraction call on his own client"
+    assert "The release codename is Juniper." in texts(2) and "Noted." in texts(2), "his history within a conversation"
+    assert "Juniper" in texts(4), "a new conversation starts with what he learned"
+    [index] = (tmp_path / "memory").rglob("MEMORY.md")
+    assert "codename is Juniper" in index.read_text(encoding="utf-8")
+
+
+def test_without_a_memory_store_nothing_is_extracted_and_hosts_pass_his_store() -> None:
+    """Step 5: automatic memory is the host's to pass (tests and other callers are untouched), and every host passes
+    steward_memory_store(): the Agent tab's service, the improvement loop, the MCP door, the console and DevUI."""
+    import inspect
+
+    import console_app
+    import devui_app
+    import hosted
+    import mcp_app
+
+    client = ScriptedChatClient(["Hello."])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            await agent.run("Say hello.", session=agent.create_session())
+
+    asyncio.run(_go())
+    assert len(client.calls) == 1, "no extraction call without a store"
+    assert inspect.getsource(hosted).count("memory_store=steward_memory_store()") == 2, "his requests and the loop"
+    for host in (mcp_app, console_app, devui_app):
+        assert "memory_store=steward_memory_store()" in inspect.getsource(host), host.__name__
+
+
+def test_the_mcp_doors_sessions_are_kept_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 5 (5.2): his MCP door keeps each session_id's session in MAF's FileSessionStore, so a session Manjuel
+    continues survives a restart: a fresh store over the same folder reads it back."""
+    from agent_framework import FileSessionStore
+
+    import mcp_app
+
+    built: list[Any] = []
+    real = mcp_app.AgentState
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        built.append(real(*args, **kwargs))
+        return built[-1]
+
+    monkeypatch.setattr(mcp_app, "MCP_SESSIONS_DIR", tmp_path / "mcp-sessions")
+    monkeypatch.setattr(mcp_app, "AgentState", recording)
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=ScriptedChatClient([]), enable_shell=False)
+            mcp_app.build_mcp_app(agent)
+            [state] = built
+            session = await state.get_or_create_session("manjuel-1")
+            session.state["marker"] = "kept"
+            await state.set_session("manjuel-1", session)
+            return await FileSessionStore(tmp_path / "mcp-sessions").get("manjuel-1")
+
+    restored = asyncio.run(_go())
+    assert restored is not None and restored.state.get("marker") == "kept", "a fresh store reads the session back"

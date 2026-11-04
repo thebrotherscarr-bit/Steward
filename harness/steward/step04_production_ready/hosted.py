@@ -48,7 +48,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent import build_steward_agent  # noqa: E402
+from agent import build_steward_agent, steward_memory_store  # noqa: E402
 from console.observers.planning_models import PlanningResponse  # noqa: E402
 from halo_traces import setup_halo_tracing  # noqa: E402
 
@@ -219,7 +219,9 @@ async def steward_graph(request: HostedResponseRequest, client_factory: Callable
         if wants_improvement(request):
             agent, workflow = await _improvement_loop(stack, **build)
         else:
-            agent, workflow = await build_steward(stack, history_provider=InMemoryHistoryProvider(), **build)
+            agent, workflow = await build_steward(
+                stack, history_provider=InMemoryHistoryProvider(), memory_store=steward_memory_store(), **build
+            )
     except BaseException:
         await stack.aclose()
         raise
@@ -244,7 +246,9 @@ async def _improvement_loop(stack: AsyncExitStack, **build: Any) -> tuple[Any, A
     the loop's graph, the host's own checkpoints, and the gate's checks read at call time."""
     import improvement_loop_workflow as loop  # noqa: PLC0415
 
-    agent = await loop.build_diagnoser(stack, history_provider=InMemoryHistoryProvider(), **build)
+    agent = await loop.build_diagnoser(
+        stack, history_provider=InMemoryHistoryProvider(), memory_store=steward_memory_store(), **build
+    )
     coder = loop.build_coder(build.get("client"))
     coder.middleware = [_host_identity_stays_with_tools, *(coder.middleware or [])]  # the coder calls Ollama too
     return agent, loop.create_workflow(agent, coder, None, checks=loop.GATE_CHECKS)
