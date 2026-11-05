@@ -444,13 +444,23 @@ def _first_user_text(response: AgentExecutorResponse) -> str:
     return next((m.text for m in response.full_conversation or [] if m.role == "user" and (m.text or "").strip()), "")
 
 
+# The confirmation bar at 5039e0e (2026-11-05 09:05Z, the discount ask): his plan's step "Run the sample project tests"
+# sent EXECUTE to run_shell("pytest -q") twice, both cards denied, and his last reply asked the user to allow test runs,
+# not what he fixed. CHECK runs the tests of the files he changed by itself (python_tests_for_changes), so a step that
+# only runs the tests is CHECK's: EXECUTE is told so, and marks it complete.
+CHECKS_RUN_THE_TESTS = (
+    "The checks run the tests of the files you change by themselves when you finish, so a step that only runs the "
+    "tests is theirs: mark it complete without running them."
+)
+
+
 def execute_message(request: str, plan: str, steps: list[str]) -> Message:
     """The message that asks EXECUTE to carry out the approved plan, with the plan's steps on it."""
     numbered = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, start=1))
     text = (
         f"The user approved your plan. Carry it out now.\n\nRequest: {request}\n\nPlan: {plan}\n\nSteps (your todos):\n"
-        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. Do not commit: "
-        "the checks run when you finish, and once they pass you will be asked to commit."
+        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. {CHECKS_RUN_THE_TESTS} "
+        "Do not commit: the checks run when you finish, and once they pass you will be asked to commit."
     )
     # REQUEST_KEY: his request hints match the request alone, never the plan's wording (agent.asked_request).
     return Message(
