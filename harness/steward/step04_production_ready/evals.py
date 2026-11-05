@@ -28,6 +28,7 @@ is added: that folder's README.md). ``validate`` checks them with no model; ``ba
 
 Run:
     python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory | heldout] [--options NAME]
+    python harness/steward/step04_production_ready/evals.py bfcl | aider-py    (tier ext, calibration: ext_sets.py)
     python harness/steward/step04_production_ready/evals.py validate
     python harness/steward/step04_production_ready/evals.py bar <set>
 """
@@ -68,6 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for th
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
+import ext_sets  # noqa: E402 - the outside sets' own (tier ext): pinned data, their runners and checks
 
 # Versioned eval sets (the plan "Steward's dev path: evals that grow with his skills", 2026-11-05, step 1): each set is
 # one file in harness/steward/evals/, <tier>-<name>.yaml, holding its name, tier, version, owner, runner, bar, the
@@ -78,7 +80,9 @@ from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
 EVAL_SETS_DIR = Path(__file__).resolve().parents[1] / "evals"
 # Baselines and the fingerprint of each set version's cases: {name: {version: {"cases": sha256, ...}}}.
 EVAL_BASELINES = EVAL_SETS_DIR / "baselines.json"
-EVAL_RUNNERS = ("asks", "steps")
+# bfcl and exercises: the outside sets' runners (ext_sets.py, tier ext only; their cases are {id, checks} over pinned
+# data, and the set names its source).
+EVAL_RUNNERS = ("asks", "steps", *ext_sets.EXT_RUNNERS)
 _SET_KEYS = {"name", "tier", "version", "owner", "runner", "split", "bar", "changes", "cases"}
 # num_repetitions: opt-in, and only for a non-gating set (tier ext, e.g. a flakiness check); a gating tier runs each
 # case once.
@@ -157,6 +161,7 @@ class EvalSet:
     fingerprint: str
     path: Path
     num_repetitions: int = 1
+    source: dict[str, str] | None = None  # an outside set's (tier ext): its pinned data, repo, commit, license, ...
 
     @property
     def asks(self) -> list[str]:
@@ -182,13 +187,14 @@ def _schema_problems(raw: Any, path: Path) -> list[str]:
     """What is wrong with a set file's shape and names (no fixture is entered here)."""
     if not isinstance(raw, dict):
         return ["not a mapping"]
-    problems = [f"unknown key {key!r}" for key in sorted(set(raw) - _SET_KEYS - _SET_OPTIONAL)]
-    problems += [f"missing key {key!r}" for key in sorted(_SET_KEYS - set(raw))]
+    required = _SET_KEYS | ({"source"} if raw.get("runner") in ext_sets.EXT_RUNNERS else set())
+    problems = [f"unknown key {key!r}" for key in sorted(set(raw) - required - _SET_OPTIONAL)]
+    problems += [f"missing key {key!r}" for key in sorted(required - set(raw))]
     if problems:
         return problems
     name, tier, version, runner = raw["name"], raw["tier"], raw["version"], raw["runner"]
-    if not (isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_]*", name)):
-        problems.append(f"name {name!r} is not a lower-case word")
+    if not (isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*", name)):
+        problems.append(f"name {name!r} is not a lower-case word (words may be joined by -)")
     if not (isinstance(tier, str) and re.fullmatch(r"T\d|ext", tier)):
         problems.append(f"tier {tier!r} is not T0 to T9 or ext")
     if raw["split"] not in SPLITS:
@@ -220,6 +226,8 @@ def _schema_problems(raw: Any, path: Path) -> list[str]:
         problems.append(f"bar is not {{passed, of, runs_in_a_row}}, each a whole number from 1: {bar!r}")
     elif not bar["passed"] <= bar["of"] == len(cases):
         problems.append(f"bar {bar['passed']}/{bar['of']} does not fit its {len(cases)} cases")
+    if runner in ext_sets.EXT_RUNNERS:
+        return [*problems, *ext_sets.schema_problems(raw)]  # {id, checks} over the pinned data
     known = set(ASKS_PROCESS_CHECKS) | set(ASKS_RESULT_CHECKS) if runner == "asks" else set(STEPS_CHECKS)
     seen: set[str] = set()
     for n, case in enumerate(cases, 1):
@@ -283,6 +291,20 @@ def load_eval_set(path: Path) -> EvalSet:
         raise EvalSetError(f"{path.name}: {error}") from error
     if problems := _schema_problems(raw, path):
         raise EvalSetError("\n".join(f"{path.name}: {problem}" for problem in problems))
+    if raw["runner"] in ext_sets.EXT_RUNNERS:  # an outside set: each ask from its pinned data, the data fingerprinted
+        cases = tuple(
+            EvalCase(
+                id=c["id"], ask=ext_sets.case_ask(raw["runner"], raw["source"], c["id"]), project=raw["source"]["data"],
+                plant=None, subject=(), precondition=c["checks"][0], checks=tuple(c["checks"]),
+            )
+            for c in raw["cases"]
+        )
+        return EvalSet(
+            name=raw["name"], tier=raw["tier"], version=raw["version"], owner=raw["owner"], runner=raw["runner"],
+            split=raw["split"], bar=dict(raw["bar"]), changes=dict(raw["changes"]), cases=cases,
+            fingerprint=ext_sets.set_fingerprint(raw), path=path, num_repetitions=raw.get("num_repetitions", 1),
+            source=dict(raw["source"]),
+        )
     cases = tuple(
         EvalCase(
             id=c["id"], ask=" ".join(c["ask"].split()), project=c["fixture"]["project"], plant=c["fixture"]["plant"],
@@ -499,12 +521,14 @@ SAMPLE_PROJECT_2 = "harness/steward/working/sample-project-2"
 # Every sample project an eval set's fixture names (validate_sets: none other).
 SAMPLE_PROJECTS = (SAMPLE_PROJECT, SAMPLE_PROJECT_2)
 # The one shell command an eval approves (the evals run real commands on his PC): pytest, or python -m pytest, with
-# only -q, -rA or -p no:cacheprovider, on a sample project or a test file (and test) in it. Nothing else: no second
-# command, no pipe, no redirect.
+# only -q, -rA or -p no:cacheprovider, on a sample project or a test file (and test) in it, or on an exercise's
+# throwaway copy (ext_sets.EXERCISE_WORK/<exercise>, the aider-py set). Nothing else: no second command, no pipe, no
+# redirect.
 _SAMPLE_PYTEST = re.compile(
     r"(?:[\w.:/-]*python(?:3)?(?:\.exe)?\s+-m\s+)?pytest"
     r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
-    r"\s+(?:\./)?(?:" + "|".join(re.escape(p) for p in SAMPLE_PROJECTS) + r")(?:/[\w-]+\.py(?:::[\w:]+)?)?/?"
+    r"\s+(?:\./)?(?:" + "|".join([*(re.escape(p) for p in SAMPLE_PROJECTS), re.escape(ext_sets.EXERCISE_WORK) + r"/[\w-]+"])
+    + r")(?:/[\w-]+\.py(?:::[\w:]+)?)?/?"
     r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
 )
 
@@ -1683,6 +1707,8 @@ async def set_main(name: str) -> int:
     A non-gating set (tier ext) with num_repetitions runs the whole set that many times, each pass scored and recorded
     on its own (a flakiness check); the exit code is the worst pass's."""
     eval_set = EVAL_SETS[name]
+    if eval_set.runner in ext_sets.EXT_RUNNERS:  # an outside set (bfcl, aider-py): ext_sets runs and scores it
+        return await ext_sets.ext_main(eval_set, sys.modules[__name__])
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     codes = []
@@ -1710,6 +1736,7 @@ def validate_sets(folder: Path = EVAL_SETS_DIR, baselines: Path | None = None) -
     missing += [f"{n} (measurement {f})" for n, f in RESULT_CHECKS.items() if not callable(globals().get(f))]
     missing += [n for n in STEPS_CHECKS if not callable(globals().get(n))]
     missing += [f"plant {n} ({f})" for n, f in PLANTS.items() if not callable(globals().get(f))]
+    missing += [n for n in (*ext_sets.BFCL_CHECKS, *ext_sets.EXERCISE_CHECKS) if n not in {e.__name__ for e in ext_sets.EXT_EVALUATORS}]
     problems += [f"evals.py: no check {n}" for n in missing]
     try:
         recorded = json.loads(baselines.read_text(encoding="utf-8"))
@@ -1738,6 +1765,10 @@ def validate_sets(folder: Path = EVAL_SETS_DIR, baselines: Path | None = None) -
                 f"{path.name}: its cases changed but its version did not: give it version {eval_set.version + 1}, say "
                 f"what changed under changes, and record its fingerprint {eval_set.fingerprint}"
             )
+        if eval_set.runner in ext_sets.EXT_RUNNERS:  # an outside set: no plant; an exercise's stub must fail its tests
+            if eval_set.runner == "exercises":
+                problems += ext_sets.exercise_precondition_problems(eval_set)
+            continue
         for case in eval_set.cases:
             if eval_set.runner == "asks" and case.ask in asks:  # the asks runner keys its cases by their ask
                 problems.append(f"{path.name}: case {case.id!r}'s ask is also a case of {asks[case.ask]}")

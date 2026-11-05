@@ -13,3 +13,5 @@ state/
 agent-memory.old-*/
 storage/
 .as/
+# The aider-py eval set's throwaway exercise copies (ext_sets.EXERCISE_WORK), removed after each case.
+harness/steward/working/ext-aider-py/
