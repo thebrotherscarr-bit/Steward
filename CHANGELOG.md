@@ -109,6 +109,20 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A plan written as JSON text in the model's own shape now raises the plan card (the bar at 6d8b127, the README
+  ask's run 2: `{"summary": "...", "steps": [{"title": "Locate README.md", "action": "read file ..."}, ...]}` ended
+  with "No plan card"). `steward_plan_in` reads a plan-shaped object with no `type` (a `summary` or `question`, and a
+  `steps` list of strings or of objects with a `title`, `action` or `description`) as the approval: each step one
+  line ("Locate README.md: read file ..."), the summary the card's question. A blank step, a step with no line, or no
+  summary is still no plan, and PLAN is asked again. Run 1's README write written as text is asked again
+  (`PLAN_NOT_A_CALL`), nothing is written, and its answer in either shape raises the card. Test:
+  `test_a_plan_written_as_json_text_in_its_own_shape_gets_the_plan_card`.
+- EXECUTE is no longer offered CodeAct (`execute_code`; the steps set at 6d8b127 called it seven times and never
+  wrote inventory.py). CodeAct is for counting and calculation, so ANSWER keeps it; EXECUTE gets it only while the
+  Hyperlight sandbox is on, where `SANDBOX_SHELL_REFUSAL` sends a shell step to it. The steps set's empty first PLAN
+  reply had been asked again (`PLAN_AGAIN`) and its second reply was the plan; `PLAN_AGAIN` now asks for the
+  structured plan by name, as `PLAN_NOT_A_CALL` does. Test:
+  `test_execute_is_not_offered_codeact_and_an_empty_plan_is_asked_for_the_structured_plan`.
 - A run no longer ends on an empty reply (the bar at 98d54d5: the item_count ask's last reply was `''`). MAF's harness
   loop asks once more (`plan_reply_loop`, feedback `answer`): the turn's message carries `ANSWER_NOW_KEY`,
   `tools_off_to_answer_now` makes it a `tool_choice` "none" call, and `answer_when_tools_are_off` adds

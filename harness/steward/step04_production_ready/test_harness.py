@@ -5494,8 +5494,8 @@ def test_each_workflow_step_is_offered_only_its_own_tools() -> None:
     assert not {"file_access_write", "file_access_replace_lines", "git_commit", "mode_set", "mode_get", "todos_complete",
                 "execute_code", "file_memory_write"} & planned
     assert function_results(client.calls[1]) == ['Error: Requested function "mode_get" not found.'], "it never ran"
-    assert {"file_access_write", "file_access_replace_lines", "todos_complete", "execute_code"} <= executed
-    assert not {"git_commit", "mode_set", "mode_get"} & executed
+    assert {"file_access_write", "file_access_replace_lines", "todos_complete"} <= executed
+    assert not {"git_commit", "mode_set", "mode_get", "execute_code"} & executed
     assert len(planned) < len(executed) < 36, (len(planned), len(executed))
 
     client = ScriptedChatClient(["It defines order_total."], routes=['{"kind": "answer"}'])
@@ -5596,3 +5596,114 @@ def test_an_empty_last_reply_is_asked_once_more_with_tools_off() -> None:
     outputs = said(asyncio.run(_question()))
     assert len(client.calls) == 2 and client.calls[1]["options"].get("tool_choice") == "none"
     assert any("It sums the prices." in o for o in outputs), outputs
+
+
+# The bar at 6d8b127 (2026-11-05 02:45-03:08Z), the README ask. Run 2's PLAN reply: its plan as JSON text in its own
+# shape (the log's text, cut there at 200 characters; the rest as the model's steps went on). Run 1's: the README
+# write's arguments as text (the log's text, the content the README's own).
+OWN_SHAPE_PLAN = (
+    '{"summary":"Add a line to the sample‑project README that explains how to run its tests","steps":['
+    '{"title":"Locate README.md","action":"read file harness/steward/working/sample-project/README.md"},'
+    '{"title":"Add the line","action":"append \'Run the tests with python -m unittest -v.\' to README.md"}]}'
+)
+README_WRITE_AS_TEXT = (
+    '{"file_name":"harness/steward/working/sample-project/README.md","content":"# sample-project\\n\\nA tiny inventory '
+    "module that Steward's samples work on. One test fails on purpose\\n(`discount_percent` is a percentage, but "
+    '`order_total` treats it as a fraction).\\n\\nRun the tests:\\n\\n```\\npython -m unittest -v\\n```\\n"}'
+)
+
+
+def test_a_plan_written_as_json_text_in_its_own_shape_gets_the_plan_card() -> None:
+    """Run 2 of the README ask wrote its plan as JSON text in its own shape (a summary, steps as title/action objects)
+    and ended with "No plan card". A plan-shaped object (a steps list of strings or of title/action/description objects,
+    a summary or question) is read as the approval: its steps one line each, its summary the card's question. Run 1's
+    write written as text is asked again (PLAN_NOT_A_CALL) and its answer, a plan in either shape, raises the card.
+    Anything else that is no plan is still no plan."""
+    import steward_workflow as wf
+
+    guide = '{"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Read README.md", "Add the line"]}'
+
+    def run(replies: list[Any]) -> tuple[ScriptedChatClient, list[Any], list[str]]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> tuple[list[Any], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run(
+                        "Add one line to harness/steward/working/sample-project/README.md that says how to run its tests.",
+                        stream=True,
+                    )]
+            cards = [e.data.function_call for e in events if e.type == "request_info"]
+            return cards, [str(e.data) for e in events if e.type == "output"]
+
+        cards, outputs = asyncio.run(_go())
+        return client, cards, outputs
+
+    readme = steward._WORKING_DIR / "harness/steward/working/sample-project/README.md"
+    before = readme.read_bytes()
+
+    client, cards, outputs = run([OWN_SHAPE_PLAN])
+    assert [c.name for c in cards] == [wf.APPROVE_PLAN] and len(client.calls) == 1, (outputs, len(client.calls))
+    shown = cards[0].parse_arguments()
+    assert shown["plan"] == "Add a line to the sample‑project README that explains how to run its tests"
+    assert shown["steps"] == [
+        "Locate README.md: read file harness/steward/working/sample-project/README.md",
+        "Add the line: append 'Run the tests with python -m unittest -v.' to README.md",
+    ]
+
+    for second in (guide, OWN_SHAPE_PLAN):
+        client, cards, outputs = run([README_WRITE_AS_TEXT, second])
+        assert [c.name for c in cards] == [wf.APPROVE_PLAN], ("run 1's text, then a plan: a card", outputs)
+        assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+        assert not function_results(client.calls[1]), "nothing ran on the write's text"
+    assert readme.read_bytes() == before, "the README was never written while planning"
+
+    # Strings, a question, a description: the same reading. A blank step, an object without a line, or no summary: no plan.
+    plan = wf.steward_plan_in('{"question": "Fix it?", "steps": ["Read it", {"description": "Fix  the\\nline"}]}')
+    assert plan is not None and plan.steps == ["Read it", "Fix the line"] and plan.questions[0].message == "Fix it?"
+    for no_plan in (
+        '{"summary": "s", "steps": ["Read it", "  "]}',
+        '{"summary": "s", "steps": [{"file": "a.py"}]}',
+        '{"summary": "s", "steps": []}',
+        '{"steps": ["Read it"]}',
+        '{"type": "approval", "summary": "s", "steps": ["Read it"]}',
+        README_WRITE_AS_TEXT,
+    ):
+        assert wf.steward_plan_in(no_plan) is None, no_plan
+
+
+def test_execute_is_not_offered_codeact_and_an_empty_plan_is_asked_for_the_structured_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The steps set at 6d8b127: PLAN's first reply was '' and EXECUTE then called execute_code seven times and never
+    wrote inventory.py. CodeAct is for counting and calculation (the Charter), an answer's tool: EXECUTE is not offered
+    execute_code, unless the Hyperlight sandbox is on, where it is the shell's stand-in after untrusted content
+    (SANDBOX_SHELL_REFUSAL). The empty reply was asked again (PLAN_AGAIN); the re-ask now names the structured plan,
+    as PLAN_NOT_A_CALL does, and ends in the card."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    client = ScriptedChatClient(["", plan, "Done."])
+
+    async def _task() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent)
+                events = [e async for e in workflow.run("Fix the discount bug in inventory.py.", stream=True)]
+                cards = [e for e in events if e.type == "request_info"]
+                for card in cards:
+                    answer = card.data.to_function_approval_response(True)
+                    [e async for e in workflow.run(stream=True, responses={card.request_id: answer})]
+        return [c.data.function_call.name for c in cards]
+
+    assert asyncio.run(_task()) == [wf.APPROVE_PLAN], "the empty reply was asked again, then the card"
+    asked = " ".join(m.text or "" for m in client.calls[1]["messages"])
+    assert wf.PLAN_AGAIN in asked and "type approval" in wf.PLAN_AGAIN and "steps" in wf.PLAN_AGAIN
+    planned, executed = offered_tools(client.calls[0]), offered_tools(client.calls[2])
+    assert "execute_code" not in planned and "execute_code" not in executed, sorted(executed)
+    assert {"file_access_write", "file_access_replace_lines", "run_shell"} & executed
+
+    assert wf.offered_in_step("execute_code", wf.ANSWER_STEP), "an answer still counts with CodeAct"
+    assert not wf.offered_in_step("execute_code", wf.EXECUTE_STEP)
+    monkeypatch.setattr(steward, "hyperlight_sandbox_on", lambda: True)
+    assert wf.offered_in_step("execute_code", wf.EXECUTE_STEP), "the sandbox's shell stand-in"
