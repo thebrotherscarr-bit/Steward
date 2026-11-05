@@ -718,6 +718,16 @@ class StewardProgress(WorkflowEvent[str]):
 
 # How a check, run in a worker thread (asyncio.to_thread copies the context), reports what it is about to run.
 _CHECK_PROGRESS: ContextVar[Callable[[str], None] | None] = ContextVar("steward_check_progress", default=None)
+# The files EXECUTE's session says his write tools wrote (agent.written_files), set by CHECK for its checks' thread. The
+# steps set at a3a3519 (2026-11-05 06:05Z): his fix put inventory.py back to its committed text (the evals plant the
+# bug in the working copy only), git listed no change, the check ran nothing and the run ended with an empty report.
+# A file he wrote is checked whether or not it differs from the commit.
+_CHECK_WRITTEN: ContextVar[tuple[str, ...]] = ContextVar("steward_check_written", default=())
+
+
+def check_written() -> list[str]:
+    """The files his run wrote, as CHECK set them for this check (none outside a check)."""
+    return list(_CHECK_WRITTEN.get())
 
 
 def check_progress(text: str) -> None:
@@ -814,6 +824,7 @@ def python_tests_for_changes(messages: Sequence[Message], workspace: Path | None
         from agent import _WORKING_DIR as workspace  # noqa: PLC0415 - the folder his file tools write in
 
     files = changed_python_files(workspace)
+    files += [f for f in check_written() if f.endswith(".py") and f not in files and (Path(workspace) / f).is_file()]
     if not files:
         return None
     targets = sorted({str(Path(f).parent) if str(Path(f).parent) != "." else f for f in files})
@@ -918,9 +929,10 @@ class AskApproval(Executor):
 class Check(Executor):
     """Runs the checks on what EXECUTE did (model-free) and reports the attempt."""
 
-    def __init__(self, checks: Checks, id: str = CHECK_STEP) -> None:
+    def __init__(self, checks: Checks, id: str = CHECK_STEP, written: Callable[[], list[str]] | None = None) -> None:
         super().__init__(id=id)
         self._checks = checks
+        self._written = written  # the files EXECUTE's session says he wrote (check_written)
 
     @handler
     async def check(self, response: AgentExecutorResponse, ctx: WorkflowContext[CheckReport]) -> None:
@@ -932,9 +944,11 @@ class Check(Executor):
             asyncio.run_coroutine_threadsafe(ctx.add_event(StewardProgress(text, executor_id=self.id)), loop).result()
 
         token = _CHECK_PROGRESS.set(report)
+        wrote = _CHECK_WRITTEN.set(tuple(self._written() if self._written is not None else ()))
         try:
             result = await asyncio.to_thread(self._checks, list(response.full_conversation or response.agent_response.messages))
         finally:
+            _CHECK_WRITTEN.reset(wrote)
             _CHECK_PROGRESS.reset(token)
         passed, output = result if result is not None else (True, "")
         if output:
@@ -1196,7 +1210,7 @@ def build_steward_workflow(
     read_plan = ReadPlan()
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
-    check = Check(checks)
+    check = Check(checks, written=lambda: written_files(executor_session(execute)))
     repair = Repair()
     ask_commit = AskCommit()
     # His own git_commit, the copy this build gave him (agent.py): a build without it has nothing to commit with.
