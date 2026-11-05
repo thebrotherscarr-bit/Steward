@@ -12,7 +12,7 @@ approval card you answer.
   the notes, web and MCP tools he uses.
 - **Manjuel** ([Manjuel](https://github.com/thebrotherscarr-bit/Manjuel)) is the ground and the
   record: the laws, the history and the engine.
-- **Atlas** (Aurora) is parked until Steward has visible computer control.
+- **Atlas** (repository [Aurora](https://github.com/thebrotherscarr-bit/Aurora)) is parked until Steward has visible computer control.
 - **Neiro** has been retired as a gate.
 
 Everything runs on your own PC on local models. No hosted model is used by default.
