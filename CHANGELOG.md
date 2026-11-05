@@ -15,6 +15,14 @@ was never merged and has no entry.
 
 ### Added
 
+- `evals.py --transport in-process|responses|ag-ui` for the asks sets (small, heldout; run-bar's `-Transport`):
+  `responses` drives each case against the running Responses host (hosted.py, 43120), its cards answered with
+  `mcp_approval_response` as SecondBrain's steward.cjs does; `ag-ui` against the AG-UI host (ag_ui_app.py, 43122),
+  its interrupts resumed with `interruptId` and `checkpointId` (`eval_transports.py`). The same approval policy and
+  checks as in-process; the default is unchanged. Each history line carries `transport` and each case `timings`
+  (first text or reasoning event, total time, cards and whether each resumed, stream errors); a dropped stream or
+  refused resume fails the case with its reason, not a crash. `evals.py compare-transports [--set] [--last N]`
+  prints the per-case table and the README's rule for turning AG-UI on by default.
 - Versioned, data-driven eval sets in `harness/steward/evals/` (one `<tier>-<name>.yaml` per set: name, tier, version,
   owner, runner, split, bar, changes, cases with ask, fixture, subject, precondition and checks), read by `evals.py`
   at import; `evals.py small` and `evals.py steps` run the T0 files, `evals.py heldout` the T1 file, and each run's

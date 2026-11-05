@@ -3476,6 +3476,8 @@ def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_cod
     assert (entry["set"], entry["passed"], entry["total"], entry["exit_code"]) == ("small", 1, 1, 0), entry
     assert f"{entry['checks_passed']}/{entry['checks_total']}" == checks and entry["checks_total"] > 0, entry
     assert entry["options"] == {"name": "plan_t0", "values": {"STEWARD_PLAN_TEMPERATURE": "0"}}, entry
+    timings = entry["cases"][0].pop("timings")  # each case's transport and timings (evals.py --transport)
+    assert (entry["transport"], timings["transport"]) == ("in-process", "in-process"), (entry, timings)
     assert entry["cases"] == [{"input": evals.SMALL_ASK_README[:80], "passed": True, "failed_checks": []}], entry
     assert (entry["git_head"], entry["model"]) == (head or None, "gpt-oss:20b") and entry["ts"], entry
 
