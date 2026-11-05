@@ -15,6 +15,8 @@ was never merged and has no entry.
 
 ### Added
 
+- The repository is licensed MIT (`LICENSE`, the same text and holder as Manjuel's); README and TRADEMARKS.md say so.
+
 - SecondBrain's automations run as MAF workflows on his MCP host (`recipe_workflow.py`, served by `mcp_app.py` as
   `run_recipe` and `recipe_status`): a recipe (steps from a fixed list, `summarize`, `deliver`) is built with
   WorkflowBuilder, one executor per step, then a tool-less summarize run in its own session, then deliver;

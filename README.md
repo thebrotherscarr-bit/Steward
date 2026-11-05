@@ -60,5 +60,6 @@ version holds, and today's findings under Unreleased. Versions are not git tags.
 
 ## License and names
 
-This repository does not carry a license file yet. See `TRADEMARKS.md` for the names policy and
-`SECURITY.md` to report a vulnerability.
+MIT (`LICENSE`). The outside eval data under `harness/steward/evals/data/` keeps its own license,
+in each folder's `LICENSE`. See `TRADEMARKS.md` for the names policy and `SECURITY.md` to report a
+vulnerability.
