@@ -7145,7 +7145,7 @@ def test_the_aider_py_set_runs_each_exercise_on_a_throwaway_copy_and_scores_its_
     assert (aider.tier, aider.runner, aider.eval_name, len(aider.cases)) == ("ext", "exercises", "aider-py@v1", 20)
     assert "harness/steward/working/ext-aider-py/" in (_WORKING_DIR / ".gitignore").read_text(encoding="utf-8")
     pinned = ext_sets.data_folder(aider.source) / "exercises"
-    assert all({p.name for p in (pinned / c.id).iterdir()} == {"instructions.md", *ext_sets.exercise_files(c.id)} for c in aider.cases)
+    assert all({p.name for p in (pinned / c.id).iterdir()} - {"__pycache__"} == {"instructions.md", *ext_sets.exercise_files(c.id)} for c in aider.cases)
 
     data = tmp_path / "data"
     for name in ("adder-one", "adder-two", "adder-three"):
