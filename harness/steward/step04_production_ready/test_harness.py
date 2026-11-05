@@ -4192,6 +4192,11 @@ def test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task
     assert wf.from_an_automation(request)
     assert not wf.from_an_automation("Write the daily what-happened.")
     assert not wf.from_an_automation("Hello\n[from an automation (Startup)]")
+    # Jesster stamps the time on the same line (service.cjs clockStamp): the line still reads as an automation's,
+    # and the stamped line is never taken for an opening verb.
+    stamped = "[from an automation (Startup) | Thu 2026-11-05 06:00 local (UTC-07:00) | 13:00 UTC]\nWrite the daily what-happened."
+    assert wf.from_an_automation(stamped)
+    assert not wf.asks_for_a_change(stamped)
     client = ScriptedChatClient(["Yesterday: two merges."], routes=['{"kind": "task"}'])
 
     async def _go() -> list[Any]:
