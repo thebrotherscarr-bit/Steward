@@ -144,6 +144,12 @@ was never merged and has no entry.
 
 ### Changed
 
+- Eval sets t1-heldout v2 and t0-small v2: `answer_on_topic` takes a wider subject per case (the cookbook: an
+  answer-level check tests what matters). Heldout v1 run 2 (e94cb90) fixed `test_boiling_point` and failed only on a
+  reply naming units.py and the corrected formula; each case now also takes the file changed (units.py,
+  inventory.py), and fix_bug its test and formula, refactor the old name, discount `order_total`. The small set's
+  baseline (10 of 17) is carried to v2; both fingerprints are recorded in baselines.json.
+
 - One model: the coder is Steward's own model by default (the operator's ruling, 2026-11-05: "one model to rule
   them all"). `_coder_model()` is `STEWARD_CODER_MODEL` if set, else `OLLAMA_MODEL`, Steward's own (1,015 traced chat
   calls, all `steward:1`; qwen2.5-coder:14b cannot sit beside it on the 16 GB card). The coder's client records its
@@ -178,6 +184,12 @@ was never merged and has no entry.
   qwen2.5-coder:14b) are unchanged. Test: `test_the_older_team_path_is_gone_and_the_live_team_is_kept`.
 
 ### Fixed
+
+- EXECUTE is offered `execute_code` only once the Hyperlight sandbox has closed the session's shell
+  (`agent.sandbox_shell_closed`; a run_shell refused on FIDES's untrusted label now closes it too). Heldout v1 run 2
+  (e94cb90, trace 14:57Z): with the sandbox on and nothing untrusted read, EXECUTE wrote units.py with execute_code,
+  into the sandbox's copy of harness/; the tool answered "", no .py file changed, and fahrenheit_to_celsius_works
+  failed on an ImportError.
 
 - `test_harness.py` runs with every `STEWARD_*` switch in the environment cleared (`clear_his_switches`, an autouse
   fixture; `STEWARD_CHECK_RUNNING` stays) and the sandbox's cached answer forgotten, as on GitHub's runners. With

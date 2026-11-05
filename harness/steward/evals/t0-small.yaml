@@ -3,7 +3,7 @@
 # The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
 name: small
 tier: T0
-version: 1
+version: 2
 owner: operator
 runner: asks
 split: full
@@ -13,13 +13,17 @@ changes:
     The small asks as evals.py ran them on 2026-11-05 (Steward 0071746), moved into this file unchanged, with one
     addition the validator requires: the README ask's result check, readme_says_how_to_run_tests (the README names
     unittest or pytest after the run). Before it the README ask had process checks only.
+  2: >-
+    answer_on_topic (and commit_message_specific, which reads the same subject) widened as t1-heldout v2: item_count
+    and discount also take the file changed (inventory.py), and discount the function it fixes (order_total).
+    The README ask's subject (readme, test) was already as wide.
 cases:
   - id: item_count
     ask: >-
       Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total
       quantity of all the items, with a docstring.
     fixture: {project: harness/steward/working/sample-project, plant: null}
-    subject: [item_count]
+    subject: [item_count, inventory.py]
     precondition: item_count_works
     checks:
       - plan_is_approval
@@ -33,7 +37,7 @@ cases:
   - id: discount
     ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
     fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
-    subject: [discount]
+    subject: [discount, order_total, inventory.py]
     precondition: discount_test_passes
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, discount_test_passes]
   - id: readme
