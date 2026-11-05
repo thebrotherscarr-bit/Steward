@@ -1524,8 +1524,12 @@ async def tools_off_to_answer_now(context: ChatContext, call_next: Callable[[], 
 
 
 async def answer_when_tools_are_off(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
-    """Chat middleware: the call MAF makes with tool_choice "none" (a limit tripped) asks him for his answer in text."""
-    if (context.options or {}).get("tool_choice") == "none":
+    """Chat middleware: the call MAF makes with tool_choice "none" (a limit tripped) asks him for his answer in text.
+
+    Not on a call with a response_format (the workflow's plan call, steward_workflow.plan_phases_turn): its answer is
+    that format, which "in plain text" would contradict."""
+    options = context.options or {}
+    if options.get("tool_choice") == "none" and options.get("response_format") is None:
         context.messages = [*context.messages, Message(role="user", contents=[Content.from_text(TOOLS_OFF_ANSWER_NOW)])]
     await call_next()
 

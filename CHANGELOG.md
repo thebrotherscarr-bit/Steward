@@ -109,6 +109,22 @@ was never merged and has no entry.
 
 ### Fixed
 
+- PLAN is two phases, so the plan step can only answer with a plan (the bar at aba870f: the discount ask's PLAN ended
+  on a tool call's arguments written as text both runs, `{"todos": [...]}` and `{"file_name": ..., "new_lines": ...}`,
+  a new shape each bar). EXPLORE reads with the read-only tools and no response_format; then PLAN is one call with
+  `tool_choice` "none" and `StewardPlan` as response_format (`plan_phases_turn`), given EXPLORE's conversation and
+  `PLAN_NOW`. MAF's own final no-tools call (`_tools.py` 4726) and OllamaChatClient's "none omits the tools"
+  (`_chat_client.py` 483-497). No todo tool is offered while planning: the approved plan's steps become the todos
+  (`approved_plan_turn`). The plan call gets no "answer in plain text" line (`answer_when_tools_are_off` skips a
+  call with a response_format). `STEWARD_PLAN_*` options apply to both phases. #113's tolerant reader stays as the
+  fallback. Test: `test_plan_reads_with_read_only_tools_then_one_call_with_tools_off_answers_with_the_plan`.
+- The commit message names the user's request after PLAN was asked again (the steps set at aba870f: the commit
+  message call was sent "Request: Your reply was empty. Reply now with your plan ...", and the model copied
+  `COMMIT_PROMPT`'s example, "Add item_count to inventory.py", onto the discount fix). The sets ran in separate
+  processes and shared no state; the request was taken from PLAN's last run, which after an ask-again starts at
+  `PLAN_AGAIN`. ROUTE now keeps the request in the workflow's state, and the plan card and commit message read it
+  there. The commit example now names no eval ask's work (`Add parse_date to dates.py`). Test:
+  `test_the_commit_message_is_asked_for_the_users_request_after_plan_was_asked_again`.
 - A plan written as JSON text in the model's own shape now raises the plan card (the bar at 6d8b127, the README
   ask's run 2: `{"summary": "...", "steps": [{"title": "Locate README.md", "action": "read file ..."}, ...]}` ended
   with "No plan card"). `steward_plan_in` reads a plan-shaped object with no `type` (a `summary` or `question`, and a
