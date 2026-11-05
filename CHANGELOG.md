@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A run that ends on a tool's result with no reply after it is ended empty (`ended_empty`), so the harness loop asks
+  it for its answer as it asks an empty reply. The confirmation bar at 5039e0e (the item_count ask): after
+  todos_get_remaining the reply came back empty, MAF kept no message for it, and the run ended with no answer. Test:
+  `test_a_run_that_ends_on_a_tool_result_with_no_reply_is_asked_for_its_answer`.
 - The open-todo reminder says his replies are already shown (`TODOS_ALREADY_SHOWN`) only when the iteration held his
   own words (`said_something`). The confirmation bar at e532fea (the README ask): his reply was empty, the reminder
   still told him to say only what is new, and after the write his whole answer was "Todos marked complete." Test:

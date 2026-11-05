@@ -1510,8 +1510,16 @@ READ_ON_NUDGE = (
 
 
 def ended_empty(response: Any) -> bool:
-    """Whether a run's last assistant message holds no text and no call (or there is no assistant message)."""
-    messages = [m for m in getattr(response, "messages", None) or [] if m.role == "assistant"]
+    """Whether a run's last assistant message holds no text and no call (or there is no assistant message), or the run
+    ended on a tool's result with no reply after it.
+
+    The confirmation bar at 5039e0e (2026-11-05 09:03Z, the item_count ask): after todos_get_remaining the model's
+    reply came back with nothing in it, MAF kept no message for it, and the run's last assistant message was the call,
+    so the empty reply was not seen and the run ended with no answer."""
+    everything = list(getattr(response, "messages", None) or [])
+    if everything and everything[-1].role == "tool":
+        return True
+    messages = [m for m in everything if m.role == "assistant"]
     if not messages:
         return True
     last = messages[-1]
