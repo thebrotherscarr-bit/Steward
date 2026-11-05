@@ -109,6 +109,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The evals answer up to 20 rounds of cards in a run (`CARD_ROUNDS`, was 8 for the small set and 12 for the steps
+  set): in the small set's item_count ask, REPAIR's write took the 8th and last answer and the re-check's card was
+  never answered, so the case failed silently. A run still asking after 20 rounds fails with "the eval stopped
+  answering cards after 20 rounds" (run_completed). Test:
+  `test_the_eval_answers_twenty_rounds_of_cards_and_a_looping_run_fails_with_a_plain_reason`.
 - A request that opens with a verb that changes something (Fix, Add, Write ..., "please" allowed) is routed to
   PLAN whatever the router's model says (the bar at a0fb3ca, traces 04:35Z and 04:41Z: "Fix the bug that makes
   test_percent_discount fail ..." came back `{"kind":"answer"}` both small runs, and ANSWER replied with the fixed

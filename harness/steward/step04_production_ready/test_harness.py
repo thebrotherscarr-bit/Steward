@@ -5927,3 +5927,69 @@ def test_a_failed_check_is_said_before_the_repair() -> None:
     assert repairing == [wf.repair_text(wf.CheckReport(1, False, failed, ""))], shown
     assert "$ pytest -q harness/steward/working/sample-project" in repairing[0]
     assert shown.index(repairing[0]) < shown.index("Checks passed:\n1 passed"), shown
+
+
+def test_the_eval_answers_twenty_rounds_of_cards_and_a_looping_run_fails_with_a_plain_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live 2026-11-04 (#115's trace): item_count's REPAIR write took the eval's 8th and last card answer, the re-check's
+    card was never answered, and the case failed silently. A run needing 12 rounds now completes; one that never stops
+    asking ends at CARD_ROUNDS, and run_case records "the eval stopped answering cards after 20 rounds"."""
+    from types import SimpleNamespace
+
+    import evals
+    from agent_framework import AgentResponseUpdate, FileAccessProvider
+
+    assert evals.CARD_ROUNDS == 20
+
+    def card(n: int) -> Any:
+        call = Content.from_function_call(call_id=f"w{n}", name=FileAccessProvider.WRITE_TOOL_NAME, arguments={"file_name": "x.py", "content": "x"})
+        return Content.from_function_approval_request(id=f"w{n}", function_call=call)
+
+    class Agent:
+        def __init__(self, cards: int | None) -> None:
+            self.cards, self.raised, self.answers = cards, 0, 0
+
+        async def run(self, message: Any, *, session: Any = None, stream: bool = True) -> Any:
+            if not isinstance(message, str):
+                self.answers += len(message.contents)
+            if self.cards is None or self.raised < self.cards:
+                self.raised += 1
+                yield AgentResponseUpdate(contents=[card(self.raised)], role="assistant")
+            else:
+                yield AgentResponseUpdate(contents=[Content.from_text("Checks passed")], role="assistant")
+
+    writes = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001
+    agent = Agent(12)
+    response = asyncio.run(evals._run_answering_cards(agent, None, "q", writes))  # noqa: SLF001
+    assert agent.answers == 12 and "Checks passed" in response.text, (agent.answers, response.text)
+
+    looping = Agent(None)
+    with pytest.raises(evals.CardsUnanswered):
+        asyncio.run(evals._run_answering_cards(looping, None, "q", writes))  # noqa: SLF001
+    assert looping.answers == evals.CARD_ROUNDS
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.answers = 0
+
+        async def run(self, query: Any = None, *, stream: bool = True, responses: Any = None) -> Any:
+            self.answers += len(responses or {})
+            c = card(self.answers)
+            yield SimpleNamespace(type="request_info", request_id=c.id, data=c)
+
+    workflow = Workflow()
+    with pytest.raises(evals.CardsUnanswered):
+        asyncio.run(evals._run_workflow_answering_cards(workflow, "q", writes))  # noqa: SLF001
+    assert workflow.answers == evals.CARD_ROUNDS
+
+    # run_case records the plain reason, which run_completed fails the case with.
+    async def loops(query: str, approve: set[str], **build: Any) -> Any:
+        raise evals.CardsUnanswered
+
+    reason = "the eval stopped answering cards after 20 rounds"
+    monkeypatch.setattr(evals, "run_steward", loops)
+    try:
+        asyncio.run(evals.run_case("q", writes))
+        assert evals.CASE_ERRORS["q"] == reason, evals.CASE_ERRORS
+        assert evals.raised(BaseExceptionGroup("g", [evals.CardsUnanswered()])) == reason
+    finally:
+        evals.CASE_ERRORS.pop("q", None)
