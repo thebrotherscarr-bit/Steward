@@ -46,9 +46,30 @@ import pytest  # noqa: E402
 # His real trace file, as halo_traces resolved it on import (HALO_TRACE_PATH, or <repo>/halo_traces/traces.jsonl).
 REAL_HALO_TRACES = halo_traces.HALO_TRACE_PATH
 
+# The one STEWARD_* name the tests set for themselves at import (below); every other one is a switch of his.
+_TEST_OWN_SWITCHES = frozenset({"STEWARD_CHECK_RUNNING"})
+
+
+def clear_his_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every STEWARD_* switch in his environment (STEWARD_SANDBOX, STEWARD_FIDES_ENFORCE, STEWARD_SENSITIVE_TELEMETRY,
+    a step's options, ...) is cleared for the test, as on GitHub's runners where none is set, and the sandbox's
+    once-per-process answer is forgotten. A test that wants a switch sets it with monkeypatch after this ran."""
+    for name in [n for n in os.environ if n.upper().startswith("STEWARD_") and n.upper() not in _TEST_OWN_SWITCHES]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(steward, "_SANDBOX_STATE", {})
+
 
 @pytest.fixture(autouse=True)
-def _his_memory_is_never_the_real_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _his_switches_are_never_in_the_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-05: STEWARD_SANDBOX=hyperlight in his user environment turned three CodeAct tests red on his PC while
+    they passed in CI. The tests run as CI runs them, whatever his shell has set."""
+    clear_his_switches(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _his_memory_is_never_the_real_one(
+    _his_switches_are_never_in_the_tests: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Step 5: hosts pass steward_memory_store(); in the tests its default store is off (an extraction call would take
     a scripted reply), and in any case it would never be his real memory folder."""
     monkeypatch.setenv("STEWARD_AUTOMATIC_MEMORY", "off")
@@ -1179,6 +1200,32 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     assert not (steward._WORKING_DIR / "harness" / "test_harness_codeact_probe.txt").exists(), "and nothing written"
     asked = [hint for pattern, hint, _ in steward.REQUEST_HINTS if pattern.search("Report the pass count and every failing line.")]
     assert asked == []
+
+
+def test_his_user_level_sandbox_switch_does_not_change_a_codeact_test(monkeypatch: Any) -> None:
+    """2026-11-05: STEWARD_SANDBOX=hyperlight in his environment, with a sandbox that would start and its answer already
+    cached "on", reddened the CodeAct test above on his PC. Cleared as the autouse fixture clears it, the build is
+    Monty's and that test passes, as in CI."""
+    from agent_framework.monty import MontyCodeActProvider
+
+    monkeypatch.setenv(steward.SANDBOX_ENV, "hyperlight")
+    monkeypatch.setenv("STEWARD_FIDES_ENFORCE", "on")
+    monkeypatch.setenv("STEWARD_SENSITIVE_TELEMETRY", "on")
+    monkeypatch.setattr(steward, "_SANDBOX_STATE", {"on": True})
+    monkeypatch.setattr(steward, "_probe_hyperlight", lambda: None)
+    clear_his_switches(monkeypatch)
+
+    assert not any(n in os.environ for n in (steward.SANDBOX_ENV, "STEWARD_FIDES_ENFORCE", "STEWARD_SENSITIVE_TELEMETRY"))
+    assert os.environ.get("STEWARD_CHECK_RUNNING") == "1", "the tests' own recursion guard stays"
+    assert steward.hyperlight_sandbox_on() is False
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            return await steward.build_steward_agent(stack, client=ScriptedChatClient(["Done."]), enable_shell=False)
+
+    agent = asyncio.run(_go())
+    assert any(isinstance(p, MontyCodeActProvider) for p in agent.context_providers)
+    test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_question()
 
 
 def test_a_run_that_added_todos_is_never_told_its_list_is_empty(monkeypatch: Any) -> None:
@@ -6868,6 +6915,93 @@ def test_the_tracked_bar_runner_runs_each_set_as_its_own_process_and_reads_the_h
         assert part in script, part
     ignored = (evals._REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "storage/" in ignored, "the runs' logs stay out of the repository"
+
+
+def _ag_ui_events(http: Any, body: dict[str, Any]) -> list[dict[str, Any]]:
+    """One AG-UI run over HTTP: the SSE stream's events, in order (keepalive comments skipped)."""
+    import json
+
+    with http.stream("POST", "/", json=body, headers={"Accept": "text/event-stream"}) as stream:
+        assert stream.status_code == 200, stream.read()
+        return [json.loads(line[len("data:"):]) for line in stream.iter_lines() if line.startswith("data:")]
+
+
+def test_the_ag_ui_host_streams_the_workflow_and_raises_a_write_card_as_an_interrupt() -> None:
+    """ag_ui_app.py: Steward's workflow over MAF's AG-UI package on 127.0.0.1:43122 (Learn, "Workflows with AG-UI").
+    A request ends on the plan's card as RUN_FINISHED's interrupt outcome; the Approve, sent as a canonical resume with
+    the interrupt's checkpoint id, runs EXECUTE in a freshly built Steward, whose file write is the next card (a
+    request_info tool call and an interrupt naming file_access_write); the No resumes again, and the run ends with his
+    words (REASONING_*, as EXECUTE's are intermediate output) and RUN_FINISHED. A plan's No is the workflow's output:
+    TEXT_MESSAGE_*. Red when the endpoint, the per-request build or the interrupt mapping comes unplugged."""
+    import ag_ui_app
+    import steward_workflow as wf
+    from starlette.testclient import TestClient
+
+    plan = '{"type": "approval", "questions": [{"message": "Write x.py."}], "steps": ["Write x.py"]}'
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "x.py", "content": "x = 1"})
+    replies: list[Any] = [plan, write, "The write was denied, so I stopped."]
+    calls: list[Any] = []
+    built: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:  # one Steward per request, as hosted.py builds him
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        built.append(client)
+        return client
+
+    assert (ag_ui_app.HOST, ag_ui_app.PORT) == ("127.0.0.1", 43122), "loopback, its own port"
+    thread = "thread-1"
+
+    def card(events: list[dict[str, Any]]) -> dict[str, Any]:
+        finished = events[-1]
+        assert finished["type"] == "RUN_FINISHED" and finished["outcome"]["type"] == "interrupt", finished
+        [interrupt] = finished["outcome"]["interrupts"]
+        assert interrupt["reason"] == "tool_call", interrupt
+        assert [e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"][-1] == "request_info"
+        assert any(e["type"] == "CUSTOM" and e["name"] == "request_info" for e in events)
+        return interrupt
+
+    def answer(interrupt: dict[str, Any], approved: bool) -> dict[str, Any]:
+        return {
+            "threadId": thread,
+            "runId": f"run-{len(built)}",
+            "messages": [],
+            "resume": [{"interruptId": interrupt["id"], "status": "resolved", "payload": {"approved": approved}}],
+            "forwardedProps": {"checkpointId": interrupt["metadata"]["agent_framework"]["checkpoint_id"]},
+        }
+
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        first = _ag_ui_events(http, {
+            "threadId": thread, "runId": "run-0", "messages": [{"id": "u1", "role": "user", "content": "Write x.py."}],
+        })
+        assert first[0]["type"] == "RUN_STARTED" and first[0]["threadId"] == thread, first[0]
+        plan_card = card(first)
+        assert plan_card["metadata"]["agent_framework"]["function_call"]["name"] == "approve_plan", plan_card
+        assert len(calls) == 1, "nothing ran before the Approve"
+        second = _ag_ui_events(http, answer(plan_card, True))
+        write_card = card(second)
+        assert write_card["metadata"]["agent_framework"]["function_call"]["name"] == "file_access_write", write_card
+        assert any(e["type"] == "TOOL_CALL_START" and e["toolCallName"] == "file_access_write" for e in second), [e["type"] for e in second]
+        third = _ag_ui_events(http, answer(write_card, False))
+    types = [e["type"] for e in third]
+    assert types[0] == "RUN_STARTED" and types[-1] == "RUN_FINISHED" and not third[-1].get("outcome"), third[-1]
+    assert "TOOL_CALL_RESULT" in types, "the denied write's result"
+    # EXECUTE's words stream as intermediate output (intermediate_output_from), which MAF's AG-UI maps to REASONING_*.
+    words = "".join(e["delta"] for e in third if e["type"] == "REASONING_MESSAGE_CONTENT")
+    assert words == "The write was denied, so I stopped.", third
+    assert len(built) == 3, "a fresh Steward for each request"
+    assert not (steward._WORKING_DIR / "x.py").exists(), "the denied write wrote nothing"
+    # The workflow's own output (here the plan's No) is TEXT_MESSAGE_*.
+    replies.append(plan)
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        thread = "thread-2"
+        refused = _ag_ui_events(http, answer(card(_ag_ui_events(http, {
+            "threadId": thread, "runId": "run-a", "messages": [{"id": "u2", "role": "user", "content": "Write x.py."}],
+        })), False))
+    types = [e["type"] for e in refused]
+    assert ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"] == [t for t in types if t.startswith("TEXT_MESSAGE")], types
+    assert [e["delta"] for e in refused if e["type"] == "TEXT_MESSAGE_CONTENT"] == [wf.NOT_APPROVED], refused
+    assert types[-1] == "RUN_FINISHED" and not refused[-1].get("outcome"), refused[-1]
 
 
 class _ScriptedHost:

@@ -36,7 +36,12 @@ was never merged and has no entry.
 - `harness/steward/evals/run-bar.ps1 -Sets <list> -Tag <name>`: each set run as its own process (Start-Job), UTF-8 logs
   and a progress file under `storage/evals/runs/<Tag>/`, a summary line per run from history.jsonl, each bar, then
   "BAR DONE". Test: `test_the_tracked_bar_runner_runs_each_set_as_its_own_process_and_reads_the_history`.
-
+- `ag_ui_app.py`: Steward's workflow over AG-UI on 127.0.0.1:43122 (`STEWARD_AG_UI_PORT`), with MAF's
+  `agent_framework_ag_ui` as it ships (`AgentFrameworkWorkflow`, `add_agent_framework_fastapi_endpoint`,
+  `single_user=True`). One Steward per request through `hosted.steward_graph` (the same build and middleware as
+  `hosted.py`); a card is RUN_FINISHED's interrupt outcome and is answered with a `resume` entry and the interrupt's
+  `checkpointId` (in-memory checkpoints). Off unless started; not yet used by Jesster. Test:
+  `test_the_ag_ui_host_streams_the_workflow_and_raises_a_write_card_as_an_interrupt`.
 - An end-to-end test of a Manjuel face turn that needs a card: tools/call over HTTP on mcp_app's MCP host, the card
   asked by `secondbrain_cards` on an MCP server standing in for SecondBrain's `approval_ask` (a real MCP `Client`, in
   process), Allow runs the tool and the answer returns to Manjuel; Deny runs nothing. Test:
@@ -150,6 +155,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- `test_harness.py` runs with every `STEWARD_*` switch in the environment cleared (`clear_his_switches`, an autouse
+  fixture; `STEWARD_CHECK_RUNNING` stays) and the sandbox's cached answer forgotten, as on GitHub's runners. With
+  `STEWARD_SANDBOX=hyperlight` in the user environment, three CodeAct tests failed locally and passed in CI. Test:
+  `test_his_user_level_sandbox_switch_does_not_change_a_codeact_test`.
 - A run that stopped on a tool's result (no reply after it) is asked once to go on with its tools on (`GO_ON_NUDGE`,
   `ended_on_a_result`); only a second stop gets the answer-now turn, and an empty reply gets it as before. The
   confirmation bar at 1c23f70 (the item_count ask): the run stopped on a tool's error, the answer-now turn (#134) said

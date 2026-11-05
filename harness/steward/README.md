@@ -143,6 +143,7 @@ With the factory (SecondBrain's Agent tab or `console_app.py`), Step 3's list ad
 |-------|-------------------------------------------------------------------------------|
 | 43120 | Steward's service, `hosted.py` (Responses protocol; `STEWARD_PORT`)           |
 | 43121 | Steward as an MCP tool, `mcp_app.py` (`http://127.0.0.1:43121/mcp`)           |
+| 43122 | Steward over AG-UI, `ag_ui_app.py` (not yet used by Jesster; `STEWARD_AG_UI_PORT`) |
 | 43110 | SecondBrain's MCP (`SECONDBRAIN_MCP_URL`)                                     |
 | 43111 | The Atlas door                                                                |
 | 8091  | The glass                                                                     |
