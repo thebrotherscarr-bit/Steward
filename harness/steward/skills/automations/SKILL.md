@@ -6,9 +6,12 @@ description: What SecondBrain's automations are, the recipe an automation is wri
 ## Usage
 
 An automation is a schedule in SecondBrain (Settings, Automations; kept in the vault's
-`.secondbrain/schedules.json`). At its time SecondBrain runs it itself, as a workflow: its steps gather, then at most
-one turn to you writes the result, and the result is filed as a note (tag `automation`) with one short line to
-Telegram. It is not a chat with you: your daytime conversations and their context are never touched.
+`.secondbrain/schedules.json`). SecondBrain keeps only the clock: at its time it hands the recipe to your MCP host's
+`run_recipe`, where it runs as a MAF workflow (`step04_production_ready/recipe_workflow.py`: one executor per step,
+then summarize, then deliver, checkpointed, its events in `storage/recipes/<run_id>.jsonl`), and reads `recipe_status`
+until it is done. The result is filed as a note (tag `automation`) with one short line to Telegram. It is not a chat
+with you: the summarize step is a tool-less run in a session of its own, and your daytime conversations and their
+context are never touched.
 
 ### The recipe (the data an automation is)
 

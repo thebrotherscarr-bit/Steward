@@ -7791,3 +7791,229 @@ def test_compare_transports_names_the_runs_of_another_set_version_it_leaves_out(
     monkeypatch.setattr(evals, "GIT_HEAD_AT_START", "e94cb90")
     monkeypatch.setattr(evals, "_git_head", lambda: "2681f88")
     assert evals.history_entry("small", {}, 0)["git_head"] == "e94cb90", "the head the run began on"
+
+
+# ---- SecondBrain's automations as MAF workflows (recipe_workflow.py, served by mcp_app.py) ----------------------------
+
+
+def _recipe_ground(tmp_path: Path) -> tuple[Path, Path]:
+    """A ground with the Estate's five repositories (a .git folder each), the plan file and an eval run's progress."""
+    import recipe_workflow as rw
+
+    ground = tmp_path / "Research"
+    for r in rw.estate_repos(ground):
+        (Path(r.dir) / ".git").mkdir(parents=True, exist_ok=True)
+    (ground / "WHATS_LEFT.md").write_text(
+        "# WHAT'S LEFT\n\n## Today's working path\n\n1. The eval framework, step 1.\n\n## The plan by office\n\nold\n", encoding="utf-8"
+    )
+    steward_dir = ground / "worlds" / "steward"
+    run = steward_dir / "storage" / "evals" / "runs" / "small-night"
+    run.mkdir(parents=True)
+    (run / "progress.txt").write_text(
+        "2026-11-05T01:00:00 bar small-night : sets small\n2026-11-05T01:40:00 done  small v4 (T0) run 1: 9/10 cases\n"
+        "2026-11-05T01:40:09 BAR DONE\n",
+        encoding="utf-8",
+    )
+    return ground, steward_dir
+
+
+def _fake_git(calls: list[list[str]]) -> Any:
+    """git and gh as recorded fakes: steward is on a feature branch, atlas has uncommitted changes, the rest clean."""
+    import json
+
+    async def run(program: str, args: Sequence[str], cwd: str) -> tuple[int, str, str]:
+        repo = Path(cwd).name
+        calls.append([program, *args, repo])
+        if program == "git" and args[0] == "rev-parse":
+            return 0, "fix-x" if repo == "steward" else "main", ""
+        if program == "git" and args[0] == "diff-index":
+            return (1 if repo == "atlas" else 0), "", ""
+        if program == "git" and args[0] == "pull":
+            return 0, "Fast-forward" if repo == "jesster" else "Already up to date.", ""
+        if program == "git" and args[0] == "log":
+            return 0, "ae02179 2026-11-05 Merge pull request #71" if repo == "jesster" else "", ""
+        if program == "gh" and args[0] == "pr":
+            return 0, json.dumps([{"number": 71, "title": "Steward keep-up", "mergedAt": "2026-11-05T02:00:00Z"}] if repo == "jesster" else []), ""
+        if program == "gh" and args[0] == "release":
+            return 0, json.dumps([{"tagName": "secondbrain-b85", "publishedAt": "2099-11-05T03:00:00Z"}, {"tagName": "secondbrain-b80", "publishedAt": "2000-10-01T03:00:00Z"}] if repo == "jesster" else []), ""
+        return 1, "", "unexpected"
+
+    return run
+
+
+class _Summarizer:
+    """A tool-less agent stand-in: records each run and its session."""
+
+    def __init__(self) -> None:
+        self.runs: list[tuple[str, Any]] = []
+
+    def create_session(self) -> object:
+        return object()
+
+    async def run(self, text: str, session: Any = None) -> Any:
+        from types import SimpleNamespace
+
+        self.runs.append((text, session))
+        return SimpleNamespace(text="Yesterday: Jesster #71 landed and b85 shipped.\nMore.")
+
+
+def _secondbrain(calls: list[tuple[str, dict[str, Any]]], *, sitting: dict[str, Any], statuses: list[dict[str, Any]] | None = None) -> Any:
+    import json
+
+    async def call(name: str, arguments: Mapping[str, Any]) -> str:
+        calls.append((name, dict(arguments)))
+        if name == "estate_status":
+            return json.dumps({"sitting": sitting, "repos": [
+                {"name": "research", "branch": "main", "head": "aaa1111", "origin_main": "aaa1111", "behind": 0, "ahead": 0, "clean": True},
+                {"name": "steward", "branch": "fix-x", "head": "bbb2222", "origin_main": "ccc3333", "behind": 3, "ahead": 1, "clean": False},
+            ]})
+        if name == "eval_start":
+            return json.dumps({"started": True, "tag": arguments["tag"], "progress": "p"})
+        if name == "eval_status":
+            return json.dumps((statuses or [{"done": True, "lines": []}]).pop(0))
+        raise RuntimeError(f"no tool {name}")
+
+    return call
+
+
+def _run_recipe(tmp_path: Path, recipe: dict[str, Any], tools: Any, summarizer: Any) -> dict[str, Any]:
+    import recipe_workflow as rw
+
+    async def _go() -> dict[str, Any]:
+        runs = rw.RecipeRuns(tmp_path / "recipes", tools=lambda: tools, summarizer=summarizer)
+        started = runs.start(recipe)
+        assert started["state"] == "running"
+        assert runs.status(started["run_id"])["state"] == "running", "run_recipe answers at once"
+        await runs._tasks[started["run_id"]]
+        return runs.status(started["run_id"]) | {"events": (tmp_path / "recipes" / f"{started['run_id']}.jsonl").read_text(encoding="utf-8")}
+
+    return asyncio.run(_go())
+
+
+def test_a_recipe_is_data_checked_against_the_fixed_steps() -> None:
+    """A recipe's steps come from STEPS only (what a later automation_save may write), each with bounded arguments."""
+    import recipe_workflow as rw
+
+    assert rw.STEPS == ("repo_log", "merged_prs", "releases", "eval_bars", "plan_left", "versions", "pull_ff", "eval_start", "eval_wait")
+    for bad, why in (
+        ({"steps": []}, "one or more steps"),
+        ({"steps": ["repo_log", "run_shell"]}, 'no workflow step "run_shell"'),
+        ({"steps": [{"step": "eval_start"}]}, "needs sets"),
+        ({"steps": [{"step": "eval_start", "sets": ["x"], "runs": 9}]}, "runs is 1 to 3"),
+        ({"steps": [{"step": "eval_wait", "hours": 30}]}, "at most 8"),
+    ):
+        with pytest.raises(rw.RecipeError, match=why):
+            rw.validate_recipe(bad)
+    r = rw.validate_recipe({"name": "Night", "steps": [{"step": "eval_start", "sets": ["aider-py"]}, "eval_wait"]})
+    assert r["steps"] == [{"step": "eval_start", "sets": ["aider-py"], "runs": 1, "transport": "ag-ui"}, {"step": "eval_wait", "hours": 8}]
+    graph = rw.recipe_graph({"name": "Startup", "steps": ["versions", "plan_left"], "summarize": "Write it."})
+    assert "1_versions" in graph["mermaid"] and "summarize" in graph["mermaid"] and "deliver" in graph["mermaid"]
+    assert graph["workflow"]["name"] == "recipe_startup", "WorkflowViz and to_dict for the Flows shelf"
+
+
+def test_startup_runs_as_a_maf_workflow_gathering_read_only_pulling_only_clean_mains(tmp_path: Path) -> None:
+    """The operator's Startup recipe as a MAF workflow (one executor per step, then summarize, then deliver): what each
+    step gathers, the ground never pulled in a sitting, one tool-less summarize run in a session of its own, and
+    never git status or git diff."""
+    import recipe_workflow as rw
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+    calls: list[list[str]] = []
+    sb: list[tuple[str, dict[str, Any]]] = []
+    tools = rw.RecipeTools(
+        repos=rw.estate_repos(ground), ground=str(ground), steward_dir=str(steward_dir),
+        run=_fake_git(calls), secondbrain=_secondbrain(sb, sitting={"open": True, "n": "112"}),
+    )
+    summarizer = _Summarizer()
+    recipe = {
+        "name": "Startup", "prompt": "Review work from the previous day on Github and bring all repos current.",
+        "steps": ["pull_ff", "versions", "repo_log", "merged_prs", "releases", "eval_bars", "plan_left"],
+        "summarize": "Write the daily what-happened from this: a short plain summary, under 300 words.",
+        "deliver": ["note", "telegram"],
+    }
+    status = _run_recipe(tmp_path, recipe, tools, summarizer)
+    assert status["state"] == "done" and status["ok"] is True, status
+    [(text, session)] = summarizer.runs
+    assert session is not None, "its own session"
+    assert text.startswith("Write the daily what-happened") and "The automation's own words: Review work" in text
+    for expected in (
+        "research: not pulled: Manjuel sitting 112 is open (RULE 9)",
+        "steward: not pulled: on branch fix-x, not main",
+        "jesster: pulled (fast-forward)",
+        "atlas: not pulled: the work tree has uncommitted changes",
+        "- steward: fix-x at bbb2222; origin/main ccc3333, 3 behind, 1 ahead, uncommitted changes",
+        "ae02179 2026-11-05 Merge pull request #71",
+        "#71 Steward keep-up",
+        "jesster: secondbrain-b85 (2099-11-05T03:00:00Z)",
+        "done  small v4 (T0) run 1: 9/10 cases",
+        "1. The eval framework, step 1.",
+    ):
+        assert expected in text, expected
+    assert "secondbrain-b80" not in text and "The plan by office" not in text
+    assert sorted(c[-1] for c in calls if c[:2] == ["git", "pull"]) == ["jesster"]
+    assert all(c[1] not in ("status", "diff") for c in calls if c[0] == "git"), "never git status or git diff"
+    assert status["short"] == "Yesterday: Jesster #71 landed and b85 shipped."
+    assert "What the steps gathered" in status["text"]
+    assert '"executor": "1_pull_ff"' in status["events"] and '"executor": "summarize"' in status["events"], "events as JSONL"
+    assert list((tmp_path / "recipes" / "checkpoints").iterdir()), "MAF's FileCheckpointStorage holds its checkpoints"
+
+
+def test_the_nightly_eval_recipe_starts_over_ag_ui_and_waits_for_bar_done(tmp_path: Path) -> None:
+    """eval_start and eval_wait as steps: SecondBrain's eval_start over AG-UI, eval_status read until BAR DONE (a fake
+    sleep between reads), the result its counts; no summarize, so no agent run."""
+    import recipe_workflow as rw
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+    sb: list[tuple[str, dict[str, Any]]] = []
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    statuses = [{"done": False, "lines": ["start aider-py run 1"]}, {"done": False, "lines": []},
+                {"done": True, "lines": ["2026-11-07T03:12:00 done  aider-py v1 (ext) run 1: 21/34 cases", "2026-11-07T03:12:04 BAR DONE"]}]
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=_secondbrain(sb, sitting={"open": False}, statuses=statuses), sleep=sleep)
+    summarizer = _Summarizer()
+    status = _run_recipe(tmp_path, {"name": "Nightly aider-py", "steps": [{"step": "eval_start", "sets": ["aider-py"]}, {"step": "eval_wait", "hours": 8}]}, tools, summarizer)
+    assert status["state"] == "done" and status["ok"] is True, status
+    [start] = [a for n, a in sb if n == "eval_start"]
+    assert start["sets"] == ["aider-py"] and start["transport"] == "ag-ui" and start["tag"].startswith("aider-py-")
+    assert len(slept) == 2 and summarizer.runs == []
+    assert "ended (BAR DONE)" in status["text"] and status["short"] == "done  aider-py v1 (ext) run 1: 21/34 cases"
+
+
+def test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him(tmp_path: Path) -> None:
+    """mcp_app.py lists run_recipe and recipe_status with his own tool, starts a recipe and reads it back; a bad recipe
+    is an error result. Red if the host stops serving them."""
+    import json
+    import time
+
+    import mcp_app
+    import recipe_workflow as rw
+    from starlette.testclient import TestClient
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir))
+    recipes = rw.RecipeRuns(tmp_path / "recipes", tools=lambda: tools, summarizer=None)
+    from agent_framework import Agent
+
+    agent = Agent(client=ScriptedChatClient(["hi"]), name="Steward", description="Steward")
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", "MCP-Protocol-Version": "2025-06-18"}
+
+    def rpc(http: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        return http.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).json()
+
+    with TestClient(mcp_app.build_mcp_app(agent, None, recipes)) as http:
+        names = [t["name"] for t in rpc(http, "tools/list", {})["result"]["tools"]]
+        assert {"run_recipe", "recipe_status"} <= set(names), names
+        out = rpc(http, "tools/call", {"name": "run_recipe", "arguments": {"recipe": {"name": "Plan", "steps": ["plan_left"]}}})["result"]
+        run_id = json.loads(out["content"][0]["text"])["run_id"]
+        for _ in range(200):
+            st = json.loads(rpc(http, "tools/call", {"name": "recipe_status", "arguments": {"run_id": run_id}})["result"]["content"][0]["text"])
+            if st["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert st["state"] == "done" and "The eval framework, step 1." in st["text"], st
+        bad = rpc(http, "tools/call", {"name": "run_recipe", "arguments": {"recipe": {"steps": ["run_shell"]}}})["result"]
+        assert bad["isError"] is True and "no workflow step" in bad["content"][0]["text"]
+    assert "build_mcp_app(agent, ask_card, recipes)" in Path(mcp_app.__file__).read_text(encoding="utf-8"), "main() serves them"
