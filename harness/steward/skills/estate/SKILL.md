@@ -16,14 +16,15 @@ Read first, every time. Then change one thing, on the card, and read again.
    - Restart, start or stop a server: `secondbrain_service_control` with `service` and `action`
      (`start`, `stop` or `restart`). It waits on the user's card.
    - A model stuck in memory, or two chat models loaded at once: `secondbrain_ollama_unload` with its `model`
-     name from the status. It waits on the user's card.
+     name from the status. It waits on the user's card. The `ollama-ops` skill has the rest of Ollama.
    - SecondBrain's update: `secondbrain_app_update` with `action="check"` first and report the two builds. Only
      on the user's word, `action="apply"`: it restarts SecondBrain and ends your connection, so say so first.
      Both ask the user's card.
 5. **Check.** Call `secondbrain_estate_status` again and report what changed, as the tool shows it.
 
-What the user has approved or denied: `secondbrain_approvals_history` (`limit`, newest first). Use it before
-asking again for something the user has just refused.
+What the user has approved or denied: `secondbrain_approvals_history` (`limit`, newest first), and how a held door
+call ended: `secondbrain_hold_status` (`id`). The `approvals` skill says how. Use them before asking again for
+something the user has just refused.
 
 Rules:
 - Every change asks the user's card. A refused or unanswered card means stop; never try another way round it.

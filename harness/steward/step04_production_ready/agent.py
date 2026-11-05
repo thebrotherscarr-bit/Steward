@@ -798,7 +798,9 @@ ESTATE_WORLDS: dict[str, str] = {
 }
 # The Estate as SecondBrain runs it, served on its MCP to him (SecondBrain electron/estate.cjs, 2026-11-04). The reads
 # never ask; the writes always ask the user's card. app_update always asks: one name covers its check and its apply.
-ESTATE_READS = ("estate_status", "estate_logs", "approvals_history")
+# hold_status (2026-11-04, the approvals skill) is the door's read of how one held call ended (SecondBrain
+# electron/door/registry.cjs), served on the same MCP; read here beside approvals_history, so the door's gate is not on it.
+ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status")
 ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
 
 

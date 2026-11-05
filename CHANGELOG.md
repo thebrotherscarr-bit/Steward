@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- The last Estate controls as skills. `ollama-ops` reads Ollama's loaded models with `secondbrain_estate_status`,
+  unloads a stale or crowding model only with `secondbrain_ollama_unload` on Kyle's card, and reads the pinned
+  `OLLAMA_*` settings from the Ollama settings note in SecondBrain, never from `.env`. `approvals` answers what Kyle
+  approved, denied or left waiting from `secondbrain_approvals_history` and `secondbrain_hold_status` (how one held
+  door call ended), and never acts on a card. `hold_status` joins `ESTATE_READS`: on his live build, no card. Test:
+  `test_the_ollama_ops_and_approvals_skills_read_and_leave_every_change_to_the_card`.
 - Two read skills for the Estate's own record. `eval-history` (`scripts/eval_history.py`) compares the last runs of
   a set in `storage/evals/history.jsonl`: each run's counts, commit and model, its failed checks, and which checks
   flipped between the last two. `telemetry` (`scripts/telemetry.py`) summarises the newest spans of
