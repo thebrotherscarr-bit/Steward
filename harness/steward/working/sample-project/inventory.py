@@ -16,10 +16,13 @@ def order_total(items: list[Item], discount_percent: float = 0.0) -> float:
 
     Parameters:
         items: list[Item] – items in the order.
-        discount_percent: float – discount percentage in whole number (e.g., 10 for 10%). (default 0.0).        float – the discounted total rounded to the nearest cent.
+        discount_percent: float – discount percentage (default 0.0).
+
+    Returns:
+        float – the discounted total rounded to the nearest cent.
     """
     subtotal = sum(item.unit_price * item.quantity for item in items)
-    return round(subtotal * (1 - discount_percent), 2)
+    return round(subtotal * (1 - discount_percent / 100), 2)
 
 
 def low_stock(items: list[Item], threshold: int = 5) -> list[str]:
