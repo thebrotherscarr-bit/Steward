@@ -4,7 +4,7 @@
 # Never tune the harness on these asks; a fix for a T1 failure is proved on a new case first.
 name: heldout
 tier: T1
-version: 1
+version: 2
 owner: operator
 runner: asks
 split: full
@@ -13,19 +13,24 @@ changes:
   1: >-
     Five asks on harness/steward/working/sample-project-2 (units.py): add a function, fix a planted bug, a rename
     that keeps the tests green, a README line that is genuinely missing, and a planted failing test to make pass.
+  2: >-
+    answer_on_topic widened (the cookbook: an answer-level check tests what matters): run 2 of v1 (e94cb90) fixed
+    test_boiling_point and failed only because its reply named units.py and the changed formula, not a subject word.
+    Each subject now also takes the file changed (units.py), and fix_bug the corrected formula ("9 / 5"), refactor
+    the old name (length_in_metres).
 cases:
   - id: add_function
     ask: >-
       Add a function fahrenheit_to_celsius(fahrenheit) to harness/steward/working/sample-project-2/units.py that
       converts degrees Fahrenheit to degrees Celsius, with a docstring.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
-    subject: [fahrenheit_to_celsius]
+    subject: [fahrenheit_to_celsius, units.py]
     precondition: fahrenheit_to_celsius_works
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, fahrenheit_to_celsius_works]
   - id: fix_bug
     ask: Fix the bug that makes test_boiling_point fail in harness/steward/working/sample-project-2.
     fixture: {project: harness/steward/working/sample-project-2, plant: fahrenheit_bug}
-    subject: [boiling, celsius_to_fahrenheit, fahrenheit]
+    subject: [boiling, celsius_to_fahrenheit, fahrenheit, test_boiling_point, units.py, "9 / 5"]
     precondition: boiling_point_test_passes
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, boiling_point_test_passes]
   - id: refactor
@@ -33,7 +38,7 @@ cases:
       Rename LENGTH_IN_METRES to METRES_PER_UNIT everywhere in harness/steward/working/sample-project-2, keeping its
       tests passing.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
-    subject: [metres_per_unit]
+    subject: [metres_per_unit, length_in_metres, units.py]
     precondition: metres_per_unit_renamed
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, metres_per_unit_renamed]
   - id: docs_line
@@ -49,6 +54,6 @@ cases:
       Make the failing test test_format_quantity_without_unit pass in harness/steward/working/sample-project-2,
       without changing the test.
     fixture: {project: harness/steward/working/sample-project-2, plant: failing_test_added}
-    subject: [format_quantity, without_unit]
+    subject: [format_quantity, without_unit, units.py]
     precondition: without_unit_test_passes
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, without_unit_test_passes]

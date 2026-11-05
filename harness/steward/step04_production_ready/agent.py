@@ -2118,11 +2118,18 @@ async def sandbox_untrusted_shell(context: FunctionInvocationContext, call_next:
         label = context.metadata.get("context_label")
         seen = session is not None and bool(session.state.get(_SANDBOX_UNTRUSTED_KEY))
         if seen or getattr(label, "integrity", None) == IntegrityLabel.UNTRUSTED:
+            if session is not None:  # the shell is closed for the session, so EXECUTE is offered its stand-in
+                session.state[_SANDBOX_UNTRUSTED_KEY] = True
             context.result = SANDBOX_SHELL_REFUSAL
             return
     await call_next()
     if name in _SANDBOX_UNTRUSTED_SOURCES and session is not None:
         session.state[_SANDBOX_UNTRUSTED_KEY] = True
+
+
+def sandbox_shell_closed(session: Any) -> bool:
+    """Whether sandbox_untrusted_shell has closed run_shell for this session (untrusted content is in its context)."""
+    return session is not None and bool(session.state.get(_SANDBOX_UNTRUSTED_KEY))
 
 
 # </sandbox>

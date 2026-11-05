@@ -5829,7 +5829,7 @@ def test_execute_is_not_offered_codeact_and_an_empty_plan_is_asked_for_the_struc
     assert wf.offered_in_step("execute_code", wf.ANSWER_STEP), "an answer still counts with CodeAct"
     assert not wf.offered_in_step("execute_code", wf.EXECUTE_STEP)
     monkeypatch.setattr(steward, "hyperlight_sandbox_on", lambda: True)
-    assert wf.offered_in_step("execute_code", wf.EXECUTE_STEP), "the sandbox's shell stand-in"
+    assert wf.offered_in_step("execute_code", wf.EXECUTE_STEP, True), "the sandbox's shell stand-in, once it is closed"
 
 
 # The text-shaped calls PLAN ended on in the bars (aba870f: the discount ask, both runs; earlier: the README ask and the
@@ -6749,7 +6749,7 @@ def test_the_eval_sets_are_versioned_files_and_the_validator_refuses_what_it_mus
 
     assert evals.validate_sets() == [], evals.validate_sets()
     assert evals.cli(["validate"]) == 0
-    assert {(s.tier, s.name, s.version) for s in evals.EVAL_SETS.values()} >= {("T0", "small", 1), ("T0", "steps", 2), ("T1", "heldout", 1)}
+    assert {(s.tier, s.name, s.version) for s in evals.EVAL_SETS.values()} >= {("T0", "small", 2), ("T0", "steps", 2), ("T1", "heldout", 2)}
     assert evals.SMALL_ASKS == evals.SMALL_SET.asks and len(evals.SMALL_ASKS) == 3, "evals.py small runs t0-small.yaml"
     assert evals.STEPS_QUERY == evals.EVAL_SETS["steps"].cases[0].ask, "evals.py steps runs t0-steps.yaml"
     assert all(evals.SMALL_ASK_RESULT_CHECKS[ask] for ask in evals.SMALL_ASKS), "every small ask is measured"
@@ -6858,14 +6858,14 @@ def test_the_eval_history_records_each_runs_set_version_and_tier_and_the_bar_rea
     assert (entry["set_version"], entry["tier"]) == (None, None), entry
     run("heldout", 5, 5)
     entry = json.loads(history.read_text(encoding="utf-8").splitlines()[-1])
-    assert (entry["set"], entry["set_version"], entry["tier"]) == ("heldout", 1, "T1"), entry
+    assert (entry["set"], entry["set_version"], entry["tier"]) == ("heldout", 2, "T1"), entry
     assert evals.bar_status("heldout")[0] is False, "one run is not twice in a row"
     run("heldout", 3, 5)
     assert evals.bar_status("heldout")[0] is False, "3/5 is under the bar of 4"
     run("heldout", 4, 5)
     run("heldout", 4, 5)
     met, line = evals.bar_status("heldout")
-    assert met and "T1 heldout v1 bar 4/5 2x in a row: MET" in line, line
+    assert met and "T1 heldout v2 bar 4/5 2x in a row: MET" in line, line
     lines = history.read_text(encoding="utf-8").splitlines()
     old = json.loads(lines[-1])
     old["set_version"] = 0
@@ -7302,3 +7302,73 @@ def test_the_transport_flag_takes_the_asks_sets_and_the_comparison_runs_nothing(
     assert "in-process" in out and "responses" in out and "ag-ui" in out and "Decision: keep AG-UI off" in out, out
     script = (evals.EVAL_SETS_DIR / "run-bar.ps1").read_text(encoding="utf-8")
     assert "[string]$Transport" in script and "--transport" in script, "run-bar passes the transport on"
+
+def test_execute_is_offered_codeact_only_once_the_sandbox_has_closed_the_shell(monkeypatch: Any) -> None:
+    """T1 heldout v1 run 2 (e94cb90, trace 2026-11-05 14:57Z): with the Hyperlight sandbox on and nothing untrusted
+    read, EXECUTE was offered execute_code and wrote units.py with it, into the sandbox's copy of harness/: the tool
+    answered "", no .py file changed, and fahrenheit_to_celsius_works failed on an ImportError. Replayed through
+    step_tools_turn: EXECUTE's live list loses execute_code until sandbox_untrusted_shell has closed the session's
+    shell (a run_shell refused after untrusted content), and then keeps it as the shell's stand-in."""
+    from types import SimpleNamespace
+
+    import steward_workflow as wf
+    from agent_framework.security import ContentLabel, IntegrityLabel
+
+    monkeypatch.setattr(steward, "hyperlight_sandbox_on", lambda: True)
+    session = SimpleNamespace(state={wf.STEP_KEY: wf.EXECUTE_STEP})
+    names = ["file_access_read", "file_access_write", "run_shell", "execute_code", "todos_complete"]
+
+    def offered() -> list[str]:
+        tools = [SimpleNamespace(name=n) for n in names]
+        context = SimpleNamespace(session=session, options={"tools": tools})
+
+        async def call_next() -> None:
+            return None
+
+        asyncio.run(wf.step_tools_turn(context, call_next))
+        return [t.name for t in tools]
+
+    assert offered() == ["file_access_read", "file_access_write", "run_shell", "todos_complete"], "the run-2 replay"
+    assert not steward.sandbox_shell_closed(session)
+
+    # A run_shell after untrusted content (FIDES's label, with no untrusted call marked) is refused and closes the shell.
+    ran: list[str] = []
+    shell = SimpleNamespace(
+        function=SimpleNamespace(name="run_shell"), session=session, result=None,
+        metadata={"context_label": ContentLabel(integrity=IntegrityLabel.UNTRUSTED)},
+    )
+
+    async def run_it() -> None:
+        ran.append("run_shell")
+
+    asyncio.run(steward.sandbox_untrusted_shell(shell, run_it))
+    assert ran == [] and shell.result == steward.SANDBOX_SHELL_REFUSAL
+    assert steward.sandbox_shell_closed(session)
+    assert "execute_code" in offered(), "the refusal sends the step to execute_code, so it is offered"
+
+    monkeypatch.setattr(steward, "hyperlight_sandbox_on", lambda: False)
+    assert "execute_code" not in offered(), "no sandbox, no CodeAct in EXECUTE"
+
+
+def test_answer_on_topic_takes_the_file_changed_or_the_changed_formula() -> None:
+    """T1 heldout v1 run 2 (e94cb90): the boiling-point fix was right (its result check passed), but answer_on_topic
+    failed on his reply naming units.py and the corrected formula, not 'boiling' or 'fahrenheit'. t1-heldout v2 and
+    t0-small v2 widen the subjects: the file changed, the test, the function or the formula. Off topic still fails."""
+    import evals
+
+    def said(text: str) -> Message:
+        return Message(role="assistant", contents=[Content.from_text(text)])
+
+    asks = {c.id: c.ask for s in ("heldout", "small") for c in evals.EVAL_SETS[s].cases}
+    assert evals.EVAL_SETS["heldout"].version >= 2 and evals.EVAL_SETS["small"].version >= 2
+    run2 = (
+        "✅ updated **harness/steward/working/sample-project-2/units.py**: changed the conversion formula from  \n"
+        "`celsius * 5 / 9 + 32` to `celsius * 9 / 5 + 32`.  \n\nall tests pass."
+    )
+    assert scored(evals.answer_on_topic, asks["fix_bug"], [said(run2)]).passed, "the run-2 reply"
+    assert scored(evals.answer_on_topic, asks["fix_bug"], [said("The formula is `celsius * 9 / 5 + 32` now.")]).passed
+    assert scored(evals.answer_on_topic, asks["add_function"], [said("Added the function to units.py.")]).passed
+    assert scored(evals.answer_on_topic, asks["item_count"], [said("Added it to inventory.py, with a docstring.")]).passed
+    assert scored(evals.answer_on_topic, asks["discount"], [said("order_total divides by 100 now.")]).passed
+    for case in ("fix_bug", "add_function", "item_count", "discount", "refactor", "failing_test"):
+        assert not scored(evals.answer_on_topic, asks[case], [said("Paris is the capital of France.")]).passed, case
