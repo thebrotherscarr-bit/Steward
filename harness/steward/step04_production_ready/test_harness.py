@@ -102,8 +102,8 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
 SKILLS = (
-    "agent-framework-builder-python", "code-review", "codebase-map", "estate", "eval-history", "evals", "github", "improve",
-    "run-tests", "secondbrain-notes", "telemetry",
+    "agent-framework-builder-python", "approvals", "code-review", "codebase-map", "estate", "eval-history", "evals", "github",
+    "improve", "ollama-ops", "run-tests", "secondbrain-notes", "telemetry",
 )
 
 
@@ -3958,6 +3958,10 @@ def _estate_server() -> Any:
         return "[]"
 
     @server.tool()
+    def hold_status(id: str) -> str:
+        return '{"state": "denied"}'
+
+    @server.tool()
     def service_control(service: str, action: str) -> str:
         return "restarted"
 
@@ -5004,6 +5008,29 @@ def test_the_eval_history_and_telemetry_skills_compare_runs_and_read_only_the_tr
     assert summary["tool_calls"] == {"file_access_write": 1}, "only the tail is read: the early span is not in it"
     assert summary["errors"] == 1 and summary["last_errors"][0]["error"] == "method not found", summary
     assert summary["read_kb"] == 2 and summary["spans"] < 10, summary
+
+
+def test_the_ollama_ops_and_approvals_skills_read_and_leave_every_change_to_the_card(monkeypatch: Any) -> None:
+    """The last Estate controls as skills: ollama-ops reads the status and unloads only through ollama_unload (a card),
+    and takes the OLLAMA_* settings from the note, never .env; approvals reads approvals_history and hold_status, which
+    are on his live build with no card, and names no write."""
+    skill = {name: (steward._SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8") for name in ("ollama-ops", "approvals")}
+    asks = {f"secondbrain_{t}" for t in steward.ESTATE_ASKS}
+    assert {"secondbrain_estate_status", "secondbrain_ollama_unload", "secondbrain_read_note"} <= {
+        w.strip("`") for w in skill["ollama-ops"].split() if w.startswith("`secondbrain_")
+    }, "ollama-ops tools"
+    assert ".env" in skill["ollama-ops"] and "card" in skill["ollama-ops"]
+    named = {w.strip("`,.") for w in skill["approvals"].split() if w.startswith("`secondbrain_")}
+    assert named == {"secondbrain_approvals_history", "secondbrain_hold_status"} and not named & asks, named
+    assert {"approvals_history", "hold_status"} <= set(steward.ESTATE_READS), "both reads on his live build"
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    held = Content.from_function_call(call_id="h1", name="secondbrain_hold_status", arguments={"id": "hold_1"})
+    client, _, response = run_steward([held, "It was denied."], "Was my hold approved?", mode="execute")
+    assert not approval_requests(response) and "denied" in function_results(client.calls[1])[0], "a read, no card"
 
 
 def test_fides_enforce_refuses_an_untrusted_write_and_leaves_a_trusted_one(monkeypatch: Any) -> None:
