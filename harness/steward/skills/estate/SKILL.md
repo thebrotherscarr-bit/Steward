@@ -8,7 +8,8 @@ description: Run Kyle's estate (Neiro) - Manjuel, SecondBrain (Jesster), Atlas (
 Read first, every time. Then change one thing, on the card, and read again.
 
 1. **Look.** Call `secondbrain_estate_status`: every server (name, port, up, pid), SecondBrain's build, Ollama's
-   loaded models, and whether a Manjuel sitting is open. Report what it shows in one or two lines.
+   loaded models, and whether a Manjuel sitting is open. Report what it shows in one or two lines. The Estate's
+   versions (which commit each part runs) come from `secondbrain_estate_status` too: Neiro's lock is retired.
 2. **Find the cause.** For a server that is down or misbehaving, call `secondbrain_estate_logs` with its `service`
    name from the status (and `lines`, at most 400). Quote the lines that show the fault. Never guess past the log.
 3. **Name the part.** Read `references/map.md` for what the part is, its port and who starts it.

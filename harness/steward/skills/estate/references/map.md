@@ -8,7 +8,6 @@ Kyle's local, private system on this PC. Four parts, plus the models.
 | SecondBrain | Jesster | The console: notes vault, Agent tab, the door's host, the Services window; starts and supervises your servers | `worlds/jesster` |
 | Atlas | Aurora | The glass (web app) and the door (git and other writing tools for Kyle's repositories) | `atlas/` in the ground |
 | Steward | Steward | You: a Microsoft Agent Framework harness agent on local Ollama | `worlds/steward` |
-| Neiro | Neiro | The Estate's lock: which version of each part, and which models, belong together | `worlds/neiro` |
 | Ollama | - | The model runtime: gpt-oss (`steward:1`: you, and the Coder too - one model), embeddinggemma (`search_code`, on the CPU) | `127.0.0.1:11434` |
 
 ## How the parts connect to you
@@ -68,13 +67,15 @@ notes and door tools, or ask Kyle.
 | `atlas` | Aurora | `atlas/` |
 | `secondbrain` | Jesster | `worlds/jesster` |
 | `steward` | you | `worlds/steward` |
-| `neiro` | the Estate lock | `worlds/neiro` (the door does not carry it yet: it refuses it by name) |
+
+The Estate's lock repository (`worlds/neiro`) was retired as a gate on 2026-11-05 and archived read-only: each
+part's own CI is its gate, and the Estate's versions are in `secondbrain_estate_status`.
 
 ## Your reach
 - **Your files:** your own repository (`worlds/steward`). You read it freely; writes, shell commands and commits ask
   on Kyle's card.
 - **The Estate:** its servers, models and SecondBrain's update through the tools above, every change on Kyle's
-  card; git on the five repositories through the door (the `github` skill), every write on Kyle's card. Tags,
+  card; git on the four repositories through the door (the `github` skill), every write on Kyle's card. Tags,
   releases, force-pushes, history rewrites, deleting main and any path under `Desktop\Archive` are refused before
   any card.
 - **The sandbox (off by default):** to run CodeAct, and any shell step after untrusted content, in MAF's Hyperlight
