@@ -6396,19 +6396,29 @@ def test_a_read_that_finds_nothing_at_a_path_missing_a_part_of_the_named_one_is_
     assert steward.missed_path_meant(readme, [readme]) is None, "the named path itself is there"
 
 
-def test_todos_complete_by_title_is_answered_with_the_open_todos_ids_and_completes_nothing() -> None:
+def test_todos_complete_by_title_gets_the_one_open_todos_id_and_an_unclear_title_is_answered_with_the_ids() -> None:
     """The bar at f7b5120 (2026-11-05 06:26Z, the discount ask): he called todos_complete with {"title": "Edit file",
     "reason": ...}; MAF's "Invalid arguments for 'todos_complete'" twice, then his last reply was the call as raw text.
-    Such a call is now answered with TODO_IDS_REFUSAL naming the open todos by id (todo_ids_by_name), nothing is
-    completed, and his next call by id completes it."""
-    add = Content.from_function_call(call_id="a1", name="todos_add", arguments={"todos": [{"title": "Edit file"}]})
-    by_title = Content.from_function_call(call_id="c1", name="todos_complete", arguments={"items": [{"title": "Edit file", "reason": "Fixed."}]})
-    by_id = Content.from_function_call(call_id="c2", name="todos_complete", arguments={"items": [{"id": 1, "reason": "Fixed."}]})
-    client, _, _ = run_steward([add, by_title, by_id, "Done."], "Fix it.", mode="execute")
+    At 1b56963 (07:30Z, the README ask) the refusal alone (TODO_IDS_REFUSAL) sent him to todos_add, not offered, and
+    he decided the todo tools were missing. Now a title naming exactly one open todo (backticks and case aside, or the
+    start of it) gets that todo's id through MAF's argument-repair hook (todo_ids_by_name), and the todo is completed;
+    a title that names none, or several, is answered with the open todos by id, and nothing is completed."""
+    from types import SimpleNamespace
+
+    readme = "Read the current contents of `harness/steward/working/sample-project/README.md`"
+    add = Content.from_function_call(call_id="a1", name="todos_add", arguments={"todos": [{"title": readme}, {"title": "Edit file"}, {"title": "Edit files"}]})
+    by_title = Content.from_function_call(call_id="c1", name="todos_complete", arguments={"items": [
+        {"title": "read the current contents of harness/steward/working/sample-project/README.md", "reason": "Read it."},
+    ]})
+    unclear = Content.from_function_call(call_id="c2", name="todos_complete", arguments={"items": [{"title": "Edit", "reason": "Fixed."}]})
+    client, _, _ = run_steward([add, by_title, unclear, "Done."], "Fix it.", mode="execute")
     results = function_results(client.calls[-1])
-    refusal = next(r for r in results if r.startswith("Not completed"))
-    assert 'id 1: "Edit file"' in refusal and '{"id": 1, "reason": "..."}' in refusal, refusal
-    assert results.index(refusal) < len(results) - 1 and "completed" in results[-1] and "1" in results[-1], results
+    assert '"completed": 1' in results[1].replace(" ", "").replace('"completed":1', '"completed": 1'), results
+    refusal = results[2]
+    assert refusal.startswith("Not completed") and 'id 2: "Edit file"' in refusal and 'id 3: "Edit files"' in refusal, refusal
+    assert 'id 1:' not in refusal, "the todo completed by its title is no longer open"
+    left = [SimpleNamespace(id=2, title="Edit file"), SimpleNamespace(id=3, title="Edit files")]
+    assert steward.todo_id_for_title("Edit files", left) == 3, "the exact title wins over a longer one it starts"
 
 
 def test_a_call_maf_never_ran_is_no_change_made_while_planning() -> None:
