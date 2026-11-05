@@ -9,6 +9,8 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 | `t0-small.yaml` | T0, regression (frozen) | small | `evals.py small [--gate]` |
 | `t0-steps.yaml` | T0, regression (frozen) | steps | `evals.py steps` |
 | `t1-heldout.yaml` | T1, held out | heldout | `evals.py heldout` |
+| `ext-bfcl.yaml` | ext, calibration (outside, pinned) | bfcl | `evals.py bfcl` |
+| `ext-aider-py.yaml` | ext, calibration (outside, pinned) | aider-py | `evals.py aider-py` |
 
 `baselines.json` holds, per set and version, the fingerprint of its cases (`cases`) and any baseline its gate reads
 (`small` v1: `checks`). `run-bar.ps1` runs sets for their bar; `evals.py bar <set>` says whether a bar is met.
@@ -113,3 +115,39 @@ five asks: add `fahrenheit_to_celsius`; fix the planted `fahrenheit_bug` (`test_
 planted failing `test_format_quantity_without_unit` pass without changing it. Bar: 4/5, twice in a row. Each run puts
 the project back as committed (git checkout of the folder) and removes any untracked file it left in the repository.
 Never tune the harness on these asks.
+
+## ext, outside sets (calibration only)
+
+`ext-bfcl.yaml` and `ext-aider-py.yaml` are public benchmarks, pinned once in `data/` (each folder with its source's
+LICENSE; the set file's `source` names the repository, the commit, the license, the attribution and a contamination
+note). Nothing is downloaded at run time. They calibrate Steward against outside numbers and are never a gate: their
+cases may be in a model's training data, and no harness change is tuned on them. Their code is
+`step04_production_ready/ext_sets.py`.
+
+| Set | Source (commit, license) | Cases | Scored by |
+|---|---|---|---|
+| bfcl | ShishirPatil/gorilla `6ea5797`, Apache-2.0: BFCL v4 | simple_python 20, multiple 15, parallel 15, parallel_multiple 15, irrelevance 15 | `bfcl_ast_match`, `no_tool_called` |
+| aider-py | Aider-AI/polyglot-benchmark `7e0611e`, MIT (Exercism's Python track) | 20 exercises | `exercise_tests_pass` |
+
+- **bfcl** (runner `bfcl`): each case's functions are offered to a bare MAF `Agent` on Steward's model
+  (`OllamaChatClient`, `OLLAMA_MODEL`) as declaration-only tools (`FunctionTool(func=None)`: the run stops on the
+  calls, nothing runs), with no Estate tool and no instructions. MAF's `evaluate_agent` scores the calls against the
+  case's possible answers (its `expected_output`): `bfcl_ast_match` is BFCL's AST check (the function, its required
+  parameters, no parameter the answer lacks, each value among its acceptable ones; one call for simple and multiple,
+  one-to-one in any order for the parallel kinds), `no_tool_called` the irrelevance check.
+- **aider-py** (runner `exercises`): each exercise (stub, tests, instructions) is copied into
+  `harness/steward/working/ext-aider-py/<name>` (gitignored, removed after the case) and Steward's workflow runs the
+  ask on it as the asks runner does: the plan and the writes approved, a shell card only for pytest on that folder,
+  git_commit and everything else denied. `exercise_tests_pass` then runs the PINNED test file on the stub he left
+  (`python -m unittest`, 60 s at most): all green or fail. No Docker. Validate checks that each stub fails its tests.
+
+An ext set's cases are `{id, checks}` (an id in the pinned data, the runner's one check); its fingerprint covers the
+cases, the source and every pinned file, so a change to the snapshot is a new version too. `num_repetitions: N`
+runs each case N times (a flakiness reading). Run one in its own window, one model at a time:
+
+```powershell
+powershell -File harness/steward/evals/run-bar.ps1 -Sets bfcl,aider-py -Tag ext-first -Runs 1 -RunMinutes 300
+```
+
+To re-pin from a newer source commit: copy the rows or exercises again, update `source.commit` and `changes`, bump
+`version`, and record the fingerprint `evals.py validate` names.

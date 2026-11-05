@@ -27,5 +27,15 @@
     "2": {
       "cases": "426d744fb4c3039dd2006dea6cc47ae52a78038b0b37e641b08758302af5f597"
     }
+  },
+  "bfcl": {
+    "1": {
+      "cases": "158874801cc2ec1761c9140f7996fcf622d6d7e08dbe11146b5511b36d1ddb65"
+    }
+  },
+  "aider-py": {
+    "1": {
+      "cases": "764646a3be81943e1587b31e0be90f4bfdeded21496bea5bd3b6641c7a71500d"
+    }
   }
 }

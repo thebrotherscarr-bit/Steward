@@ -168,16 +168,17 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
         else:
             self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
             reply = self.replies.pop(0) if self.replies else "done"
-        content = reply if isinstance(reply, Content) else Content.from_text(reply)
+        # A list of Contents is one reply holding them all (several function calls in one turn: BFCL's parallel cases).
+        contents = list(reply) if isinstance(reply, list) else [reply if isinstance(reply, Content) else Content.from_text(reply)]
         if stream:
             # As MockBaseChatClient._get_streaming_response: the reply as one update, finalized from updates.
             async def _stream() -> AsyncIterable[ChatResponseUpdate]:
-                yield ChatResponseUpdate(contents=[content], role="assistant", finish_reason="stop")
+                yield ChatResponseUpdate(contents=contents, role="assistant", finish_reason="stop")
 
             return ResponseStream(_stream(), finalizer=lambda updates: ChatResponse.from_updates(updates))
 
         async def _get() -> ChatResponse:
-            return ChatResponse(messages=Message(role="assistant", contents=[content]))
+            return ChatResponse(messages=Message(role="assistant", contents=contents))
 
         return _get()
 
@@ -7027,6 +7028,232 @@ def test_the_ag_ui_host_streams_the_workflow_and_raises_a_write_card_as_an_inter
     assert ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"] == [t for t in types if t.startswith("TEXT_MESSAGE")], types
     assert [e["delta"] for e in refused if e["type"] == "TEXT_MESSAGE_CONTENT"] == [wf.NOT_APPROVED], refused
     assert types[-1] == "RUN_FINISHED" and not refused[-1].get("outcome"), refused[-1]
+
+
+def test_the_bfcl_checker_scores_calls_as_bfcls_ast_check_does() -> None:
+    """ext-bfcl's bfcl_ast_match, as BFCL's AST checker: the function, its required parameters, no parameter the answer
+    lacks, each value among its acceptable ones (strings case- and punctuation-blind, an int for a float, "" meaning it
+    may be left out), one call for simple and multiple, one-to-one in any order for the parallel kinds. Every pinned
+    answer, called with its own first acceptable values in reverse order, matches; a wrong value or a missing call
+    does not."""
+    import json
+
+    import ext_sets
+
+    rows = ext_sets.load_bfcl(ext_sets.EVALS_DIR / "data" / "bfcl")
+
+    def first(options: list[Any]) -> Any:
+        value = next(o for o in options if o != "")
+        return {k: first(v) for k, v in value.items() if any(o != "" for o in v)} if isinstance(value, dict) else value
+
+    scored = 0
+    for row in rows.values():
+        expected = json.loads(ext_sets.bfcl_expected(row))
+        if row["category"] == "irrelevance":
+            continue
+        calls = [
+            (name, {k: first(v) for k, v in params.items() if any(o != "" for o in v)})
+            for call in expected["ground_truth"] for name, params in call.items()
+        ]
+        assert ext_sets.bfcl_match_problem(calls[::-1], expected) is None, (row["id"], calls)
+        scored += 1
+    assert scored == 65 and len(rows) == 80
+
+    triangle = json.loads(ext_sets.bfcl_expected(rows["simple_python_0"]))
+    assert ext_sets.bfcl_match_problem([("calculate_triangle_area", {"base": 10, "height": 5})], triangle) is None
+    assert ext_sets.bfcl_match_problem([("calculate_triangle_area", {"base": 10.0, "height": 5, "unit": "Units"})], triangle) is None
+    assert "is not one of" in ext_sets.bfcl_match_problem([("calculate_triangle_area", {"base": 11, "height": 5})], triangle)
+    assert "missing required" in ext_sets.bfcl_match_problem([("calculate_triangle_area", {"base": 10})], triangle)
+    assert "the answer does not have" in ext_sets.bfcl_match_problem(
+        [("calculate_triangle_area", {"base": 10, "height": 5, "colour": "red"})], triangle
+    )
+    assert "2 call(s)" in ext_sets.bfcl_match_problem([("calculate_triangle_area", {"base": 10, "height": 5})] * 2, triangle)
+    assert ext_sets.bfcl_match_problem([], triangle) == "no function was called"
+    spotify = json.loads(ext_sets.bfcl_expected(rows["parallel_0"]))
+    swift, maroon = ("spotify_play", {"artist": "Taylor Swift", "duration": 20}), ("spotify_play", {"artist": "Maroon 5", "duration": 15})
+    assert ext_sets.bfcl_match_problem([maroon, swift], spotify) is None, "parallel calls match in any order"
+    assert "one to one" in ext_sets.bfcl_match_problem([swift, swift], spotify), "each call matches a different answer"
+    assert ext_sets.bfcl_tool_name("math.factorial") == "math_factorial"
+    assert ext_sets.bfcl_json_schema({"type": "dict", "properties": {"x": {"type": "float"}, "t": {"type": "tuple"}, "a": {"type": "any"}}}) == {
+        "type": "object", "properties": {"x": {"type": "number"}, "t": {"type": "array"}, "a": {}},
+    }
+
+
+def test_the_bfcl_set_offers_each_cases_functions_as_declaration_only_tools_and_scores_the_calls(monkeypatch: Any) -> None:
+    """evals.py bfcl: each case's question goes to a bare MAF agent whose only tools are the case's functions, declared
+    and never run (FunctionTool with func=None: the run stops on the calls), and MAF's evaluate_agent scores them under
+    bfcl@v1 with bfcl_ast_match, or no_tool_called for irrelevance. Recorded replies stand in for the model: a right
+    simple call, a right parallel pair, a wrong value, a call where none fits and a text answer where none fits."""
+    import dataclasses
+    import json
+
+    import evals
+    import ext_sets
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    bfcl = evals.EVAL_SETS["bfcl"]
+    assert (bfcl.tier, bfcl.runner, bfcl.eval_name, len(bfcl.cases)) == ("ext", "bfcl", "bfcl@v1", 80)
+    assert {c.id.rsplit("_", 1)[0] for c in bfcl.cases} == set(ext_sets.BFCL_CATEGORIES)
+    picked = ("simple_python_0", "simple_python_20", "parallel_0", "irrelevance_0", "irrelevance_16")
+    eval_set = dataclasses.replace(bfcl, cases=tuple(c for c in bfcl.cases if c.id in picked))
+    assert [c.id for c in eval_set.cases] == list(picked)
+    rows = ext_sets.load_bfcl(ext_sets.data_folder(bfcl.source))
+    assert eval_set.cases[0].ask == rows["simple_python_0"]["question"][0][0]["content"]
+
+    def call(name: str, arguments: dict[str, Any], n: int) -> Any:
+        return Content.from_function_call(call_id=f"c{n}", name=name, arguments=json.dumps(arguments))
+
+    wrong = next(iter(rows["simple_python_20"]["ground_truth"][0].items()))
+    client = ScriptedChatClient([
+        call("calculate_triangle_area", {"base": 10, "height": 5}, 1),
+        call(ext_sets.bfcl_tool_name(wrong[0]), {k: "not this" for k in wrong[1]}, 2),
+        [call("spotify_play", {"artist": "Maroon 5", "duration": 15}, 3), call("spotify_play", {"artist": "Taylor Swift", "duration": 20}, 4)],
+        call("determine_body_mass_index", {"weight": 70.0, "height": 1.8}, 5),
+        "None of these functions can answer that.",
+    ])
+    responses, asks, expected = asyncio.run(ext_sets.run_bfcl(eval_set, evals, client=client))
+    offered = [[t.name for t in c["options"].get("tools") or []] for c in client.calls]
+    assert offered[0] == ["calculate_triangle_area"] and offered[2] == ["spotify_play"], offered
+    assert all(t.declaration_only for c in client.calls for t in c["options"]["tools"]), "declared, never run"
+    assert len(client.calls) == 5, "one model call per case: the declared calls end the run, nothing is executed"
+    result = asyncio.run(ext_sets.score_bfcl(eval_set, evals, responses, asks, expected))
+    assert [item.status == "pass" for item in result.items] == [True, False, True, False, True], [
+        [(s.name, s.passed, (s.sample or {}).get("reason")) for s in item.scores] for item in result.items
+    ]
+    reasons = {s.name: (s.sample or {}).get("reason") for s in result.items[3].scores}
+    assert reasons["no_tool_called"] == "called ['determine_body_mass_index']"
+
+
+def test_the_aider_py_set_runs_each_exercise_on_a_throwaway_copy_and_scores_its_pinned_tests(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    """evals.py aider-py: each exercise is copied into harness/steward/working/ext-aider-py/<name> (gitignored), Steward's
+    workflow runs on it (evals.run_case, faked here: one run solves it, one leaves the stub, one rewrites the test file
+    to pass), and exercise_tests_pass runs the PINNED tests on the stub left, with a hard timeout; the copy is gone
+    after. A pytest card on the copy is approved, on any other folder denied."""
+    import dataclasses
+
+    import evals
+    import ext_sets
+    from agent import _WORKING_DIR
+    from agent_framework import AgentResponse
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    aider = evals.EVAL_SETS["aider-py"]
+    assert (aider.tier, aider.runner, aider.eval_name, len(aider.cases)) == ("ext", "exercises", "aider-py@v1", 20)
+    assert "harness/steward/working/ext-aider-py/" in (_WORKING_DIR / ".gitignore").read_text(encoding="utf-8")
+    pinned = ext_sets.data_folder(aider.source) / "exercises"
+    assert all({p.name for p in (pinned / c.id).iterdir()} - {"__pycache__"} == {"instructions.md", *ext_sets.exercise_files(c.id)} for c in aider.cases)
+
+    data = tmp_path / "data"
+    for name in ("adder-one", "adder-two", "adder-three"):
+        folder = data / "exercises" / name
+        folder.mkdir(parents=True)
+        stub, test = ext_sets.exercise_files(name)
+        (folder / "instructions.md").write_text("Add two numbers.\n", encoding="utf-8")
+        (folder / stub).write_text("def add(a, b):\n    pass\n", encoding="utf-8")
+        (folder / test).write_text(
+            f"import unittest\nfrom {stub[:-3]} import add\n\n\nclass AddTest(unittest.TestCase):\n"
+            "    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n",
+            encoding="utf-8",
+        )
+    (data / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    cases = tuple(
+        evals.EvalCase(id=n, ask=ext_sets.exercise_ask(n), project=str(data), plant=None, subject=(),
+                       precondition="exercise_tests_pass", checks=("exercise_tests_pass",))
+        for n in ("adder-one", "adder-two", "adder-three")
+    )
+    eval_set = dataclasses.replace(aider, cases=cases, source={**aider.source, "data": str(data)})
+    assert ext_sets.exercise_precondition_problems(eval_set) == [], "each stub fails its tests before a run"
+    seen: list[tuple[str, bool]] = []
+
+    async def fake_run_case(query: str, approve: set[str], **build: Any) -> Any:
+        name = next(c.id for c in cases if c.ask == query)
+        copy = _WORKING_DIR / ext_sets.EXERCISE_WORK / name
+        stub, test = ext_sets.exercise_files(name)
+        seen.append((name, (copy / stub).is_file() and (copy / "instructions.md").is_file()))
+        assert approve, "the writes are approved"
+        if name == "adder-one":
+            (copy / stub).write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        elif name == "adder-three":  # the test file rewritten to pass: the pinned one is what runs
+            (copy / test).write_text("import unittest\n\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        pass\n", encoding="utf-8")
+        return None, AgentResponse(messages=[])
+
+    monkeypatch.setattr(evals, "run_case", fake_run_case)
+    code = asyncio.run(ext_sets.ext_main(eval_set, evals))
+    assert seen == [("adder-one", True), ("adder-two", True), ("adder-three", True)], "each ran on its own fresh copy"
+    assert not (_WORKING_DIR / ext_sets.EXERCISE_WORK).exists(), "the throwaway copies are removed"
+    out = capsys.readouterr().out
+    assert "ext aider-py@v1: 1/3 passed" in out and code == 1, out
+    assert ext_sets.EXERCISE_RESULTS[cases[0].ask][0] and not ext_sets.EXERCISE_RESULTS[cases[2].ask][0]
+    assert evals.is_sample_project_pytest("pytest -q harness/steward/working/ext-aider-py/bowling")
+    assert evals.is_sample_project_pytest(r"python -m pytest -q harness\steward\working\ext-aider-py\bowling\bowling_test.py")
+    assert not evals.is_sample_project_pytest("pytest -q harness/steward/working/ext-aider-py")
+    assert not evals.is_sample_project_pytest("pytest -q harness/steward/working/ext-aider-py/x/../..")
+
+    looping = tmp_path / "looping"
+    looping.mkdir()
+    (looping / "adder_one.py").write_text("def add(a, b):\n    while True:\n        pass\n", encoding="utf-8")
+    passed, reason = ext_sets.exercise_tests_result(data, "adder-one", looping, timeout=3)
+    assert not passed and "did not finish in 3 s" in reason
+
+
+def test_the_validator_holds_the_outside_sets_to_their_source_their_pinned_data_and_their_checks(tmp_path: Any) -> None:
+    """An ext set (runner bfcl or exercises) is tier ext only, names its source (data, repo, commit, license,
+    attribution, contamination) and the data folder holds a LICENSE; each case is {id, checks} with an id in the pinned
+    data and its runner's check (no_tool_called for irrelevance); and a change to the pinned data, like a change to a
+    case, is a new version (the fingerprint covers the data)."""
+    import shutil
+
+    import evals
+    import yaml
+
+    folder = tmp_path / "evals"
+    shutil.copytree(evals.EVAL_SETS_DIR, folder)
+    assert {"bfcl", "aider-py"} <= set(evals.EVAL_SETS), "validate_sets (the versioned-files test) reads them as pinned"
+
+    def problems_with(edit: Any) -> list[str]:
+        """The set file's own problems (load_eval_set, as validate_sets reads each file), after ``edit``."""
+        path = folder / "ext-bfcl.yaml"
+        original = path.read_text(encoding="utf-8")
+        raw = yaml.safe_load(original)
+        edit(raw)
+        path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        try:
+            evals.load_eval_set(path)
+        except evals.EvalSetError as error:
+            return str(error).splitlines()
+        finally:
+            path.write_text(original, encoding="utf-8")
+        return []
+
+    def gating(raw: Any) -> None:
+        raw["tier"] = "T2"
+
+    def no_license(raw: Any) -> None:
+        del raw["source"]["license"]
+
+    def unknown_id(raw: Any) -> None:
+        raw["cases"][0]["id"] = "simple_python_9999"
+
+    def wrong_check(raw: Any) -> None:
+        raw["cases"][-1]["checks"] = ["bfcl_ast_match"]
+
+    assert any("is for an outside set: its tier is ext" in p for p in problems_with(gating))
+    assert any("source is not {" in p for p in problems_with(no_license))
+    assert any("'simple_python_9999': not in the pinned data" in p for p in problems_with(unknown_id))
+    assert any("irrelevance cases are scored by no_tool_called" in p for p in problems_with(wrong_check))
+    answers = evals.ext_sets.data_folder({"data": "data/bfcl"})
+    assert answers.is_dir() and (answers / "LICENSE").read_text(encoding="utf-8").lstrip().startswith("Apache License")
+    pinned = folder / "data" / "bfcl" / "possible_answers.jsonl"
+    original = pinned.read_text(encoding="utf-8")
+    raw = yaml.safe_load((folder / "ext-bfcl.yaml").read_text(encoding="utf-8"))
+    raw["source"]["data"] = str(folder / "data" / "bfcl")
+    before = evals.ext_sets.set_fingerprint(raw)
+    pinned.write_text(original.replace("[10]", "[11]", 1), encoding="utf-8")
+    assert evals.ext_sets.set_fingerprint(raw) != before, "a change to the pinned data changes the set's fingerprint"
 
 
 class _ScriptedHost:
