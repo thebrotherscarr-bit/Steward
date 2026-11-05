@@ -6868,3 +6868,90 @@ def test_the_tracked_bar_runner_runs_each_set_as_its_own_process_and_reads_the_h
         assert part in script, part
     ignored = (evals._REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "storage/" in ignored, "the runs' logs stay out of the repository"
+
+
+def _ag_ui_events(http: Any, body: dict[str, Any]) -> list[dict[str, Any]]:
+    """One AG-UI run over HTTP: the SSE stream's events, in order (keepalive comments skipped)."""
+    import json
+
+    with http.stream("POST", "/", json=body, headers={"Accept": "text/event-stream"}) as stream:
+        assert stream.status_code == 200, stream.read()
+        return [json.loads(line[len("data:"):]) for line in stream.iter_lines() if line.startswith("data:")]
+
+
+def test_the_ag_ui_host_streams_the_workflow_and_raises_a_write_card_as_an_interrupt() -> None:
+    """ag_ui_app.py: Steward's workflow over MAF's AG-UI package on 127.0.0.1:43122 (Learn, "Workflows with AG-UI").
+    A request ends on the plan's card as RUN_FINISHED's interrupt outcome; the Approve, sent as a canonical resume with
+    the interrupt's checkpoint id, runs EXECUTE in a freshly built Steward, whose file write is the next card (a
+    request_info tool call and an interrupt naming file_access_write); the No resumes again, and the run ends with his
+    words (REASONING_*, as EXECUTE's are intermediate output) and RUN_FINISHED. A plan's No is the workflow's output:
+    TEXT_MESSAGE_*. Red when the endpoint, the per-request build or the interrupt mapping comes unplugged."""
+    import ag_ui_app
+    import steward_workflow as wf
+    from starlette.testclient import TestClient
+
+    plan = '{"type": "approval", "questions": [{"message": "Write x.py."}], "steps": ["Write x.py"]}'
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "x.py", "content": "x = 1"})
+    replies: list[Any] = [plan, write, "The write was denied, so I stopped."]
+    calls: list[Any] = []
+    built: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:  # one Steward per request, as hosted.py builds him
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        built.append(client)
+        return client
+
+    assert (ag_ui_app.HOST, ag_ui_app.PORT) == ("127.0.0.1", 43122), "loopback, its own port"
+    thread = "thread-1"
+
+    def card(events: list[dict[str, Any]]) -> dict[str, Any]:
+        finished = events[-1]
+        assert finished["type"] == "RUN_FINISHED" and finished["outcome"]["type"] == "interrupt", finished
+        [interrupt] = finished["outcome"]["interrupts"]
+        assert interrupt["reason"] == "tool_call", interrupt
+        assert [e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"][-1] == "request_info"
+        assert any(e["type"] == "CUSTOM" and e["name"] == "request_info" for e in events)
+        return interrupt
+
+    def answer(interrupt: dict[str, Any], approved: bool) -> dict[str, Any]:
+        return {
+            "threadId": thread,
+            "runId": f"run-{len(built)}",
+            "messages": [],
+            "resume": [{"interruptId": interrupt["id"], "status": "resolved", "payload": {"approved": approved}}],
+            "forwardedProps": {"checkpointId": interrupt["metadata"]["agent_framework"]["checkpoint_id"]},
+        }
+
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        first = _ag_ui_events(http, {
+            "threadId": thread, "runId": "run-0", "messages": [{"id": "u1", "role": "user", "content": "Write x.py."}],
+        })
+        assert first[0]["type"] == "RUN_STARTED" and first[0]["threadId"] == thread, first[0]
+        plan_card = card(first)
+        assert plan_card["metadata"]["agent_framework"]["function_call"]["name"] == "approve_plan", plan_card
+        assert len(calls) == 1, "nothing ran before the Approve"
+        second = _ag_ui_events(http, answer(plan_card, True))
+        write_card = card(second)
+        assert write_card["metadata"]["agent_framework"]["function_call"]["name"] == "file_access_write", write_card
+        assert any(e["type"] == "TOOL_CALL_START" and e["toolCallName"] == "file_access_write" for e in second), [e["type"] for e in second]
+        third = _ag_ui_events(http, answer(write_card, False))
+    types = [e["type"] for e in third]
+    assert types[0] == "RUN_STARTED" and types[-1] == "RUN_FINISHED" and not third[-1].get("outcome"), third[-1]
+    assert "TOOL_CALL_RESULT" in types, "the denied write's result"
+    # EXECUTE's words stream as intermediate output (intermediate_output_from), which MAF's AG-UI maps to REASONING_*.
+    words = "".join(e["delta"] for e in third if e["type"] == "REASONING_MESSAGE_CONTENT")
+    assert words == "The write was denied, so I stopped.", third
+    assert len(built) == 3, "a fresh Steward for each request"
+    assert not (steward._WORKING_DIR / "x.py").exists(), "the denied write wrote nothing"
+    # The workflow's own output (here the plan's No) is TEXT_MESSAGE_*.
+    replies.append(plan)
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        thread = "thread-2"
+        refused = _ag_ui_events(http, answer(card(_ag_ui_events(http, {
+            "threadId": thread, "runId": "run-a", "messages": [{"id": "u2", "role": "user", "content": "Write x.py."}],
+        })), False))
+    types = [e["type"] for e in refused]
+    assert ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"] == [t for t in types if t.startswith("TEXT_MESSAGE")], types
+    assert [e["delta"] for e in refused if e["type"] == "TEXT_MESSAGE_CONTENT"] == [wf.NOT_APPROVED], refused
+    assert types[-1] == "RUN_FINISHED" and not refused[-1].get("outcome"), refused[-1]
