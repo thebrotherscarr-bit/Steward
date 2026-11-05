@@ -712,6 +712,7 @@ def test_plan_mode_states_the_tool_policy_and_every_tool_stays_offered() -> None
     # The door's and SecondBrain's tools come over MCP, which these tests do not connect.
     over_mcp = {"atlas_git_branch", "atlas_git_commit", "atlas_git_push", "atlas_git_pr", "secondbrain_write_note", "secondbrain_append_to_note"}
     over_mcp |= {f"secondbrain_{name}" for name in steward.ESTATE_ASKS}  # the Estate's writes (2026-11-04)
+    over_mcp |= {f"secondbrain_{name}" for name in steward.ESTATE_ACTIONS}  # eval_start, carded in chat (ADR-0009)
     assert steward._CHANGES_THINGS - {"run_shell", *over_mcp} <= offered
     assert {"todos_add", "mode_set"} <= offered
     assert steward.PLAN_MODE_TOOL_POLICY in instructions and "file_access_write" in steward.PLAN_MODE_TOOL_POLICY
@@ -4151,10 +4152,12 @@ def test_an_eval_build_gets_only_the_estates_reads(monkeypatch: Any) -> None:
     assert not offered & {f"secondbrain_{t}" for t in steward.ESTATE_ACTIONS}, "no eval starts an eval"
 
 
-def test_eval_start_is_a_bounded_estate_action_that_never_asks_and_eval_status_is_a_read(monkeypatch: Any) -> None:
-    """2026-11-05, the operator: "Steward can automate on his own". SecondBrain's eval_start (estate.cjs) only runs eval
-    sets, so it is on his live build with no card, never in plan mode's list of what changes things, and reported so on
-    the tool-policy shelf; eval_status reads its progress like the Estate's other reads. Red if either starts asking."""
+def test_eval_start_in_chat_is_planned_and_carded_and_eval_status_is_a_read(monkeypatch: Any) -> None:
+    """ADR-0009 (2026-11-05, the operator: "starting an eval should always come with a plan, that doesnt make sense").
+    In chat, SecondBrain's eval_start is in plan mode's list of what changes things (refused in plan mode, so it goes on
+    the plan) and, once the plan is approved, asks its own card; the tool-policy shelf says so. eval_status stays a read
+    with no card. Red if eval_start runs in chat without a card. Inside a flow it runs with no card:
+    test_the_nightly_eval_recipe_starts_over_ag_ui_and_waits_for_bar_done holds that side."""
     import json
 
     monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
@@ -4162,23 +4165,31 @@ def test_eval_start_is_a_bounded_estate_action_that_never_asks_and_eval_status_i
     server = _estate_server()
     monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
     assert steward.ESTATE_ACTIONS == ("eval_start",) and "eval_status" in steward.ESTATE_READS
-    assert "secondbrain_eval_start" not in steward._CHANGES_THINGS
-    assert steward.estate_approval(["eval_start", "eval_status"])["never_require_approval"] == ["eval_start", "eval_status"]
+    assert "secondbrain_eval_start" in steward._CHANGES_THINGS, "plan mode leaves eval_start for the plan"
+    assert steward.estate_approval(["eval_start", "eval_status"]) == {
+        "always_require_approval": ["eval_start"], "never_require_approval": ["eval_status"], "default": "always_require",
+    }
 
-    for name, arguments, seen in (
-        ("secondbrain_eval_start", {"sets": ["aider-py"], "runs": 1}, "started"),
-        ("secondbrain_eval_status", {"tag": "aider-py-2026-11-05"}, "lines"),
-    ):
-        call = Content.from_function_call(call_id="v1", name=name, arguments=arguments)
-        client, _, response = run_steward([call, "Done."], "Start aider-py and read its progress.", mode="execute")
-        assert not approval_requests(response), f"{name} asked a card"
-        assert seen in function_results(client.calls[1])[0], name
+    start = Content.from_function_call(call_id="v1", name="secondbrain_eval_start", arguments={"sets": ["aider-py"], "runs": 1})
+    # plan mode: refused with corrective feedback, no card, nothing started
+    client, _, response = run_steward([start, "Here is the plan."], "Start aider-py.")
+    assert not approval_requests(response), "no card in plan mode: the gate refuses instead"
+    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1]))
+    # execute mode (the plan approved): its own card
+    _, _, response = run_steward([start, "Waiting on your card."], "Start aider-py.", mode="execute")
+    assert [r.function_call.name for r in approval_requests(response)] == ["secondbrain_eval_start"], "eval_start ran without a card"
+
+    status = Content.from_function_call(call_id="v2", name="secondbrain_eval_status", arguments={"tag": "aider-py-2026-11-05"})
+    client, _, response = run_steward([status, "Done."], "How is aider-py going?", mode="execute")
+    assert not approval_requests(response), "eval_status asked a card"
+    assert "lines" in function_results(client.calls[1])[0]
     rows = {row["name"]: row for row in json.loads(steward.TOOL_POLICY_PATH.read_text(encoding="utf-8"))["tools"]}
-    assert rows["secondbrain_eval_start"]["approval"] == "never", rows["secondbrain_eval_start"]
-    assert "bounded Estate action" in rows["secondbrain_eval_start"]["notes"]
+    assert rows["secondbrain_eval_start"]["approval"] == "always", rows["secondbrain_eval_start"]
+    assert "ADR-0009" in rows["secondbrain_eval_start"]["notes"] and "plan-mode gate" in rows["secondbrain_eval_start"]["notes"]
     assert rows["secondbrain_eval_status"]["approval"] == "never"
     bar = (steward._SKILLS_DIR / "bar-runner" / "SKILL.md").read_text(encoding="utf-8")
     assert "secondbrain_eval_start" in bar and "secondbrain_eval_status" in bar and "eval-history" in bar
+    assert "plan" in bar and "card" in bar and "only at night" not in bar and "never during the day" not in bar
 
 
 def test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task() -> None:
@@ -7960,7 +7971,8 @@ def test_startup_runs_as_a_maf_workflow_gathering_read_only_pulling_only_clean_m
 
 def test_the_nightly_eval_recipe_starts_over_ag_ui_and_waits_for_bar_done(tmp_path: Path) -> None:
     """eval_start and eval_wait as steps: SecondBrain's eval_start over AG-UI, eval_status read until BAR DONE (a fake
-    sleep between reads), the result its counts; no summarize, so no agent run."""
+    sleep between reads), the result its counts; no summarize, so no agent run. A saved flow starts its eval with no card
+    (ADR-0009: the flow is the operator's approved plan); red if the step stops reaching SecondBrain's eval_start."""
     import recipe_workflow as rw
 
     ground, steward_dir = _recipe_ground(tmp_path)

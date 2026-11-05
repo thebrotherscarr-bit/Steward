@@ -772,18 +772,21 @@ ESTATE_WORLDS: dict[str, str] = {
 # eval_status (2026-11-05, the bar-runner skill) reads one eval_start run's progress file: a read like the rest.
 ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status", "eval_status")
 ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
-# The Estate's bounded actions (2026-11-05, the operator: "Steward can automate on his own"): eval_start starts his
-# eval sets (run-bar.ps1 in its own window) and nothing else, only for set files in harness/steward/evals/ and only
-# while no eval runs, and a set writes only his eval history and throwaway working copies (SecondBrain estate.cjs
-# serves it with the reads). So it never asks; an eval's own build is never offered it (no eval starts an eval).
+# The Estate's bounded actions: eval_start starts his eval sets (run-bar.ps1 in its own window) and nothing else, only
+# for set files in harness/steward/evals/ and only while no eval runs (SecondBrain estate.cjs serves it with the
+# reads). Since ADR-0009 (2026-11-05, the operator: "starting an eval should always come with a plan, that doesnt make
+# sense") it is planned and carded in chat like any action: in plan mode's list of what changes things
+# (_CHANGES_THINGS), and its own card after the plan is approved. Inside a flow it runs with no card: recipe_workflow.py
+# calls SecondBrain's eval_start on its own client, as the saved flow is the operator's approved plan. An eval's own
+# build is never offered it (no eval starts an eval).
 ESTATE_ACTIONS = ("eval_start",)
 
 
 def estate_approval(tools: Sequence[str]) -> dict[str, Any]:
-    """MAF's per-tool approval_mode for SecondBrain's Estate tools (MCPSpecificApproval): the writes always ask, the
-    reads and the bounded actions (ESTATE_ACTIONS) never do, and any other name asks (default "always_require"), so a
-    tool added later is never let through."""
-    never = (*ESTATE_READS, *ESTATE_ACTIONS)
+    """MAF's per-tool approval_mode for SecondBrain's Estate tools (MCPSpecificApproval): the reads never ask, the
+    writes and the bounded actions (ESTATE_ACTIONS, ADR-0009) always do, and any other name asks (default
+    "always_require"), so a tool added later is never let through."""
+    never = ESTATE_READS
     return {
         "always_require_approval": [t for t in tools if t not in never],
         "never_require_approval": [t for t in tools if t in never],
@@ -970,6 +973,8 @@ _CHANGES_THINGS = frozenset({
     *(f"secondbrain_{name}" for name in ("write_note", "append_to_note")),
     # The Estate's writes (2026-11-04): a server started, stopped or restarted, a model unloaded, SecondBrain updated.
     *(f"secondbrain_{name}" for name in ESTATE_ASKS),
+    # Starting an eval (ADR-0009, 2026-11-05): planned first, then its own card, like any action in chat.
+    *(f"secondbrain_{name}" for name in ESTATE_ACTIONS),
 })
 PLAN_MODE_TOOL_POLICY = (
     "\n\nTool policy in plan mode: you have the tools that change things ("
@@ -3302,7 +3307,7 @@ async def tool_policy(agent: Agent[Any], rules: Sequence[Any], scratch: Path) ->
         if source == "mcp:door" and name != PR_CHECKS_TOOL:
             notes.append("SecondBrain's door holds its writes for approval there")
         if name in {f"secondbrain_{t}" for t in ESTATE_ACTIONS}:
-            notes.append("a bounded Estate action: it only runs eval sets, so it never asks a card")
+            notes.append("a bounded Estate action: in chat it is planned and asks a card (ADR-0009); a saved flow runs it with none")
         if name in {f"secondbrain_{t}" for t in ESTATE_ASKS}:
             notes.append("an Estate write: SecondBrain serves it only while it allows writes (Settings, Share)")
         if notes:

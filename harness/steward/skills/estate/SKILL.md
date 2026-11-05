@@ -27,9 +27,9 @@ What the user has approved or denied: `secondbrain_approvals_history` (`limit`, 
 call ended: `secondbrain_hold_status` (`id`). The `approvals` skill says how. Use them before asking again for
 something the user has just refused.
 
-Your eval sets: `secondbrain_eval_start` starts them in their own window (never a card: it only runs eval sets) and
+Your eval sets: `secondbrain_eval_start` starts them in their own window (planned first, then its own card: ADR-0009) and
 `secondbrain_eval_status` reads a run's progress. The `bar-runner` skill says when and how; the `automations` skill
-says how SecondBrain runs them, and the daily what-happened, at night and at dawn.
+says how a saved flow runs them (no card: the flow is his approved plan), and the daily what-happened.
 
 Rules:
 - Every change asks the user's card. A refused or unanswered card means stop; never try another way round it.

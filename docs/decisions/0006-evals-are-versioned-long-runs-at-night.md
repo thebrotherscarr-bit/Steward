@@ -1,11 +1,15 @@
 ---
-status: accepted
+status: accepted; superseded in part by ADR-0009
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
 # 0006: Evals are versioned; long runs at night as eval workflows
+
+> 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
+> evals run whenever the operator says, day or night; the night-only rule for long sets is gone. In chat,
+> `eval_start` is planned and carded.
 
 ## Context and Problem Statement
 
