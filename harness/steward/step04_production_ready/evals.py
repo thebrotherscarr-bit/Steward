@@ -601,7 +601,10 @@ STEPS_QUERY = "Fix the bug that makes test_percent_discount fail in harness/stew
 # What the plan must name, read from its steps (the cookbook: "Validators should check the artefacts themselves"). Run
 # 15: a bug-fix plan passed while planning a new inventory.py instead of the discount line, because nothing checked it.
 STEPS_MUST_NAME = ("inventory.py", "discount")
-STEPS_FIXED: list[bool] = [False]
+# Whether the run fixed the bug, and why (discount_test_result: test_percent_discount passes as the run left the
+# project). The steps set at 7a2dd79 (2026-11-05 07:13Z): his fix wrote "discount_percent/100", the tests passed, and
+# the old byte check for "discount_percent / 100" read it as not fixed.
+STEPS_FIXED: list[tuple[bool, str]] = [(False, "The run did not reach the fix.")]
 
 
 def step_conversations(events: list[Any], approve: set[str] | None = None) -> dict[str, list[list[Any]]]:
@@ -683,9 +686,10 @@ def steps_overall(query: str, response: str) -> dict[str, object]:
     """Overall: the report carries the check's pass, and the discount line is fixed on disk."""
     if "Checks passed" not in (response or ""):
         return {"passed": False, "reason": f"The report has no passed checks: {(response or '')[-240:]!r}"}
-    if not STEPS_FIXED[0]:
-        return {"passed": False, "reason": "The discount line was not fixed on disk."}
-    return {"passed": True, "reason": "Checks passed, and the discount line is fixed."}
+    fixed, why = STEPS_FIXED[0]
+    if not fixed:
+        return {"passed": False, "reason": f"Not fixed: {why}"}
+    return {"passed": True, "reason": f"Checks passed, and {why}"}
 
 
 async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[str]) -> list[Any]:
@@ -711,10 +715,8 @@ async def steps_main() -> int:
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     import steward_workflow as wf  # noqa: PLC0415
-    from agent import _WORKING_DIR  # noqa: PLC0415
     from agent_framework import ConversationSplit, EvalItem, FileAccessProvider, Message  # noqa: PLC0415
 
-    module = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project" / "inventory.py"
     # The plan and the writes; a shell card only for the sample project's pytest (card_approved), every other denied.
     approve = {wf.APPROVE_PLAN, *FileAccessProvider._WRITE_TOOL_NAMES}  # noqa: SLF001
     async with AsyncExitStack() as stack:
@@ -734,9 +736,9 @@ async def steps_main() -> int:
                         events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
                     except Exception as error:  # the run raised: overall fails with it (run_completed); the bug is put back
                         CASE_ERRORS[STEPS_QUERY] = raised(error)
-                    STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
+                    STEPS_FIXED[0] = discount_test_result()
                 else:
-                    STEPS_FIXED[0] = False
+                    STEPS_FIXED[0] = (False, "The bug was not planted, so nothing ran.")
     steps = step_conversations(events, approve)
     outputs = [str(e.data) for e in events if e.type == "output"]
     user = Message(role="user", contents=[STEPS_QUERY])

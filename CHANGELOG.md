@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The steps set judges the fix by `test_percent_discount` passing as the run left the project (`STEPS_FIXED` is
+  `discount_test_result()`, with its reason), not by the bytes "discount_percent / 100". The steps set at 7a2dd79: his
+  fix wrote "discount_percent/100", the checks passed, and overall read "The discount line was not fixed on disk".
+  Test: `test_the_steps_set_judges_the_fix_by_test_percent_discount_not_by_its_spacing`.
 - The evals read a call MAF never ran (its own "Requested function ... not found" and "Argument parsing failed"
   results, `NOT_RUN_RESULTS`) as "not run", not "ran". The steps set at f7b5120: EXPLORE called run_shell, which it is
   not offered, nothing ran, and plan_step failed "Changed things while planning: ['run_shell']". Test:
