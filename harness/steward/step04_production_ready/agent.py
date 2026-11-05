@@ -2623,16 +2623,37 @@ async def point_a_missed_path_at_the_named_one(
 # called todos_complete with {"title": "Edit file", "reason": ...}, MAF answered "Argument parsing failed. Exception:
 # Invalid arguments for 'todos_complete'" twice, and his last reply was the call written as raw text. MAF shows a call
 # whose arguments fail validation to function middleware before it refuses it (_tools.py: "Invalid provider arguments
-# are intentionally exposed to middleware"); here a todos_complete item with no id is answered with what was wrong and
-# the open todos by id, and nothing is completed. His call is never rewritten for him.
+# are intentionally exposed to middleware so it has a supported opportunity to repair them before final validation").
+# The bar at 1b56963 (2026-11-05 07:30Z, the README ask): answered with the ids, he called todos_add (not offered in
+# EXECUTE), decided the todo tools were missing, and the open-todo reminder kept him going for twenty rounds of cards.
+# So an item whose title names exactly one open todo (backticks, case and spacing aside; one title the start of the
+# other) is given that todo's id, as repair_tool_names gives a misspelled call its one tool; anything else is answered
+# with TODO_IDS_REFUSAL and nothing is completed.
 TODO_IDS_REFUSAL = (
     "Not completed: todos_complete takes each item's id (a number) and a reason, not its title. Your open todos: "
     "{open}. Call todos_complete again with items like {{\"id\": {first}, \"reason\": \"...\"}}."
 )
 
 
+def _todo_title_key(title: Any) -> str:
+    return " ".join(str(title or "").replace("`", "").lower().split())
+
+
+def todo_id_for_title(title: Any, open_todos: Sequence[Any]) -> int | None:
+    """The id of the one open todo a title names (todo_ids_by_name), or None when none or several do."""
+    key = _todo_title_key(title)
+    if not key:
+        return None
+    exact = [t for t in open_todos if _todo_title_key(t.title) == key]
+    if exact:
+        return exact[0].id if len(exact) == 1 else None
+    named = [t for t in open_todos if (k := _todo_title_key(t.title)) and (k.startswith(key) or key.startswith(k))]
+    return named[0].id if len(named) == 1 else None
+
+
 def todo_ids_by_name(todo_provider: TodoProvider | None) -> Callable[..., Awaitable[None]]:
-    """Function middleware: a todos_complete whose items lack an id is answered with TODO_IDS_REFUSAL."""
+    """Function middleware: a todos_complete whose items lack an id gets the id of the one open todo each title names,
+    or is answered with TODO_IDS_REFUSAL."""
 
     async def todo_ids_by_name_(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
         if todo_provider is not None and context.function.name == "todos_complete":
@@ -2643,7 +2664,11 @@ def todo_ids_by_name(todo_provider: TodoProvider | None) -> Callable[..., Awaita
                 session = context.session or _RUN_SESSION.get()
                 todos = await todo_provider.store.load_items(session, source_id=todo_provider.source_id) if session is not None else []
                 left = [t for t in todos if not t.is_complete]
-                if left:
+                ids = [i.get("id") if isinstance(i, dict) and i.get("id") is not None else todo_id_for_title((i or {}).get("title") if isinstance(i, dict) else None, left) for i in items]
+                if left and all(found is not None for found in ids) and len(set(ids)) == len(ids):
+                    repaired = [{**i, "id": found} for i, found in zip(items, ids, strict=True)]
+                    context.arguments = {**arguments, "items": [{k: v for k, v in i.items() if k != "title"} for i in repaired]}
+                elif left:
                     named = "; ".join(f'id {t.id}: "{t.title}"' for t in left)
                     context.result = TODO_IDS_REFUSAL.format(open=named, first=left[0].id)
                     return

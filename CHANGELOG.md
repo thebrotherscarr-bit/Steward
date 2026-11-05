@@ -120,6 +120,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A todos_complete item with a title that names exactly one open todo (backticks, case and spacing aside, or the start
+  of it) is given that todo's id through MAF's argument-repair hook (`todo_id_for_title` in `todo_ids_by_name`); an
+  unclear title is still answered with the open todos by id. The bar at 1b56963 (the README ask): answered with the
+  ids alone, he called todos_add (not offered in EXECUTE), decided the todo tools were missing, and the open-todo
+  reminder kept the run going for twenty rounds of cards. Test:
+  `test_todos_complete_by_title_gets_the_one_open_todos_id_and_an_unclear_title_is_answered_with_the_ids`.
 - The steps set judges the fix by `test_percent_discount` passing as the run left the project (`STEPS_FIXED` is
   `discount_test_result()`, with its reason), not by the bytes "discount_percent / 100". The steps set at 7a2dd79: his
   fix wrote "discount_percent/100", the checks passed, and overall read "The discount line was not fixed on disk".
