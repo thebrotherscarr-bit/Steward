@@ -1,11 +1,15 @@
 ---
-status: accepted
+status: accepted; superseded in part by ADR-0009
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
 # 0005: Automations are recipes run as MAF workflows
+
+> 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
+> a flow (the steps) is saved by itself and an automation is `{flow, when, on/off}`; there is no open-ended prompt
+> type.
 
 ## Context and Problem Statement
 

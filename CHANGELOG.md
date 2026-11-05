@@ -171,6 +171,15 @@ was never merged and has no entry.
 
 ### Changed
 
+- ADR-0009, "Flows are ordered tool chains; automations schedule flows" (the operator's rulings, 2026-11-05): a
+  flow is an ordered chain of steps saved by itself and runs with no card (the saved flow is his approved plan); an
+  automation is a saved flow, when and on/off; no open-ended prompt type; evals run whenever he says, day or night.
+  In chat, `secondbrain_eval_start` is now planned and carded like any action: it is in plan mode's list of what
+  changes things and asks its own card after the plan is approved (`agent.py` `estate_approval`, `_CHANGES_THINGS`);
+  inside a flow `recipe_workflow.py` still starts it with no card. ADR-0005, 0006 and 0008 are marked superseded in
+  part; `docs/ARCHITECTURE.md` (a flow and an automation, the card rule), AGENTS.md and the `bar-runner`,
+  `automations` and `estate` skills follow it (no night-only rule). Restart required (Steward's hosts).
+
 - Eval sets t1-heldout v2 and t0-small v2: `answer_on_topic` takes a wider subject per case (the cookbook: an
   answer-level check tests what matters). Heldout v1 run 2 (e94cb90) fixed `test_boiling_point` and failed only on a
   reply naming units.py and the corrected formula; each case now also takes the file changed (units.py,

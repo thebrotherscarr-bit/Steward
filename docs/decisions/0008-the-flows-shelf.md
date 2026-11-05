@@ -1,11 +1,15 @@
 ---
-status: accepted
+status: accepted; superseded in part by ADR-0009
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
 # 0008: The Flows shelf
+
+> 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
+> Set up holds the automations (a saved flow, when, on/off) and builds no flows; "+ New flow" is the only way to
+> make a flow.
 
 ## Context and Problem Statement
 

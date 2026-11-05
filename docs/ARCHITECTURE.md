@@ -62,9 +62,11 @@ flowchart LR
   `run_recipe` and `recipe_status`), `devui_app.py` (DevUI, for development only).
 - **The improvement loop:** `improvement_loop_workflow.py`: one change, checks, Kyle's review (keep, drop, guidance),
   checkpointed.
-- **Recipes:** `recipe_workflow.py`: an automation built as a MAF workflow ([ADR-0005](decisions/0005-automations-are-recipes-run-as-maf-workflows.md)).
+- **Recipes:** `recipe_workflow.py`: a flow built as a MAF workflow ([ADR-0005](decisions/0005-automations-are-recipes-run-as-maf-workflows.md),
+  [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **Evals:** `evals.py`, `ext_sets.py`, `eval_transports.py` and the versioned sets in `harness/steward/evals/`
-  ([ADR-0006](decisions/0006-evals-are-versioned-long-runs-at-night.md)).
+  ([ADR-0006](decisions/0006-evals-are-versioned-long-runs-at-night.md); they run whenever the operator says,
+  [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **Skills:** `harness/steward/skills/<name>/SKILL.md` (estate, github, automations, bar-runner, eval-history,
   telemetry, ollama-ops, approvals and others).
 - **The Charter:** his instructions, the SecondBrain note `steward-charter` (v4.9), read every turn.
@@ -104,7 +106,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | Steward | Memory (durable facts by topic), the improvement loop's checkpoints | `agent-file-memory/`, `improvement_loop/checkpoints` |
 | Steward | Eval sets, baselines, pinned outside data | `harness/steward/evals/` (versioned in git) |
 | Jesster | The notes vault (Markdown; every save on Jesster's provenance chain) | `worlds/notes` |
-| Jesster | Schedules and recipes | `<vault>/.secondbrain/schedules.json` |
+| Jesster | Flows and automations (and legacy prompt-only schedules) | `<vault>/.secondbrain/schedules.json` |
 | Jesster | Answered cards | `approvals-history.jsonl` |
 | Manjuel | The record: laws, sittings ledger, DAYBOOK, HANDOFF, CHANGELOG, transcripts | the ground (`law/`, `sessions/`, `logs/`, root `.md`) |
 | All | Keys and tokens | each part's `.env`, placed by the operator; never read, printed, copied or committed |
@@ -137,12 +139,19 @@ sequenceDiagram
   WhatsApp turns are chat and research only; no cards reach it.
 - A plain question or a read-only request gets a plain answer, with no plan.
 - A No on any card ends the run.
+- Starting an eval in chat (`secondbrain_eval_start`) is an action like any other: it goes on the plan, and after
+  the plan is approved it raises its own card ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 
-### An automation
+### A flow and an automation
+
+[ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md): a **flow** is an ordered
+chain of steps, built on the Flows shelf's canvas ("+ New flow") and saved by itself. An **automation** is
+`{flow, when, on/off}` and nothing else, made in the shelf's Set up. Run now runs a flow at once.
 
 ```mermaid
 flowchart LR
-    C["Jesster's clock<br/>(schedules.json, parseWhen)"] -->|skip if Steward is busy| R["run_recipe (MCP 43121)"]
+    C["Jesster's clock<br/>(an automation: flow, when, on/off)"] -->|skip if Steward is busy| R["run_recipe (MCP 43121)"]
+    N["Run now (Flows shelf)"] --> R
     R --> W["MAF workflow<br/>one executor per step"]
     W --> Sm["summarize<br/>(tool-less Steward run)"]
     Sm --> D["deliver: note + Telegram"]
@@ -150,13 +159,16 @@ flowchart LR
 ```
 
 The steps come from a fixed list (repo_log, merged_prs, releases, eval_bars, plan_left, versions, pull_ff,
-eval_start, eval_wait). An automation never approves its own card. Startup (weekdays 06:00) is the baseline.
+eval_start, eval_wait). **A flow runs unattended by design:** the saved flow is the operator's approved plan, so no
+step raises a card, and a step that could do harm is made safe in its own code (`pull_ff`: main only, a clean tree,
+never during a sitting; `eval_start`: eval sets only, one at a time). There is no open-ended prompt type; prompt-only
+schedules saved before 2026-11-05 keep running and are shown as legacy. Startup (weekdays 06:00) is the baseline.
 
 ### An eval
 
-- **By day:** short sets (the T0 and T1 bars, ext-bfcl) may run one at a time, each in its own window
-  (`run-bar.ps1`), never two at once.
-- **At night:** long sets run as eval workflows: a recipe of `eval_start` then `eval_wait`, scheduled by the operator.
+- **Whenever the operator says,** day or night: from a flow, an automation, or a request in chat (planned and
+  carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
+- An eval flow is `eval_start` then `eval_wait`.
 - Every run is scored by MAF's `evaluate_agent` / `evaluate_workflow` with local evaluators, and lands in the history
   with its set version. A gating tier runs each case once.
 
@@ -178,7 +190,11 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 - **The harness, not the model.** A failure is fixed in the task, the context, the tools or the check, never by a
   bigger model.
 - **Name the wire.** Every piece has a test that goes red when it is unplugged.
-- **By day Steward is Kyle's.** Long evals and heavy automations run at night.
+- **The card rule.** In chat, everything that changes something is planned and carded, `eval_start` included. A
+  saved flow runs unattended by design: the flow is the approval
+  ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
+- **His system, his hours.** Evals and flows run whenever the operator says, day or night (ADR-0009; this replaced
+  "By day Steward is Kyle's. Long evals and heavy automations run at night", 2026-11-05).
 
 ## 6. The build plan ahead
 
@@ -186,7 +202,9 @@ In order, as the notes stand on 2026-11-05. Each item is one piece and one pull 
 
 1. **Flows shelf** ([ADR-0008](decisions/0008-the-flows-shelf.md)): run history, the graph from Steward's
    `to_dict()`, Steward's card with `automation_save` on Kyle's card, evals in flow.
-2. **Automations:** `automation_save`; BFCL and Aider as nightly eval workflows.
+2. **Flows and automations** ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)):
+   Set up as automations (a saved flow, when, on/off), the prompt type removed (Jesster); `automation_save`; BFCL
+   and Aider as eval flows.
 3. **AG-UI step 3:** the Phone view and the console shelves on AG-UI events; then the A2UI pilot for approval cards.
 4. **Dev-path tiers:** T3 (Estate operations) and T4 (GitHub), then T2 and T5, then the `eval-author` skill; T6 and T7
    grow with his reach. T5 needs restating now that Neiro is retired.

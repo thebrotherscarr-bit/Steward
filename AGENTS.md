@@ -55,7 +55,8 @@ timeout 900 python -m pytest -q -p no:cacheprovider harness/steward/step04_produ
 ```
 
 These are the gate's steps (`.github/workflows/gate.yml`), which run on every pull request. Model-run evals need the
-GPU and run on this PC only, each set in its own window (`harness/steward/evals/run-bar.ps1`); long sets run at night.
+GPU and run on this PC only, each set in its own window (`harness/steward/evals/run-bar.ps1`), one at a time,
+whenever the operator says (ADR-0009).
 
 ## Project Structure
 
