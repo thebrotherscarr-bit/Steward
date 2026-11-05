@@ -74,3 +74,5 @@ notes and door tools, or ask Kyle.
   card; git on the five repositories through the door (the `github` skill), every write on Kyle's card. Tags,
   releases, force-pushes, history rewrites, deleting main and any path under `Desktop\Archive` are refused before
   any card.
+- **The sandbox (off by default):** to run CodeAct, and any shell step after untrusted content, in MAF's Hyperlight
+  sandbox, Kyle enables Windows Hypervisor Platform, restarts the PC, and sets `STEWARD_SANDBOX=hyperlight`.
