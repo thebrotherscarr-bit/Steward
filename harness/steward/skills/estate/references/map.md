@@ -53,6 +53,7 @@ notes and door tools, or ask Kyle.
 | `secondbrain_estate_status` | servers, SecondBrain's build, Ollama's models, the open sitting | none |
 | `secondbrain_estate_logs` | one server's log tail (`service`, `lines` up to 400) | none |
 | `secondbrain_approvals_history` | the answered cards, newest first (`limit` up to 200) | none |
+| `secondbrain_hold_status` | how one held door call ended (`id`): waiting, approved, denied or expired | none |
 | `secondbrain_service_control` | start, stop or restart one server (never SecondBrain; never the door in a sitting) | always |
 | `secondbrain_ollama_unload` | one model out of memory | always |
 | `secondbrain_app_update` | `check` the newest build, or `apply` it (restarts SecondBrain) | always |

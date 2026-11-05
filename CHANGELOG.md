@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- The last Estate controls as skills. `ollama-ops` reads Ollama's loaded models with `secondbrain_estate_status`,
+  unloads a stale or crowding model only with `secondbrain_ollama_unload` on Kyle's card, and reads the pinned
+  `OLLAMA_*` settings from the Ollama settings note in SecondBrain, never from `.env`. `approvals` answers what Kyle
+  approved, denied or left waiting from `secondbrain_approvals_history` and `secondbrain_hold_status` (how one held
+  door call ended), and never acts on a card. `hold_status` joins `ESTATE_READS`: on his live build, no card. Test:
+  `test_the_ollama_ops_and_approvals_skills_read_and_leave_every_change_to_the_card`.
 - `STEWARD_FIDES_ENFORCE` (off by default, so nothing changes until it is turned on): `on` turns on MAF's FIDES
   `block_on_violation` for his sinks (file writes, `run_shell`, `git_commit`, the door's branch, commit, push and PR,
   note writes and the Estate's asks). A sink called after untrusted content (a web page, a note, an Estate log) is in
