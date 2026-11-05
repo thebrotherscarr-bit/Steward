@@ -117,6 +117,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A plan call that answers only with read calls (tools are off there, so none run) sends them back to EXPLORE once
+  (`PLAN_READ_FIRST`, a new edge read_plan -> explore), where they run, and the plan call follows as before. The bar
+  at 416ba41 (the discount ask's second run): EXPLORE stopped after listing the folder, the plan call answered with
+  `file_access_read` twice, and the run ended empty with no card. Test:
+  `test_a_plan_call_answering_with_reads_sends_explore_to_make_them_once_then_plans`.
 - The harness loop's own turns (the open-todo reminder, the plan and todos asks, the required-tool and background
   nudges, the answer-now turn) carry `REQUEST_KEY` "", so `RequestHints` never reads a request in them. The bar at
   416ba41: the reminder quoted the todo "interpret discount_percent as a percentage", the number hint matched, and the
