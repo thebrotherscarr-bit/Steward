@@ -2536,6 +2536,30 @@ def bare_name_meant(file_name: str, named: Sequence[str]) -> str | None:
     return meant.pop() if len(meant) == 1 else None
 
 
+# The bar at 1b56963 (2026-11-05 07:32-07:40Z, the README ask): his memory's context says "Use MEMORY.md" (MAF's
+# DEFAULT_MEMORY_CONTEXT_PROMPT, _memory.py), and he wrote MEMORY.md at the repository root with file_access_write, nine
+# times over twenty rounds of cards. MEMORY.md is his memory's index, which MAF's memory store rebuilds from its topic
+# files; the workspace's file tools never write it. Such a write is refused with the memory tool to use, and nothing
+# is written; a MEMORY.md the workspace already has is left to the file tools as any file is.
+MEMORY_INDEX_REFUSAL = (
+    "Refused: '{file_name}' is your memory's index, which your memory keeps itself; the file tools do not write it. To "
+    "remember something, call write_memory with a topic and the fact. Nothing was written."
+)
+
+
+def writes_memory_index(file_name: str) -> bool:
+    """Whether a file tool's file_name is MAF's memory index (MEMORY.md) at the workspace root, where no such file is."""
+    from agent_framework._harness._memory import DEFAULT_MEMORY_INDEX_FILE_NAME  # noqa: PLC0415
+
+    name = str(file_name or "").replace("\\", "/").strip().lstrip("./")
+    if name.lower() != DEFAULT_MEMORY_INDEX_FILE_NAME.lower():
+        return False
+    try:
+        return not _inside_workspace(name).exists()
+    except ValueError:
+        return False
+
+
 async def refuse_a_bare_name_the_request_put_in_a_folder(
     context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
 ) -> None:
@@ -2547,6 +2571,9 @@ async def refuse_a_bare_name_the_request_put_in_a_folder(
         arguments = context.arguments
         arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
         file_name = str(arguments.get("file_name") or "")
+        if writes_memory_index(file_name):
+            context.result = MEMORY_INDEX_REFUSAL.format(file_name=file_name)
+            return
         if named and (path := bare_name_meant(file_name, named)):
             context.result = BARE_NAME_REFUSAL.format(file_name=file_name, path=path)
             return
