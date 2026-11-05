@@ -15,3 +15,11 @@ storage/
 .as/
 # The aider-py eval set's throwaway exercise copies (ext_sets.EXERCISE_WORK), removed after each case.
 harness/steward/working/ext-aider-py/
+# Keys, tokens and logs never go in the record; nor the Archive.
+*.pem
+*.key
+*.pfx
+*_token.txt
+*.log
+logs/
+/Archive/
