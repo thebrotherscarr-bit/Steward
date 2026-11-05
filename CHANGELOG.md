@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- The Estate's design docs: `docs/ARCHITECTURE.md` (the parts, the wires with their ports and protocols, the data
+  each keeps, how a request, an automation and an eval flow, the rules and the build plan) and `docs/decisions/`, the
+  decision records in MAF's own format (MAF's `adr-template.md` and `adr-short-template.md`, copied unchanged), with
+  ADR-0001 moved in from SecondBrain and 0002 to 0008 for the 2026-11-04 and 11-05 rulings. From now on every
+  architectural change gets an ADR before it is built (the operator, 2026-11-05).
+
 - The repository is licensed MIT (`LICENSE`, the same text and holder as Manjuel's); README and TRADEMARKS.md say so.
 
 - SecondBrain's automations run as MAF workflows on his MCP host (`recipe_workflow.py`, served by `mcp_app.py` as

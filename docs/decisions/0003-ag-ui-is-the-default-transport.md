@@ -1,0 +1,67 @@
+---
+status: accepted
+contact: Kyle
+date: 2026-11-05
+deciders: Kyle
+---
+
+# 0003: AG-UI is the default transport, Responses the fallback
+
+## Context and Problem Statement
+
+Until 2026-11-05 SecondBrain's Agent tab reached Steward over the OpenAI Responses protocol, served by MAF's
+`ResponsesHostServer` (`hosted.py`, 127.0.0.1:43120), with approval cards as `mcp_approval_request` items. MAF also
+ships an AG-UI host (`agent_framework_ag_ui`), which streams a workflow's steps and turns approvals into AG-UI
+interrupts. Which transport should every caller (the Agent tab, the phone, automations, evals) use?
+
+## Decision Drivers
+
+- The operator, 2026-11-05: "The pairing of MAF with UI abstractions (like AG-UI) separates the underlying logic from
+  the visual layer, resulting in more robust, non-breaking desktop automation. This seems important."
+- Use MAF as it ships: the AG-UI host and its interrupt and step events come from MAF, not from our own code.
+- The workflow's step events (StepStarted, StepFinished per executor) are what the console shelves and the Flows
+  shelf need to light up steps live.
+- Evidence first: the switch is made on a measured comparison (`evals.py compare-transports`), with the rule written
+  in `harness/steward/evals/README.md` ("The decision rule").
+
+## Considered Options
+
+- AG-UI by default, Responses as the fallback.
+- Responses only (as before).
+- AG-UI only.
+
+## Decision Outcome
+
+Chosen option: "AG-UI by default, Responses as the fallback", because AG-UI passed small 3/3 at `6401b56` and was
+faster on every case, and the fallback keeps a turn working while the AG-UI host is down.
+
+The operator's word, 2026-11-05: "use it" (recorded in Jesster #77).
+
+- Step 1, Steward #138: Steward's workflow served over AG-UI on 127.0.0.1:43122 (`ag_ui_app.py`), cards as its
+  interrupts (resumed with `interruptId` and `forwardedProps.checkpointId`).
+- Step 2, Jesster #70 then #77: the Agent tab, the phone and automation turns reach Steward over AG-UI. If its host is
+  down, the turn falls back to Responses (43120) and one console line says so. Only a Responses choice made in
+  Settings stays on Responses.
+- The eval workflows run with `-Transport ag-ui`.
+
+### Consequences
+
+- Good, because the UI reads MAF's own step and interrupt events, so a change in Steward's workflow does not break the
+  console.
+- Good, because the evals can check the same events the operator sees.
+- Bad, because the AG-UI host keeps checkpoints in memory: a restart drops a parked card's checkpoint, and its resume
+  is refused (the case fails with its reason).
+- Neutral: MAF's `agent-framework-ag-ui` 1.7.1 pins `ag-ui-protocol` below 0.2, while AG-UI's latest is 1.0. We hold
+  until MAF moves.
+
+## Validation
+
+Jesster's `agent.test.cjs` covers the default, the fallback and a chosen setting; `agui.test.cjs` covers the resume.
+Steward's `evals.py --transport ag-ui` runs the asks sets against the live AG-UI host.
+
+## More Information
+
+- Next: AG-UI step 3, the Phone view and the console shelves on the same events; then an A2UI pilot for approval
+  cards only (after step 2, the operator's choice). A2A is deferred until a second autonomous agent exists.
+- The SecondBrain note `steward-s-dev-path-evals-that-grow-with--cb3211`, sections "AG-UI: added on his word" and
+  "Protocols".
