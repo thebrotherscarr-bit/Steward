@@ -98,6 +98,9 @@ was never merged and has no entry.
 
 ### Changed
 
+- The plan call's own turn (`PLAN_NOW`) asks a step that changes a file to name that file by its path. The steps set
+  at 416ba41: the steps named order_total but never inventory.py, and EXECUTE worked from todos that did not say where.
+  Test: `test_the_plan_call_asks_each_step_that_changes_a_file_to_name_it_by_its_path`.
 - Each workflow step's model calls are offered only that step's tools, not the whole set (the bar at 98d54d5: 43 tools
   in an eval's build, 56 live, on every call; of 56 PLAN calls in the traces, 4 wrote a call's arguments as text and
   one called `functions?`). PLAN gets the reads, the todo tools and his memory's reads (22 in an eval's build, of 43);
