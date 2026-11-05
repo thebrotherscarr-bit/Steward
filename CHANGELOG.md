@@ -19,7 +19,10 @@ was never merged and has no entry.
   each keeps, how a request, an automation and an eval flow, the rules and the build plan) and `docs/decisions/`, the
   decision records in MAF's own format (MAF's `adr-template.md` and `adr-short-template.md`, copied unchanged), with
   ADR-0001 moved in from SecondBrain and 0002 to 0008 for the 2026-11-04 and 11-05 rulings. From now on every
-  architectural change gets an ADR before it is built (the operator, 2026-11-05).
+  architectural change gets an ADR before it is built (the operator, 2026-11-05). The doc standard for the whole
+  Estate: `docs/README.md` maps which document is for what; `docs/specs/` with MAF's `spec-template.md`;
+  `.agent/PLANS.md`, the OpenAI Cookbook's ExecPlan format with this Estate's adaptations, and `docs/plans/` for the
+  plans; `AGENTS.md` at the root in MAF's style (key docs, the gate's commands with timeouts, rules, structure).
 
 - The repository is licensed MIT (`LICENSE`, the same text and holder as Manjuel's); README and TRADEMARKS.md say so.
 

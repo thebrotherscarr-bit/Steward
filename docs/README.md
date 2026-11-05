@@ -1,12 +1,28 @@
 # Docs
 
-The design of the whole Estate lives here.
+The design of the whole Estate lives here. Every document in every repository of the Estate follows this map from
+2026-11-05 (the operator: "make this the standard moving forward, this way nothing gets misaligned"; "we need to get
+this set up so all of our docs match this format from here moving forward").
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): the one design document: the parts, the wires (ports and protocols), the data
-  each part keeps, how a request, an automation and an eval flow, the rules, and the build plan ahead.
-- [decisions/](decisions/README.md): the Architectural Decision Records, in MAF's own format (MADR, with MAF's
-  `adr-template.md` and `adr-short-template.md`). Every architectural change gets an ADR before it is built, and
-  ARCHITECTURE.md is updated in the same pull request when a decision changes the shape.
+## The doc map: which document for what
+
+| Document | For | Where | Format, from |
+|---|---|---|---|
+| **ARCHITECTURE** | The current whole: parts, wires, data, flows, rules, plan ahead | [ARCHITECTURE.md](ARCHITECTURE.md) | ours; updated in the same PR as any change to the shape |
+| **ADR** | One architectural decision, its options and why | [decisions/](decisions/README.md) `NNNN-title.md` | MAF's `docs/decisions/` (MADR): `adr-template.md`, `adr-short-template.md` |
+| **Spec** | A feature's design before it is built: goal, problem, API changes, end-to-end samples | [specs/](specs/spec-template.md) `NNN-title.md` | MAF's `docs/specs/spec-template.md` |
+| **ExecPlan** | A multi-step build in progress, a living document (Progress, Surprises & Discoveries, Decision Log, Outcomes & Retrospective) | [plans/](plans/README.md) `NNNN-title.md`, written to [`.agent/PLANS.md`](../.agent/PLANS.md) | OpenAI Cookbook, "Using PLANS.md for multi-hour problem solving" (`articles/codex_exec_plans.md`) |
+| **AGENTS.md** | How an agent works in a repository: key docs, commands with timeouts, rules, structure | each repository's root | MAF's `python/AGENTS.md` and `dotnet/AGENTS.md`; agents.md |
+| **CHANGELOG** | What landed, one entry per change | each repository's `CHANGELOG.md` | Keep a Changelog 1.1.0 |
+| **README** | What a repository is and how to install it; links here | each repository's root | ours |
+| **SecondBrain notes** | Discussion, day logs, research, the Charter; they point to the documents above for anything decided or built | the vault | ours |
+
+The order for a new piece: an ADR if it decides something architectural, a spec if it is a feature, an ExecPlan if it
+takes several steps; then the build; then CHANGELOG, and ARCHITECTURE.md if the shape moved, in the same pull request.
+
+What MAF also keeps and we do not copy: `docs/features/` (implementation summaries by feature, no template),
+`docs/design/` (one design note), `docs/FAQS.md`, and `.github/copilot-instructions.md` (the repository map for
+Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.md` carries what those would.
 
 ## Decisions
 

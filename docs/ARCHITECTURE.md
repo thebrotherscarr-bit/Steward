@@ -8,6 +8,8 @@ repository because Steward runs the Estate.
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
+  A feature's design is a spec in [`specs/`](specs/spec-template.md); a multi-step build is an ExecPlan in
+  [`plans/`](plans/README.md). [`README.md`](README.md) is the doc map.
 - **Where this disagrees with an older document** (a README, the ground's SPEC.md, a SecondBrain note), this file and
   the ADRs win; the older one carries a dated pointer here.
 
