@@ -29,8 +29,9 @@ is added: that folder's README.md). ``validate`` checks them with no model; ``ba
 ``--transport in-process|responses|ag-ui`` (an asks set: small, heldout) says how each case reaches Steward: in this
 process (the default, run_steward), or against the running Responses host (hosted.py, 127.0.0.1:43120) or AG-UI host
 (ag_ui_app.py, 127.0.0.1:43122), its cards answered over the wire with the same policy (eval_transports.py). Every case
-records its transport and timings in the history; ``compare-transports [--set NAME] [--last N]`` prints the per-case
-table of the three, from the history, running nothing.
+records its transport and timings in the history; ``compare-transports [--set NAME] [--last N] [--set-version V]``
+prints the per-case table of the three, from the history, running nothing (one version of the set: V, or its current
+one, with a line naming the runs of other versions it leaves out).
 
 Run:
     python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory | heldout] [--options NAME]
@@ -804,6 +805,9 @@ EVAL_HISTORY = _REPO / "storage" / "evals" / "history.jsonl"
 EVAL_HISTORY_KEEP = 500
 # The settings set this run uses (cli's --options), as {"name", "values"}; None when it uses none.
 OPTIONS_IN_USE: dict[str, Any] | None = None
+# The repo's HEAD as the run began (cli sets it): live 2026-11-05, main was pulled to 2681f88 during a run of e94cb90's
+# code and the run was recorded as 2681f88's.
+GIT_HEAD_AT_START: str | None = None
 logger = logging.getLogger(__name__)
 
 
@@ -850,7 +854,7 @@ def history_entry(name: str, results: dict[str, Any], code: int, progress: list[
             }
             for step, item in items
         ],
-        "git_head": _git_head(),
+        "git_head": GIT_HEAD_AT_START or _git_head(),  # the code the run loaded, not what is on disk when it ends
         "model": os.environ.get("OLLAMA_MODEL") or None,  # the model's name only; never a key
         **({"progress": list(progress)} if progress else {}),
     }
@@ -1350,20 +1354,58 @@ def answer_on_topic(query: str, conversation: list[Any]) -> dict[str, object]:
 
 
 def _stewards_last_reply(conversation: list[Any]) -> str:
-    """His own last reply: the last assistant text not written by the workflow's harness steps (MAF's WorkflowAgent
-    names each output's executor as its author_name) and not the harness's COMMIT_NOT_APPROVED sentence."""
+    """His own last reply: his words in the last round that has any (back to the user's message before it: the ask or
+    a card's answer), not the workflow's harness steps' (MAF's WorkflowAgent names each output's executor as its
+    author_name; the Responses wire names none, so their texts are known by their words, _harness_says).
+
+    Live 2026-11-05 (the Responses transport, 0/3 on answer_on_topic): the last text was ask_commit's "Checks passed",
+    which came with no step name; and on the README ask his round's last pass said only "All pending todo items have
+    been completed." after the README line (the host's _only_his_own_words splits a pass from the next, where
+    in-process the round is one message)."""
     import steward_workflow as wf  # noqa: PLC0415
 
-    harness_steps = {wf.COMMIT_STEP, wf.REPORT_STEP, "ask_commit"}
-    not_approved = wf.COMMIT_NOT_APPROVED.split("{message}")
+    harness_steps = {wf.COMMIT_STEP, wf.REPORT_STEP, wf.REPAIR_STEP, "ask_commit"}
+    said: list[str] = []
     for message in reversed(conversation or []):
+        role = getattr(message, "role", None)
+        if role == "user":
+            if said:
+                break
+            continue
         text = (getattr(message, "text", "") or "").strip()
-        if getattr(message, "role", None) != "assistant" or not text or getattr(message, "author_name", None) in harness_steps:
+        if role != "assistant" or not text:
             continue
-        if text.startswith(not_approved[0]) and text.endswith(not_approved[1]):
+        if getattr(message, "author_name", None) in harness_steps or _harness_says(text):
+            if said:
+                break
             continue
-        return text
-    return ""
+        said.append(text)
+    return "\n".join(reversed(said))
+
+
+def _harness_says(text: str) -> bool:
+    """Whether a text is one of the workflow's own outputs: the checks' result (ask_commit, report: checks_text), a
+    repair's failing checks (repair_text), the commit's result (agent.git_commit) or COMMIT_NOT_APPROVED. Read from the
+    functions and sentences themselves, so a changed wording changes this with it."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent import NOTHING_TO_COMMIT  # noqa: PLC0415
+
+    marker = "987654321"
+    forms = [
+        wf.checks_text(wf.CheckReport(int(marker), True, "", "")),
+        wf.checks_text(wf.CheckReport(int(marker), False, "", "")),
+        wf.repair_text(wf.CheckReport(int(marker), False, "", "")),
+    ]
+    starts = [re.escape(form.strip()).replace(marker, r"\d+") for form in forms]
+    not_approved = [re.escape(part) for part in wf.COMMIT_NOT_APPROVED.split("{message}")]
+    patterns = [
+        *(rf"{start}(?:\s.*)?" for start in starts),
+        rf"{not_approved[0]}.*{not_approved[1]}",
+        re.escape(NOTHING_TO_COMMIT),
+        r"Committed [0-9a-f]{4,40}: .*",  # agent.git_commit's result
+        r"git (?:add|commit) failed: .*",
+    ]
+    return any(re.fullmatch(pattern, text, re.DOTALL) for pattern in patterns)
 
 
 # Result checks (audit 2026-11-04, the cookbook's answer-level checks): the process checks above can all pass on a run
@@ -1973,21 +2015,44 @@ def _median(values: list[float]) -> float | None:
     return values[middle] if len(values) % 2 else round((values[middle - 1] + values[middle]) / 2, 2)
 
 
-def transport_comparison(set_name: str = "small", last: int = 3, history: Path | None = None) -> dict[str, dict[str, dict[str, Any]]]:
-    """From the history, each transport's last ``last`` runs of ``set_name`` (a line with no transport is in-process),
-    per case: {transport: {case input: {runs, passed, first_event_s (median), total_s (median), cards, resumed,
-    stream_errors}}}. Only runs of the set's current version count (like with like)."""
+def _set_runs(set_name: str, history: Path | None = None) -> list[dict[str, Any]]:
+    """The history's runs of ``set_name``, oldest first (a line that does not parse is skipped)."""
     path = history or EVAL_HISTORY
-    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-    version = EVAL_SETS[set_name].version if set_name in EVAL_SETS else None
-    runs: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_transports.TRANSPORTS}
-    for line in lines:
+    runs: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
         try:
             run = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(run, dict) or run.get("set") != set_name:
-            continue
+        if isinstance(run, dict) and run.get("set") == set_name:
+            runs.append(run)
+    return runs
+
+
+def runs_left_out(set_name: str = "small", version: int | None = None, history: Path | None = None) -> dict[str, dict[int, int]]:
+    """The runs transport_comparison leaves out for being of another version of the set: {transport: {version: runs}}.
+    Live 2026-11-05: main was pulled to the set's v2 while the responses run (v1) was going, so the comparison under
+    v2 printed "-" for responses with no word of the run it had left out."""
+    version = version if version is not None else (EVAL_SETS[set_name].version if set_name in EVAL_SETS else None)
+    left: dict[str, dict[int, int]] = {}
+    for run in _set_runs(set_name, history):
+        other = run.get("set_version")
+        if version is not None and other not in (version, None):
+            counts = left.setdefault(run.get("transport") or "in-process", {})
+            counts[other] = counts.get(other, 0) + 1
+    return left
+
+
+def transport_comparison(
+    set_name: str = "small", last: int = 3, history: Path | None = None, version: int | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """From the history, each transport's last ``last`` runs of ``set_name`` (a line with no transport is in-process),
+    per case: {transport: {case input: {runs, passed, first_event_s (median), total_s (median), cards, resumed,
+    stream_errors}}}. Only runs of one version of the set count (like with like): ``version``, or the set's current
+    one; runs_left_out names the others."""
+    version = version if version is not None else (EVAL_SETS[set_name].version if set_name in EVAL_SETS else None)
+    runs: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_transports.TRANSPORTS}
+    for run in _set_runs(set_name, history):
         if version is not None and run.get("set_version") not in (version, None):
             continue
         runs.setdefault(run.get("transport") or "in-process", []).append(run)
@@ -2042,22 +2107,31 @@ def ag_ui_decision(table: dict[str, dict[str, dict[str, Any]]]) -> tuple[bool, l
 
 
 def compare_transports_main(args: list[str]) -> int:
-    """``compare-transports [--set NAME] [--last N]``: the per-case table of in-process vs responses vs ag-ui from the
-    history (transport_comparison) and the README's decision line (ag_ui_decision). Runs nothing; 0, or 2 for bad args."""
-    set_name, last = "small", 3
+    """``compare-transports [--set NAME] [--last N] [--set-version V]``: the per-case table of in-process vs responses
+    vs ag-ui from the history (transport_comparison, of the set's version V, or its current one), a line for each
+    transport's runs of other versions it leaves out (runs_left_out), and the README's decision line (ag_ui_decision).
+    Runs nothing; 0, or 2 for bad args."""
+    set_name, last, version = "small", 3, None
     try:
         if "--set" in args:
             set_name = args[args.index("--set") + 1]
         if "--last" in args:
             last = int(args[args.index("--last") + 1])
+        if "--set-version" in args:
+            version = int(args[args.index("--set-version") + 1])
     except (IndexError, ValueError):
-        print("evals.py compare-transports [--set NAME] [--last N]", file=sys.stderr)
+        print("evals.py compare-transports [--set NAME] [--last N] [--set-version V]", file=sys.stderr)
         return 2
-    table = transport_comparison(set_name, last)
+    if version is None and set_name in EVAL_SETS:
+        version = EVAL_SETS[set_name].version
+    table = transport_comparison(set_name, last, version=version)
     print(
-        f"Transports on {set_name}, the last {last} run(s) of each "
-        "(passed/runs, first event s, total s, cards resumed/answered, stream errors):"
+        f"Transports on {set_name}" + (f" v{version}" if version is not None else "") + f", the last {last} run(s) of "
+        "each (passed/runs, first event s, total s, cards resumed/answered, stream errors):"
     )
+    for transport, counts in runs_left_out(set_name, version).items():
+        others = ", ".join(f"{n} of v{v}" for v, n in sorted(counts.items(), key=lambda kv: str(kv[0])))
+        print(f"  {transport}: left out {others} (--set-version to compare them)")
     cases = list(dict.fromkeys(case for transport in eval_transports.TRANSPORTS for case in table.get(transport, {})))
 
     def cell(row: dict[str, Any] | None) -> str:
@@ -2082,7 +2156,7 @@ def cli(argv: list[str]) -> int:
     ``validate``, ``bar <set name>`` or ``compare-transports [--set NAME] [--last N]``: the set's exit code, or 2 for a
     settings set or transport that cannot be used (the reason on stderr, and nothing run). validate checks every set file (validate_main); bar prints whether a set's bar is met (0) or not (1),
     from the history, running nothing."""
-    global OPTIONS_IN_USE, TRANSPORT_IN_USE
+    global GIT_HEAD_AT_START, OPTIONS_IN_USE, TRANSPORT_IN_USE
     OPTIONS_IN_USE = None  # a run uses only the settings set it names
     TRANSPORT_IN_USE = "in-process"  # and only the transport it names
     args = list(argv)
@@ -2097,6 +2171,7 @@ def cli(argv: list[str]) -> int:
         met, line = bar_status(args[1])
         print(line)
         return 0 if met else 1
+    GIT_HEAD_AT_START = _git_head()  # a set run from here on: the code it runs is what is checked out now
     if "--options" in args:
         at = args.index("--options")
         name = args[at + 1] if at + 1 < len(args) else ""

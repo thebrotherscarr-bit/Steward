@@ -185,6 +185,21 @@ was never merged and has no entry.
 
 ### Fixed
 
+- Both hosts import the code a request builds as they are built (`hosted.HOST_CODE`, `load_host_code`, called by
+  `steward_server` and `ag_ui_app.build_ag_ui_app`), so a pull while a host runs is not mixed into its requests. The
+  transport comparison (08:26, `--transport ag-ui`): the AG-UI host started at 08:12 on e94cb90's agent.py, main was
+  pulled to 2681f88 at 08:23, and the first request imported 2681f88's steward_workflow.py, whose `step_tools_turn`
+  called `agent.sandbox_shell_closed` (AttributeError): "RUN_ERROR: Workflow execution failed." on every case. Test:
+  `test_a_host_imports_the_code_its_requests_build_as_it_starts`.
+- `answer_on_topic` over a transport takes his own last reply: his words in the last round that has any, the workflow's
+  own texts (the checks' result, a repair's failing checks, the commit's result, `COMMIT_NOT_APPROVED`) skipped by
+  their words (`_harness_says`), since the Responses wire names no step. The Responses run took ask_commit's "Checks
+  passed" for his reply, and on the README ask his round's last pass, "All pending todo items have been completed.".
+  Test: `test_the_responses_transport_scores_his_own_last_reply_not_the_checks_or_his_todo_line`.
+- `compare-transports` names the runs of another set version it leaves out, and `--set-version V` compares them; a
+  run's `git_head` is the HEAD as it began (`GIT_HEAD_AT_START`). The responses run was small v1, the comparison ran
+  under v2 and printed "-" for it, and the run was recorded at 2681f88 though it ran e94cb90's code. Test:
+  `test_compare_transports_names_the_runs_of_another_set_version_it_leaves_out`.
 - EXECUTE is offered `execute_code` only once the Hyperlight sandbox has closed the session's shell
   (`agent.sandbox_shell_closed`; a run_shell refused on FIDES's untrusted label now closes it too). Heldout v1 run 2
   (e94cb90, trace 14:57Z): with the sandbox on and nothing untrusted read, EXECUTE wrote units.py with execute_code,
