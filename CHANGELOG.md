@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- SecondBrain's automations run as MAF workflows on his MCP host (`recipe_workflow.py`, served by `mcp_app.py` as
+  `run_recipe` and `recipe_status`): a recipe (steps from a fixed list, `summarize`, `deliver`) is built with
+  WorkflowBuilder, one executor per step, then a tool-less summarize run in its own session, then deliver;
+  checkpointed by FileCheckpointStorage (`storage/recipes/checkpoints`), its events as JSONL; `recipe_graph` gives
+  `to_dict()` and WorkflowViz Mermaid for the Flows shelf. SecondBrain keeps only the scheduler.
+
 - SecondBrain's eval tools on his live build (SecondBrain `estate.cjs`): `eval_status`, a read, beside the Estate's
   others, and `eval_start`, the Estate's one bounded action (`ESTATE_ACTIONS`): it only runs eval sets, so it never
   asks a card, is not in plan mode's list of what changes things, and is never offered to an eval's own build. The

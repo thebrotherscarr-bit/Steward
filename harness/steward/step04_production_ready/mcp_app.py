@@ -51,6 +51,10 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from recipe_workflow import RecipeError, RecipeRuns, RecipeTools, estate_repos  # noqa: E402
+from agent_framework import Agent  # noqa: E402
+from agent_framework.ollama import OllamaChatClient  # noqa: E402
+
 from agent import (  # noqa: E402
     _WORKING_DIR,
     build_steward_agent,
@@ -59,6 +63,8 @@ from agent import (  # noqa: E402
 )
 
 MCP_SESSIONS_DIR = _WORKING_DIR / "storage" / "mcp-sessions"
+# SecondBrain's automations as MAF workflows (recipe_workflow.py): each run's state, events and checkpoints
+RECIPES_DIR = _WORKING_DIR / "storage" / "recipes"
 from halo_traces import setup_halo_tracing  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -158,16 +164,52 @@ def steward_mcp_tool(agent: Any) -> AgentMCPTool[Any]:
     )
 
 
-def build_mcp_app(agent: Any, ask_card: AskCard | None = None) -> Starlette:
-    """The sample's session-aware server, with Steward as its agent; ``ask_card`` answers his cards (SecondBrain)."""
+# SecondBrain's scheduler calls these two (Jesster electron/agent/workflows.cjs): a recipe runs as a MAF workflow here,
+# in its own task and session, never his chat thread; its status is read until it is done.
+RECIPE_TOOLS = [
+    types.Tool(
+        name="run_recipe",
+        description=(
+            "Run one automation recipe as a MAF workflow on this host: steps from the fixed list (repo_log, merged_prs, "
+            "releases, eval_bars, plan_left, versions, pull_ff, eval_start, eval_wait), then summarize, then deliver. "
+            "Returns its run_id at once; read it with recipe_status. No step raises a card."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "recipe": {"type": "object", "description": "name, prompt, steps, summarize, deliver"},
+                "since": {"type": "number", "description": "the window's start, seconds since the epoch; a day ago when left out"},
+            },
+            "required": ["recipe"],
+        },
+    ),
+    types.Tool(
+        name="recipe_status",
+        description="One recipe run's state: running, done (ok, text for the note, short for Telegram) or failed (error).",
+        input_schema={"type": "object", "properties": {"run_id": {"type": "string"}}, "required": ["run_id"]},
+    ),
+]
+
+
+def _text_result(payload: Any, error: bool = False) -> types.CallToolResult:
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=error)
+
+
+def build_mcp_app(agent: Any, ask_card: AskCard | None = None, recipes: RecipeRuns | None = None) -> Starlette:
+    """The sample's session-aware server, with Steward as its agent; ``ask_card`` answers his cards (SecondBrain);
+    ``recipes`` serves run_recipe and recipe_status beside him."""
     agent_tool = steward_mcp_tool(agent)
     session_locks: dict[str, asyncio.Lock] = {}
 
     async def list_tools(
         _ctx: ServerRequestContext[dict[str, Any]], params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
-        """Return the agent-derived MCP tool definition."""
-        return await agent_tool.list_tools()
+        """Return the agent-derived MCP tool definition, and the recipe tools while recipes are served."""
+        listed = await agent_tool.list_tools()
+        if recipes is None:
+            return listed
+        return types.ListToolsResult(tools=[*listed.tools, *RECIPE_TOOLS])
 
     async def call_tool(
         _ctx: ServerRequestContext[dict[str, Any]], params: types.CallToolRequestParams
@@ -175,6 +217,14 @@ def build_mcp_app(agent: Any, ask_card: AskCard | None = None) -> Starlette:
         """Serialize calls per app-owned session before using ``AgentState``."""
         name = params.name
         arguments = params.arguments or {}
+        if recipes is not None and name in {t.name for t in RECIPE_TOOLS}:
+            try:
+                if name == "run_recipe":
+                    since = arguments.get("since")
+                    return _text_result(recipes.start(arguments.get("recipe") or {}, float(since) if since is not None else None))
+                return _text_result(recipes.status(str(arguments.get("run_id") or "")))
+            except RecipeError as exc:
+                return _text_result(str(exc), error=True)
         session_id = arguments.get("session_id") if arguments else None
         if not isinstance(session_id, str) or not session_id:
             raise MCPError(types.INVALID_PARAMS, "MCP tool argument 'session_id' must be a non-empty string.")
@@ -194,6 +244,34 @@ def build_mcp_app(agent: Any, ask_card: AskCard | None = None) -> Starlette:
             yield
 
     return Starlette(routes=[Mount("/", app=session_manager.handle_request)], lifespan=lifespan)
+
+
+def recipe_summarizer() -> Agent:
+    """The recipes' summarize step: a tool-less agent on his own model (OLLAMA_MODEL), each run in its own session."""
+    from recipe_workflow import SUMMARIZE_INSTRUCTIONS  # noqa: PLC0415
+
+    return Agent(client=OllamaChatClient(), name="Steward", instructions=SUMMARIZE_INSTRUCTIONS)
+
+
+async def recipe_tools(stack: AsyncExitStack, url: str | None, key: str | None) -> Callable[[], RecipeTools]:
+    """What the recipes' steps run on: the Estate's repositories from the ground (two folders above his own), and
+    SecondBrain's MCP (estate_status, eval_start, eval_status) on a client of its own, read for up to a minute."""
+    ground = _WORKING_DIR.parents[1] if (_WORKING_DIR.parents[1] / "manjuel.py").exists() else None
+    call: Any = None
+    if url and key:
+        http = await stack.enter_async_context(
+            httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(30.0, read=60.0))
+        )
+        client = await stack.enter_async_context(Client(streamable_http_client(url, http_client=http)))
+
+        async def call(name: str, arguments: Mapping[str, Any]) -> str:
+            result = await client.call_tool(name, dict(arguments))
+            text = next((c.text for c in result.content if c.type == "text"), "")
+            if result.is_error:
+                raise RuntimeError(text or f"{name} failed")
+            return text
+
+    return lambda: RecipeTools(repos=estate_repos(ground), ground=str(ground) if ground else None, steward_dir=str(_WORKING_DIR), secondbrain=call)
 
 
 async def main() -> None:
@@ -220,8 +298,9 @@ async def main() -> None:
             ask_card = secondbrain_cards(await stack.enter_async_context(Client(streamable_http_client(url, http_client=http))))
         else:
             logger.warning("SECONDBRAIN_MCP_URL or SECONDBRAIN_MCP_KEY is not set: approval cards are left unanswered")
+        recipes = RecipeRuns(RECIPES_DIR, tools=await recipe_tools(stack, url, key), summarizer=recipe_summarizer())
         async with agent:
-            app = build_mcp_app(agent, ask_card)
+            app = build_mcp_app(agent, ask_card, recipes)
             await uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="info")).serve()
 
 
