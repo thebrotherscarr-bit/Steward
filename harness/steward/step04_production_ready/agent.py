@@ -2570,7 +2570,47 @@ async def refuse_unicode_punctuation_in_code(
         if name == FileAccessProvider.WRITE_TOOL_NAME and text is not None and (refusal := whole_write_problem(file_name, text)):
             context.result = refusal
             return
+        if name != FileAccessProvider.WRITE_TOOL_NAME and text is not None and (refusal := edit_breaks_python(file_name, text)):
+            context.result = refusal
+            return
     await call_next()
+
+
+# The bar at a3a3519's parent (2026-11-05 05:33Z, the steps set): EXECUTE's file_access_replace_lines put order_total's
+# two body lines at 8 spaces under a 4-space docstring, inventory.py no longer parsed, the check failed on collection
+# ("1 error during collection"), and REPAIR made the same edit twice. An edit of a .py file that parsed before and would
+# not parse after is refused like a whole write that is not Python: nothing is written, and the refusal names Python's
+# error and shows the lines around it as they would be, numbered, so the indentation is in front of him.
+EDIT_CONTEXT_LINES = 3
+
+
+def edit_breaks_python(file_name: str, content: str) -> str | None:
+    """The refusal for an edit (file_access_replace, _replace_lines) that leaves a parsing .py file unparsable, or None.
+
+    ``content`` is the text the edit would leave (_written_text). A file that did not parse before is not judged: an
+    edit may be the one that mends it."""
+    if not str(file_name).lower().endswith(".py"):
+        return None
+    try:
+        ast.parse(content)
+        return None
+    except SyntaxError as error:
+        problem = error
+    try:
+        ast.parse(_inside_workspace(file_name).read_text(encoding="utf-8"))
+    except (OSError, ValueError, SyntaxError):
+        return None
+    lines = content.split("\n")
+    at = problem.lineno or 1
+    shown = "\n".join(
+        f"{number:>4}| {lines[number - 1]}"
+        for number in range(max(1, at - EDIT_CONTEXT_LINES), min(len(lines), at + EDIT_CONTEXT_LINES) + 1)
+    )
+    return (
+        f"Refused: after this edit {file_name} would not be Python ({problem.msg}, line {problem.lineno}), so nothing "
+        f"was written. The lines around it would be:\n{shown}\nKeep each line's indentation as the lines around it "
+        "have it (a function's body one level in from its def), and make the edit again."
+    )
 
 
 def whole_write_problem(file_name: str, content: str) -> str | None:
