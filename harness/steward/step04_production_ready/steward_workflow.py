@@ -452,6 +452,10 @@ CHECKS_RUN_THE_TESTS = (
     "The checks run the tests of the files you change by themselves when you finish, so a step that only runs the "
     "tests is theirs: mark it complete without running them."
 )
+# The confirmation bars at 2b4b509 and e532fea (2026-11-05, the discount and README asks): the work was right, and his
+# last reply was only "All remaining todos are completed and the tests now pass." or "Todos marked complete.", so the
+# user's last line said nothing of what changed. EXECUTE is asked to end on what it changed, by file.
+SAY_WHAT_CHANGED = "When the work is done, end with a line or two saying what you changed, naming each file."
 
 
 def execute_message(request: str, plan: str, steps: list[str]) -> Message:
@@ -460,6 +464,7 @@ def execute_message(request: str, plan: str, steps: list[str]) -> Message:
     text = (
         f"The user approved your plan. Carry it out now.\n\nRequest: {request}\n\nPlan: {plan}\n\nSteps (your todos):\n"
         f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. {CHECKS_RUN_THE_TESTS} "
+        f"{SAY_WHAT_CHANGED} "
         "Do not commit: the checks run when you finish, and once they pass you will be asked to commit."
     )
     # REQUEST_KEY: his request hints match the request alone, never the plan's wording (agent.asked_request).

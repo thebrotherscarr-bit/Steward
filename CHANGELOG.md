@@ -98,6 +98,9 @@ was never merged and has no entry.
 
 ### Changed
 
+- EXECUTE's message asks it to end on what it changed, naming each file (`SAY_WHAT_CHANGED` in `execute_message`). The
+  confirmation bars at 2b4b509 and e532fea: the work was right, and his last reply was only "All remaining todos are
+  completed and the tests now pass." Test: `test_execute_is_asked_to_end_on_what_it_changed_by_file`.
 - EXECUTE's message says the checks run the tests of the files it changes, so a step that only runs the tests is
   theirs and is marked complete (`CHECKS_RUN_THE_TESTS` in `execute_message`). The confirmation bar at 5039e0e (the
   discount ask): a "Run the sample project tests" step sent him to run_shell("pytest -q") twice, both denied, and his

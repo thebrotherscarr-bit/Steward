@@ -6638,3 +6638,14 @@ def test_a_run_stopped_on_a_tool_result_is_asked_to_go_on_with_tools_on_before_a
     assert go_on.text == steward.GO_ON_NUDGE and not steward.asks_to_answer_now([go_on]), "tools stay on"
     assert decide(stopped, go_on) == (True, "answer"), "stopped again: the answer-now turn"
     assert decide(empty) == (True, "answer"), "an empty reply is asked for its answer as before"
+
+
+def test_execute_is_asked_to_end_on_what_it_changed_by_file() -> None:
+    """The confirmation bars at 2b4b509 and e532fea (2026-11-05): the work was right, and his last reply was only "All
+    remaining todos are completed and the tests now pass." EXECUTE's message asks him to end on what he changed,
+    naming each file (SAY_WHAT_CHANGED)."""
+    import steward_workflow as wf
+
+    message = wf.execute_message("Fix the discount bug.", "Fix it.", ["Fix order_total in inventory.py"])
+    assert wf.SAY_WHAT_CHANGED in message.text and "naming each file" in message.text
+    assert message.text.index(wf.CHECKS_RUN_THE_TESTS) < message.text.index(wf.SAY_WHAT_CHANGED) < message.text.index("Do not commit")
