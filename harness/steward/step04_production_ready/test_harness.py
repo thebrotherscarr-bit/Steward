@@ -3082,15 +3082,15 @@ def test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done
     assert not any(steward.REQUIRED_TOOLS_NUDGE in str(m.text) for m in client.calls[0]["messages"])
 
 
-def test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model() -> None:
+def test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model(monkeypatch: Any) -> None:
     """Step 6 (2026-11-03): Steward diagnoses on his own harness with hand_to_coder beside his tools; the coder is a
     small MAF Agent on the coder model with only MAF's file tools (writes ask), his tool-call limits and a 16K window."""
     from agent_framework import FileAccessProvider
 
     import improvement_loop_workflow as loop
 
-    assert loop.fixer_client().model == steward._CODER_MODEL
-    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+    monkeypatch.setenv("OLLAMA_MODEL", "steward:1")
+    assert loop.fixer_client().model == steward._coder_model()
     client = ScriptedChatClient([])
     coder = loop.build_coder(client)
     assert coder.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 16_384
@@ -4703,6 +4703,29 @@ def test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_st
         assert "await warn_model_drift()" in inspect.getsource(host.main), f"{host.__name__} checks at start"
 
 
+def test_the_coder_is_stewards_own_model_unless_named_and_records_its_timings(monkeypatch: Any) -> None:
+    """One model (the operator's ruling, 2026-11-05): the improvement loop's coder is on Steward's own chat model, the
+    one MAF's OllamaChatClient reads from OLLAMA_MODEL; STEWARD_CODER_MODEL still names a separate coder. The coder's
+    client records Ollama's timings, so a coder on another model shows its load times in the traces."""
+    import ollama
+    from agent_framework.ollama import OllamaChatClient
+
+    import improvement_loop_workflow as loop
+
+    monkeypatch.setenv("OLLAMA_MODEL", "steward:1")
+    monkeypatch.delenv("STEWARD_CODER_MODEL", raising=False)
+    assert loop.fixer_client().model == OllamaChatClient().model == "steward:1", "the coder is Steward's own model"
+    monkeypatch.setenv("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+    client = loop.fixer_client()
+    assert client.model == "qwen2.5-coder:14b", "STEWARD_CODER_MODEL brings back a separate coder"
+    done = ollama.ChatResponse(
+        model=client.model, message=ollama.Message(role="assistant", content="ok"), done=True,
+        load_duration=5, prompt_eval_duration=7, eval_count=3, eval_duration=11, prompt_eval_count=2,
+    )
+    usage = client._parse_response_from_ollama(done).usage_details
+    assert usage.get("ollama.load_duration") == 5, f"the coder's client records Ollama's timings: {usage}"
+
+
 def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
     """The part > 4 build (Coder, Reasoner, Explainer on their own models, gemma4:26b and deepseek-r1:14b) was called by
     no host and is removed (2026-11-04). The live build keeps CodeExplorer on his client, and the improvement loop's
@@ -4712,7 +4735,7 @@ def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
     for gone in ("_build_coder_agent", "_build_reasoner_agent", "_build_conversation_agent", "_build_explorer_agent",
                  "_REASONER_MODEL", "_CONVERSATION_MODEL", "_TEAM_CONTEXT", "STEWARD_INSTRUCTIONS", "_connect_secondbrain"):
         assert not hasattr(steward, gone), gone
-    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b"), "the fixer's model stays"
+    assert not hasattr(steward, "_CODER_MODEL"), "the coder's model is read at each build (_coder_model)"
 
     async def _go(part: int) -> list[str]:
         async with AsyncExitStack() as stack:
