@@ -6035,3 +6035,82 @@ def test_a_steps_run_records_its_check_and_repair_progress_in_the_eval_history(m
 
     evals.record_history("small", {"": SimpleNamespace(passed=1, total=1, items=[])}, 0)
     assert "progress" not in json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+
+
+def test_a_manjuel_face_turn_needing_a_card_goes_through_the_mcp_host_to_secondbrains_approval_ask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end, stubbed (the overnight plan, loop B 2): Manjuel's face calls Steward over HTTP on mcp_app's MCP host
+    (tools/call, as Manjuel's mcp_call does), the turn reaches a tool that waits for a card, secondbrain_cards asks it
+    on an MCP server standing in for SecondBrain (its approval_ask tool, over a real MCP Client), the Allow runs the
+    tool, and the turn's answer comes back to Manjuel. A Deny on the same path runs nothing."""
+    import json as _json
+
+    from agent_framework import AgentModeProvider, InMemoryHistoryProvider, set_agent_mode, tool
+    from mcp import Client
+    from mcp.server.mcpserver import MCPServer
+    from starlette.testclient import TestClient
+
+    import mcp_app
+
+    monkeypatch.setattr(mcp_app, "MCP_SESSIONS_DIR", tmp_path / "mcp-sessions")
+    asked: list[tuple[str, dict[str, Any], str]] = []
+    allow = [True]
+    secondbrain = MCPServer("secondbrain")
+
+    @secondbrain.tool()
+    def approval_ask(tool: str, arguments: dict[str, Any], session_id: str) -> str:
+        """SecondBrain's card for a tool call under the MCP host (stubbed: answers at once)."""
+        asked.append((tool, arguments, session_id))
+        return _json.dumps({"id": "card-1", "approved": allow[0], "answer": "allow" if allow[0] else "deny"})
+
+    async def ask_card(card: Any, session_id: str) -> bool:
+        # a client per card, on the host's own loop (the TestClient serves the app on its own thread)
+        async with Client(secondbrain) as client:
+            return await mcp_app.secondbrain_cards(client)(card, session_id)
+
+    ran: list[str] = []
+
+    @tool(name="probe_write", approval_mode="always_require")
+    def probe_write(text: str) -> str:
+        """Writes nothing: records that it ran."""
+        ran.append(text)
+        return f"wrote {text}"
+
+    def turn(session_id: str, replies: list[Any]) -> list[str]:
+        stack = AsyncExitStack()
+        client = ScriptedChatClient(replies)
+
+        async def build() -> Any:
+            agent = await steward.build_steward_agent(
+                stack, client=client, enable_shell=False, extra_tools=[probe_write], history_provider=InMemoryHistoryProvider()
+            )
+            state = mcp_app.steward_mcp_tool(agent).state
+            session = await state.get_or_create_session(session_id)
+            for modes in [p for p in agent.context_providers if isinstance(p, AgentModeProvider)]:
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+            await state.set_session(session_id, session)
+            return agent
+
+        agent = asyncio.run(build())
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "Steward", "arguments": {"task": "Write hello.", "session_id": session_id}}}
+        try:
+            with TestClient(mcp_app.build_mcp_app(agent, ask_card), base_url=f"http://{mcp_app.HOST}:{mcp_app.PORT}") as http:
+                reply = http.post("/mcp", json=body, headers={"Accept": "application/json, text/event-stream"}).json()
+        finally:
+            asyncio.run(stack.aclose())
+        assert "result" in reply, reply
+        return [b["text"] for b in reply["result"]["content"] if b["type"] == "text"]
+
+    call = Content.from_function_call(call_id="p1", name="probe_write", arguments={"text": "hello"})
+    texts = turn("manjuel-face-1", [call, "Wrote it."])
+    assert asked == [("probe_write", {"text": "hello"}, "manjuel-face-1")], "the card reached SecondBrain's approval_ask"
+    assert ran == ["hello"], "SecondBrain's Allow ran the tool"
+    assert texts and texts[-1] == "Wrote it.", "and Manjuel got the turn's answer"
+
+    allow[0] = False
+    texts = turn("manjuel-face-2", [Content.from_function_call(call_id="p2", name="probe_write", arguments={"text": "no"}), "Not written."])
+    assert asked[-1] == ("probe_write", {"text": "no"}, "manjuel-face-2")
+    assert ran == ["hello"], "a Deny from SecondBrain runs nothing"
+    assert texts and texts[-1] == "Not written."
