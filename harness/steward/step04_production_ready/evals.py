@@ -955,8 +955,19 @@ def plan_that_reached_the_card(conversations: list[list[Any]]) -> list[list[Any]
     """The steps set's v2 scoring (t0-steps.yaml): PLAN's completions read as one conversation, so plan_step scores
     only the last plan, the one ReadPlan sent to the card (a reply it asked again for is followed by another
     completion), and still sees every call made in any of them. Under v1 each completion was its own plan, and a
-    re-asked plan that then reached the card failed. No completion: nothing to score."""
-    return [[message for conversation in conversations for message in conversation]] if conversations else []
+    re-asked plan that then reached the card failed. The earlier completions keep their calls and results but not their
+    words, so the plan scored is the last completion's own reply (an empty last reply reached no card, and fails).
+    No completion: nothing to score."""
+    from agent_framework import Message  # noqa: PLC0415
+
+    if not conversations:
+        return []
+    earlier = [
+        Message(role=message.role, contents=[c for c in message.contents or [] if c.type != "text"])
+        for conversation in conversations[:-1]
+        for message in conversation
+    ]
+    return [[*(message for message in earlier if message.contents), *conversations[-1]]]
 
 
 def _last_said(conversation: list[Any]) -> str:
