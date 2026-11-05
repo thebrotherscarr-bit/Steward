@@ -1497,6 +1497,23 @@ ANSWER_NOW_KEY = "steward_answer_now"
 EMPTY_REPLY_NUDGE = "Your last reply was empty."
 # A session whose state holds this answers in words: plan_mode_turns asks it for no plan (the workflow's answer step).
 IN_WORDS_KEY = "steward_answers_in_words"
+# A run that stopped on a tool's result, not on a reply, stopped mid-work (MAF ends its function loop after repeated
+# tool errors, or the model's next reply came back with nothing). The confirmation bar at 1c23f70 (2026-11-05 10:34Z,
+# the item_count ask): two calls to a tool EXECUTE is not offered, the run stopped on the second error, the answer-now
+# turn said his tools were off "for the rest of this request", and he answered "the tools are disabled" eleven times
+# instead of writing the function. Such a run is asked once to go on with its tools on (GO_ON_NUDGE, GO_ON_KEY); only
+# a second stop is the answer-now turn.
+GO_ON_KEY = "steward_go_on"
+GO_ON_NUDGE = (
+    "Your last turn stopped on a tool's result. Your tools are on: go on with the work, using only the tools you are "
+    "offered, then say in a few lines what is done."
+)
+
+
+def ended_on_a_result(response: Any) -> bool:
+    """Whether a run's last message is a tool's result (it stopped on a call, with no reply after it)."""
+    messages = list(getattr(response, "messages", None) or [])
+    return bool(messages) and messages[-1].role == "tool"
 # A session whose state holds this reads for a plan (the workflow's EXPLORE step). The bar at 1b56963 (2026-11-05
 # 07:55Z, the steps set): EXPLORE listed two folders, its next reply came back empty, and its reading ended there;
 # the plan call then answered with reads twice and the run ended with no plan. An empty reply there is asked once to
@@ -1867,6 +1884,9 @@ def plan_reply_loop(
         if background_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
             return (True, "background")
         if answer_missing(session, last_result, kwargs.get("messages")):
+            last = next((m for m in reversed(kwargs.get("messages") or []) if m.role == "user"), None)
+            if ended_on_a_result(last_result) and not (getattr(last, "additional_properties", None) or {}).get(GO_ON_KEY):
+                return (True, "go on")
             return (True, "answer")
         return False
 
@@ -1882,6 +1902,8 @@ def plan_reply_loop(
     async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> Any:
         if feedback == "read on":
             return loop_turn(READ_ON_NUDGE, **{READ_ON_KEY: True})
+        if feedback == "go on":
+            return loop_turn(GO_ON_NUDGE, **{GO_ON_KEY: True})
         if feedback == "answer":
             return loop_turn(EMPTY_REPLY_NUDGE, **{ANSWER_NOW_KEY: True})
         if feedback == "plan":

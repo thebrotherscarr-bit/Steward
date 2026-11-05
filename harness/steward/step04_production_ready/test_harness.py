@@ -6597,7 +6597,7 @@ def test_a_run_that_ends_on_a_tool_result_with_no_reply_is_asked_for_its_answer(
     session = AgentSession()
     set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
     decision = asyncio.run(should_continue(session=session, last_result=on_result, iteration=1, messages=[]))
-    assert decision == (True, "answer"), decision
+    assert decision == (True, "go on"), decision  # first asked to go on, tools on (GO_ON_NUDGE, the test after this one)
     assert steward.EMPTY_REPLY_NUDGE in asyncio.run(next_message(feedback="answer", session=session)).text
 
 
@@ -6610,3 +6610,31 @@ def test_execute_is_told_the_checks_run_the_tests_so_a_test_step_is_marked_compl
     message = wf.execute_message("Fix the discount bug.", "Fix it.", ["Fix order_total in inventory.py", "Run the tests"])
     assert wf.CHECKS_RUN_THE_TESTS in message.text and "mark it complete without running them" in message.text
     assert "Do not commit" in message.text and message.additional_properties[steward.REQUEST_KEY] == "Fix the discount bug."
+
+
+def test_a_run_stopped_on_a_tool_result_is_asked_to_go_on_with_tools_on_before_any_answer_now() -> None:
+    """The confirmation bar at 1c23f70 (2026-11-05 10:34Z, the item_count ask): the run stopped on a tool's error, the
+    answer-now turn said his tools were off for the rest of the request, and he answered "the tools are disabled"
+    instead of writing the function. A run stopped on a tool's result is asked once to go on, tools on (GO_ON_NUDGE,
+    no ANSWER_NOW_KEY); stopped again after that, it gets the answer-now turn; an empty reply is the answer-now turn
+    as before."""
+    from agent_framework import AgentModeProvider, AgentResponse, AgentSession, set_agent_mode
+
+    call = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "x"}]})
+    error = Content.from_function_result(call_id="t1", result='Error: Requested function "todos_add" not found.')
+    stopped = AgentResponse(messages=[Message(role="assistant", contents=[call]), Message(role="tool", contents=[error])])
+    empty = AgentResponse(messages=[Message(role="assistant", contents=[""])])
+
+    modes = AgentModeProvider(default_mode="plan")
+    should_continue, next_message = steward.plan_reply_loop(modes, None, None)
+    session = AgentSession()
+    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+
+    def decide(result: Any, last_user: Any = None) -> Any:
+        return asyncio.run(should_continue(session=session, last_result=result, iteration=1, messages=[last_user] if last_user else []))
+
+    assert decide(stopped) == (True, "go on")
+    go_on = asyncio.run(next_message(feedback="go on", session=session))
+    assert go_on.text == steward.GO_ON_NUDGE and not steward.asks_to_answer_now([go_on]), "tools stay on"
+    assert decide(stopped, go_on) == (True, "answer"), "stopped again: the answer-now turn"
+    assert decide(empty) == (True, "answer"), "an empty reply is asked for its answer as before"
