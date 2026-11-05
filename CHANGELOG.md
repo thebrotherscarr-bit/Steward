@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The open-todo reminder says his replies are already shown (`TODOS_ALREADY_SHOWN`) only when the iteration held his
+  own words (`said_something`). The confirmation bar at e532fea (the README ask): his reply was empty, the reminder
+  still told him to say only what is new, and after the write his whole answer was "Todos marked complete." Test:
+  `test_the_todo_reminder_says_his_words_are_shown_only_when_he_said_some`.
 - An empty reply in EXPLORE after it has begun reading (a tool call in that run) is asked once, tools on, to go on
   reading (`READS_FIRST_KEY` on EXPLORE's session, `READ_ON_NUDGE` in the harness loop); a second empty reply is not
   asked again, and an EXPLORE that read nothing goes to the plan call as before. The bar at 1b56963 (the steps set):
