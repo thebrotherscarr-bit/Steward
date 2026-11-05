@@ -369,10 +369,26 @@ def exit_code(results: Iterable[EvalResults]) -> int:
 CASE_ERRORS: dict[str, str] = {}
 
 
+# Rounds of cards an eval answers in one run (each round answers every card then open). Live 2026-11-04 (evals.py
+# small, the item_count ask): REPAIR's write took the 8th and last answer, the 9th card (the re-check) was never
+# answered, and the case failed silently. 20 fits a plan, several writes, a repair, its re-check and a commit; a run
+# still asking after that is looping, and fails with CardsUnanswered's reason (run_completed).
+CARD_ROUNDS = 20
+
+
+class CardsUnanswered(RuntimeError):
+    """A run still raising cards after CARD_ROUNDS rounds: the eval stopped answering, and the case fails with this."""
+
+    def __init__(self) -> None:
+        super().__init__(f"the eval stopped answering cards after {CARD_ROUNDS} rounds")
+
+
 def raised(error: BaseException, what: str = "the run") -> str:
     """A raising run's reason: the exception's type and first line, from inside the task group it came through."""
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
+    if isinstance(error, CardsUnanswered):
+        return str(error)
     first = next(iter(str(error).strip().splitlines()), "")
     return f"{what} raised {type(error).__name__}: {first}" if first else f"{what} raised {type(error).__name__}"
 
@@ -543,13 +559,15 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
     updates = [u async for u in agent.run(query, session=session, stream=True)]
     messages = list(AgentResponse.from_updates(updates).messages)
     answered: set[str] = set()
-    for _ in range(8):
+    for rounds in range(CARD_ROUNDS + 1):
         requests = [
             c for u in updates for c in u.contents
             if c.type == "function_approval_request" and c.function_call.call_id not in answered
         ]
         if not requests:
             break
+        if rounds == CARD_ROUNDS:
+            raise CardsUnanswered
         answered.update(request.function_call.call_id for request in requests)
         answers = [request.to_function_approval_response(approved=card_approved(request.function_call, approve)) for request in requests]
         answer = Message(role="user", contents=answers)
@@ -637,10 +655,12 @@ async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[
     """Every event of one run, its cards answered: approved for the names in ``approve``, denied otherwise."""
     events = [e async for e in workflow.run(query, stream=True)]
     answered: set[str] = set()
-    for _ in range(12):
+    for rounds in range(CARD_ROUNDS + 1):
         pending = [e for e in events if e.type == "request_info" and e.request_id not in answered]
         if not pending:
             break
+        if rounds == CARD_ROUNDS:
+            raise CardsUnanswered
         responses = {}
         for card in pending:
             answered.add(card.request_id)
