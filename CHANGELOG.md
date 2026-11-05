@@ -15,6 +15,16 @@ was never merged and has no entry.
 
 ### Added
 
+- SecondBrain's eval tools on his live build (SecondBrain `estate.cjs`): `eval_status`, a read, beside the Estate's
+  others, and `eval_start`, the Estate's one bounded action (`ESTATE_ACTIONS`): it only runs eval sets, so it never
+  asks a card, is not in plan mode's list of what changes things, and is never offered to an eval's own build. The
+  `bar-runner` skill says when and how to start a set and follow it; long sets only from a night automation.
+- The `automations` skill: what SecondBrain's automations are, the recipe they are written as (steps from a fixed
+  list, a `summarize` prompt, `deliver`), Startup and the nightly evals as worked examples, and that a new or changed
+  one is proposed to the operator in words until a save tool on his card exists.
+- An automation's turn (its first line "[from an automation (<name>)]") is answered in words, whatever the router
+  says (`from_an_automation`): nobody is watching, and an automation never approves its own plan card.
+
 - Outside eval sets, tier ext, for calibration only (never a gate): `ext-bfcl.yaml` (80 cases of the Berkeley
   Function Calling Leaderboard's simple_python, multiple, parallel, parallel_multiple and irrelevance, pinned from
   ShishirPatil/gorilla 6ea5797, Apache-2.0) and `ext-aider-py.yaml` (20 of the Aider polyglot benchmark's Python
