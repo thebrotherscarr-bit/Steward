@@ -110,3 +110,6 @@ is a flow plus when, one create button for flows, no daytime prompt on an eval f
 - The build: Steward's pull request with this ADR (the `eval_start` card, the `bar-runner`, `automations` and
   `estate` skills); Jesster's pull request after it (Set up as automations, the prompt type removed, the night badge
   and daytime question removed).
+- Built (2026-11-05): all of the above. Each run now keeps the flow it ran and whether Run now or its automation
+  started it (`run_recipe`'s `flow` and `trigger`), for the Flows shelf's run history ([ADR-0008](0008-the-flows-shelf.md)).
+- Open: `automation_save`.

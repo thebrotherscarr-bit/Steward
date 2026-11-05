@@ -68,7 +68,16 @@ Flows), the schedule edit and run tests in Jesster #83.
 - Built: piece 1, the read-only shelf (Jesster #79); Run now, Set up and the layered canvas (Jesster #83); "+ New
   flow", a canvas whose palette is the legend, blocks wired in a line and saved as a recipe, with eval-set and recipe
   examples built in (Jesster #86).
-- Open: the run history, the graph from Steward's `to_dict()` (`recipe_graph`, Steward #150, is ready to serve it),
-  `automation_save` behind Steward's card, evals in flow.
+- Built (2026-11-05): the run history and the graph from Steward's `to_dict()`. Steward's MCP host serves
+  `recipe_graph` (the recipe built as its MAF workflow, `Workflow.to_dict()` and WorkflowViz's Mermaid) and
+  `recipe_runs` (one flow's runs, newest first: trigger, result, and each step's state and ms from the run's MAF
+  events), both read-only; `run_recipe` keeps the flow's id and the trigger (`now` or `schedule`) on the run's state,
+  and `recipe_status` carries the steps so far. A step's failure is MAF's non-fatal `error` event with its executor id.
+  The shelf draws the canvas from that graph (or locally, "offline: drawn locally", when the host is down), lists the
+  open flow's last runs, lights the blocks with a clicked run's steps, and follows a run going now (bounded polling of
+  `recipe_status`). Tests: Steward's `test_harness.py` (the run history, `step_states` over a JSONL fixture, the two
+  tools on the host); Jesster's `flowGraph.test.tsx` (the graph from a `to_dict()` fixture, the fallback, the history
+  and per-step states) and `schedules.test.cjs` (the calls and the IPC).
+- Open: `automation_save` behind Steward's card, evals in flow.
 - The plan: the SecondBrain note `plan-the-flows-shelf-ide-for-steward-s-f-04a93a`. It asks that the guidance
   note's "no UI for ... flows" line be annotated with this date.
