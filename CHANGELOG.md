@@ -109,6 +109,20 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A request that opens with a verb that changes something (Fix, Add, Write ..., "please" allowed) is routed to
+  PLAN whatever the router's model says (the bar at a0fb3ca, traces 04:35Z and 04:41Z: "Fix the bug that makes
+  test_percent_discount fail ..." came back `{"kind":"answer"}` both small runs, and ANSWER replied with the fixed
+  file in prose; no plan card, no write). The PLAN call itself was not the cause: OllamaChatClient sends a Pydantic
+  response_format as Ollama's `format` schema, and `tool_choice` "none" only omits the tools (`_chat_client.py`
+  455-497). `asks_for_a_change`. Test: `test_a_request_opening_with_a_change_is_planned_even_when_the_router_says_answer`.
+- EXECUTE (and its repair) is offered no `todos_add`: its todos are the approved plan's steps (`approved_plan_turn`).
+  The steps set at a0fb3ca: EXECUTE's one call was `todos_add`, then no write to inventory.py. `todos_complete`,
+  `todos_get_remaining` and `todos_get_all` stay. Test:
+  `test_execute_is_offered_no_todos_add_since_its_todos_are_the_approved_plan`.
+- The failing checks are said before a repair (`repair_text`; REPAIR is now an output executor). The item_count ask's
+  run 1 at a0fb3ca: CHECK ran pytest over inventory.py and failed, REPAIR said nothing, and the run then ended on the
+  eval's ninth card (its budget is eight answers), so the reply never showed a check had run (`check_covers_writes`:
+  "Not checked"). Test: `test_a_failed_check_is_said_before_the_repair`.
 - PLAN is two phases, so the plan step can only answer with a plan (the bar at aba870f: the discount ask's PLAN ended
   on a tool call's arguments written as text both runs, `{"todos": [...]}` and `{"file_name": ..., "new_lines": ...}`,
   a new shape each bar). EXPLORE reads with the read-only tools and no response_format; then PLAN is one call with

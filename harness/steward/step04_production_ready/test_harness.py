@@ -1601,14 +1601,18 @@ def test_the_workflow_checks_what_execute_wrote_and_sends_failures_back_until_th
     assert calls[5]["options"].get("response_format") is wf.CommitMessage, "the commit message came after the pass"
     assert "Write its commit message" in " ".join(m.text or "" for m in calls[5]["messages"])
     assert len(calls) == 6, len(calls)
-    assert outputs == ["First try.", "Fixed it.", "Checks passed:\n1 passed"], outputs
+    # The failing checks are said before the repair (the bar at a0fb3ca: Repair said nothing, so a run cut short after it
+    # showed no check had run).
+    repairing = "Checks failed on attempt 1 of 3; repairing:\n1 failed: test_discount"
+    assert outputs == ["First try.", repairing, "Fixed it.", "Checks passed:\n1 passed"], outputs
 
     failing = [(False, f"fail {n}") for n in range(1, wf.MAX_ATTEMPTS + 1)]
     outputs, calls, seen = run([plan, done, "a", fixed, "b", fixed, "c", "never"], failing)
     # plan, then EXECUTE's two calls, then each repair's two (its todo marked done, then his answer)
     assert len(seen) == wf.MAX_ATTEMPTS and len(calls) == 3 + 2 * (wf.MAX_ATTEMPTS - 1), "stopped at the attempt limit; no commit asked"
     assert not any("Write its commit message" in (m.text or "") for c in calls for m in c["messages"]), "failing work is not committed"
-    assert outputs == ["a", "b", "c", f"Checks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
+    repairs = [f"Checks failed on attempt {n} of {wf.MAX_ATTEMPTS}; repairing:\nfail {n}" for n in (1, 2)]
+    assert outputs == ["a", repairs[0], "b", repairs[1], "c", f"Checks still fail after {wf.MAX_ATTEMPTS} attempts:\nfail {wf.MAX_ATTEMPTS}"], outputs
 
     def call(name: str, file_name: str) -> Message:
         return Message(role="assistant", contents=[Content.from_function_call(call_id=file_name, name=name, arguments={"file_name": file_name})])
@@ -5833,3 +5837,93 @@ def test_the_commit_message_is_asked_for_the_users_request_after_plan_was_asked_
     taught = (wf.COMMIT_PROMPT + wf.CommitMessage.model_fields["message"].description).lower()
     named = [word for words in evals.SMALL_ASK_SUBJECT.values() for word in words if word in taught and word != "test"]
     assert not named, f"the commit example names an eval ask's work: {named}"
+
+
+def test_a_request_opening_with_a_change_is_planned_even_when_the_router_says_answer() -> None:
+    """The bar at a0fb3ca (traces 2026-11-05 04:35Z and 04:41Z): "Fix the bug that makes test_percent_discount fail in
+    ..." was routed {"kind":"answer"} both small runs, and ANSWER replied with the fixed file in prose: no plan card, no
+    write. A request that opens with a verb that changes something is a task whatever the router's model says; a
+    question is still answered."""
+    import steward_workflow as wf
+
+    discount = "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project."
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+
+    def run(request: str, replies: list[Any]) -> list[Any]:
+        client = ScriptedChatClient(replies, routes=['{"kind": "answer"}'])
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent).run(request, stream=True)]
+
+        return asyncio.run(_go())
+
+    for request in (discount, "Add one line to README.md.", "please fix the README", "  Write a test for order_total."):
+        assert wf.asks_for_a_change(request), request
+    for request in (QUESTION, "What would I change to fix it?", "Show the fix", "Is there a bug to fix?"):
+        assert not wf.asks_for_a_change(request), request
+
+    events = run(discount, [plan])
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], said(events)
+    events = run(QUESTION, [ANSWERED])
+    assert said(events) == [ANSWERED] and not [e for e in events if e.type == "request_info"], said(events)
+
+
+def test_execute_is_offered_no_todos_add_since_its_todos_are_the_approved_plan() -> None:
+    """The steps set at a0fb3ca (2026-11-05 04:49Z): EXECUTE's one call was todos_add, and it ended with no write to
+    inventory.py. approved_plan_turn writes the approved plan's steps as EXECUTE's todos, so EXECUTE (and its repair)
+    is offered the todo tools that work through them, never one that adds."""
+    import steward_workflow as wf
+
+    assert not wf.offered_in_step("todos_add", wf.EXECUTE_STEP)
+    assert all(wf.offered_in_step(name, wf.EXECUTE_STEP) for name in ("todos_complete", "todos_get_remaining", "todos_get_all"))
+    assert wf.offered_in_step("todos_add", None), "a host that runs him without the graph is offered everything"
+
+    plan = '{"type": "approval", "questions": [{"message": "Add a docstring."}], "steps": ["Add it"]}'
+    client = ScriptedChatClient([plan, "Done."])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda _m: None)
+                events = [e async for e in workflow.run("Add a docstring to order_total.", stream=True)]
+                [card] = [e for e in events if e.type == "request_info"]
+                answer = card.data.to_function_approval_response(True)
+                [e async for e in workflow.run(stream=True, responses={card.request_id: answer})]
+
+    asyncio.run(_go())
+    executed = offered_tools(client.calls[-1])
+    assert "todos_add" not in executed and {"todos_complete", "todos_get_remaining"} <= executed, sorted(executed)
+
+
+def test_a_failed_check_is_said_before_the_repair() -> None:
+    """The bar at a0fb3ca (the item_count ask's run 1, 04:34Z): CHECK ran pytest over inventory.py and failed, REPAIR
+    said nothing (only a progress event, which no host forwards), the run then ended on a later card, and his reply
+    never showed that a check had run (check_covers_writes: "Not checked"). The failing checks are output before the
+    repair, with the pytest line that names the folder checked."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix x."}], "steps": ["Fix x"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    client = ScriptedChatClient([plan, done, "First.", done, "Fixed.", '{"message": "Fix x in the module"}'])
+    failed = "$ pytest -q harness/steward/working/sample-project\n(exit 1)\n1 failed"
+    results = [(False, failed), (True, "1 passed")]
+
+    async def _go() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda _m: results.pop(0), changes=lambda: ["x.py"])
+                events = [e async for e in workflow.run("Fix x.", stream=True)]
+                [card] = [e for e in events if e.type == "request_info"]
+                answer = {card.request_id: card.data.to_function_approval_response(True)}
+                return [e async for e in workflow.run(stream=True, responses=answer)]
+
+    shown = said(asyncio.run(_go()))
+    repairing = [s for s in shown if s.startswith("Checks failed on attempt 1 of")]
+    assert repairing == [wf.repair_text(wf.CheckReport(1, False, failed, ""))], shown
+    assert "$ pytest -q harness/steward/working/sample-project" in repairing[0]
+    assert shown.index(repairing[0]) < shown.index("Checks passed:\n1 passed"), shown

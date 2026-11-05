@@ -213,10 +213,13 @@ ROUTE_PROMPT = (
 )
 # A request that names one of the Estate's read-only tools and asks for no change is a question, whatever the model
 # says (live 2026-11-04: "Read it with estate_status and list each service" was routed to the plan).
-_CHANGE_WORDS = re.compile(
-    r"\b(write|fix|add|commit|restart|update|delete|change|create|edit|remove|send|push|install|stop|start|run|unload|apply)\b",
-    re.IGNORECASE,
-)
+_CHANGE_VERBS = "write|fix|add|commit|restart|update|delete|change|create|edit|remove|send|push|install|stop|start|run|unload|apply"
+_CHANGE_WORDS = re.compile(rf"\b({_CHANGE_VERBS})\b", re.IGNORECASE)
+# A request that opens with one of those verbs (an imperative, "please" allowed) asks for a change: a task, whatever the
+# model says. The bar at a0fb3ca (2026-11-05 04:35Z and 04:41Z, traces): "Fix the bug that makes test_percent_discount
+# fail in ..." was routed {"kind":"answer"} both small runs, the router's reasoning solving the bug instead of
+# classifying it ("Let's imagine the test fails"), so ANSWER replied with the fixed file in prose and no plan card.
+_OPENS_WITH_A_CHANGE = re.compile(rf"\A\W*(?:please\W+)?({_CHANGE_VERBS})\b", re.IGNORECASE)
 ANSWER_IN_WORDS = "Answer this question in plain words. Read what you need; change nothing; no plan."
 
 
@@ -237,6 +240,11 @@ class RoutedRequest(AgentExecutorRequest):
 def asks_only_to_read(request: str) -> bool:
     """Whether the request names one of the Estate's read-only tools (ESTATE_READS) and no change (_CHANGE_WORDS)."""
     return any(name in request for name in ESTATE_READS) and not _CHANGE_WORDS.search(request)
+
+
+def asks_for_a_change(request: str) -> bool:
+    """Whether the request opens with a verb that changes something (_OPENS_WITH_A_CHANGE): a task, never an answer."""
+    return bool(_OPENS_WITH_A_CHANGE.match(request or ""))
 
 
 def routed_to_answer(request: Any) -> bool:
@@ -280,6 +288,8 @@ class Router(Executor):
             kind = None  # no Route: the Default branch, the plan as before
         if asks_only_to_read(request):
             kind = "answer"
+        elif asks_for_a_change(request):
+            kind = "task"
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
@@ -586,7 +596,8 @@ def plan_call_input(conversation: list[Message]) -> list[Message]:
 #     his todos. PLAN's own call is offered no tool and is sent with tool_choice "none" (plan_phases_turn).
 #   ANSWER offers everything that changes nothing (all but agent._CHANGES_THINGS, the mode tools, the todos and file
 #     memory's writes): a question may need CodeAct, a background agent or a skill's script (REQUEST_HINTS).
-#   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own), the mode tools and CodeAct (CODEACT_TOOL).
+#   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own), the mode tools, CodeAct (CODEACT_TOOL) and
+#     todos_add (its todos are the approved plan's).
 #   ROUTE and COMMIT call the client with no tools; REPORT makes no call.
 PLAN_TOOLS = frozenset({
     *FileAccessProvider._READ_ONLY_TOOL_NAMES,  # MAF's own set: file_access_read, _read_lines, _ls, _grep
@@ -609,7 +620,10 @@ ANSWER_LEAVES_OUT = frozenset({*_CHANGES_THINGS, *_MODE_TOOLS, *_FILE_MEMORY_WRI
 # four, and never wrote inventory.py. So EXECUTE is not offered it, unless the Hyperlight sandbox is on, where it is the
 # shell's stand-in after untrusted content (agent.SANDBOX_SHELL_REFUSAL sends that step to execute_code).
 CODEACT_TOOL = "execute_code"
-EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, *_MODE_TOOLS})
+# todos_add (the steps set at a0fb3ca, 2026-11-05 04:49Z): EXECUTE's one call was todos_add, then it ended with no write
+# to inventory.py. EXECUTE's todos are the approved plan's steps (approved_plan_turn writes them), so it is offered
+# only the todo tools that work through them (todos_complete, todos_get_remaining, todos_get_all), never one to add.
+EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, "todos_add", *_MODE_TOOLS})
 
 
 def offered_in_step(name: str, step: str | None) -> bool:
@@ -1060,7 +1074,7 @@ class Repair(Executor):
         super().__init__(id=id)
 
     @handler
-    async def repair(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest]) -> None:
+    async def repair(self, report: CheckReport, ctx: WorkflowContext[AgentExecutorRequest, Any]) -> None:
         text = (
             f"The checks failed after attempt {report.attempt} of {MAX_ATTEMPTS}. Fix the cause, then stop and say "
             f"what you changed.\n\nCheck output:\n{report.output}"
@@ -1070,7 +1084,18 @@ class Repair(Executor):
             role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [REPAIR_TODO], REQUEST_KEY: ""}
         )
         await ctx.add_event(StewardProgress(f"repair attempt {report.attempt + 1}/{MAX_ATTEMPTS}", executor_id=self.id))
+        # The failing checks are said before the repair (the bar at a0fb3ca, the item_count ask's run 1, 04:34Z): CHECK
+        # ran pytest over inventory.py and failed, REPAIR said nothing (only the progress event, which no host forwards),
+        # and the run then ended on a later card, so his reply never showed that a check had run at all.
+        await ctx.yield_output(repair_text(report))
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
+
+
+def repair_text(report: CheckReport) -> str:
+    """The failing checks as the user reads them before a repair: which attempt failed, and the check's output."""
+    return (
+        f"Checks failed on attempt {report.attempt} of {MAX_ATTEMPTS}; repairing:\n{report.output[-_OUTPUT_TAIL:]}"
+    )
 
 
 class Report(Executor):
@@ -1162,7 +1187,7 @@ def build_steward_workflow(
         WorkflowBuilder(
             name=WORKFLOW_NAME,
             start_executor=route,
-            output_from=[read_plan, ask_approval, ask_commit, commit, report],
+            output_from=[read_plan, ask_approval, repair, ask_commit, commit, report],
             intermediate_output_from=[answer, execute],
         )
         .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=explore)])
