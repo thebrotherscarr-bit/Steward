@@ -15,6 +15,28 @@ was never merged and has no entry.
 
 ### Added
 
+- Versioned, data-driven eval sets in `harness/steward/evals/` (one `<tier>-<name>.yaml` per set: name, tier, version,
+  owner, runner, split, bar, changes, cases with ask, fixture, subject, precondition and checks), read by `evals.py`
+  at import; `evals.py small` and `evals.py steps` run the T0 files, `evals.py heldout` the T1 file, and each run's
+  history line carries `set_version` and `tier`. `evals.py validate` (run by test_harness and the gate's new `evals`
+  step) refuses a bad schema, an unknown check, a case with no RESULT check, a precondition that already passes on
+  its unmodified fixture, and cases that differ from their version's fingerprint in `evals/baselines.json` (which
+  also holds the small set's gate baseline, moved from `step04_production_ready/eval_baselines.json`).
+  `evals.py bar <set>` says whether a set's bar is met from the history. How a set is added and versioned:
+  `harness/steward/evals/README.md`. Tests: `test_the_eval_sets_are_versioned_files_and_the_validator_refuses_what_it_must`,
+  `test_the_eval_history_records_each_runs_set_version_and_tier_and_the_bar_reads_them`.
+- T0 frozen: `t0-small.yaml` v1 (the small asks unchanged, plus the README ask's result check
+  `readme_says_how_to_run_tests`), and `t0-steps.yaml` v2, whose one scoring change is that `plan_step` scores only the
+  plan that reached the card (a re-asked plan that then reaches it passes). Test:
+  `test_the_steps_set_v2_scores_only_the_plan_that_reached_the_card`.
+- T1 held out: `harness/steward/working/sample-project-2` (units.py and its unittest tests) and `t1-heldout.yaml`, five
+  asks (add `fahrenheit_to_celsius`, fix a planted bug, rename `LENGTH_IN_METRES`, add the missing README line of
+  length units, make a planted failing test pass), each with a result check; bar 4/5 twice in a row. The gate's
+  `sample` step runs its tests too. Test: `test_each_t1_result_check_passes_on_a_solved_project_and_fails_on_its_fixture`.
+- `harness/steward/evals/run-bar.ps1 -Sets <list> -Tag <name>`: each set run as its own process (Start-Job), UTF-8 logs
+  and a progress file under `storage/evals/runs/<Tag>/`, a summary line per run from history.jsonl, each bar, then
+  "BAR DONE". Test: `test_the_tracked_bar_runner_runs_each_set_as_its_own_process_and_reads_the_history`.
+
 - An end-to-end test of a Manjuel face turn that needs a card: tools/call over HTTP on mcp_app's MCP host, the card
   asked by `secondbrain_cards` on an MCP server standing in for SecondBrain's `approval_ask` (a real MCP `Client`, in
   process), Allow runs the tool and the answer returns to Manjuel; Deny runs nothing. Test:

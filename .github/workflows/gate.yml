@@ -7,9 +7,10 @@
 # STAGE 1, the simplest gate. No model, no GPU, no network beyond the install:
 #   compile  every Python file in the repo parses (python -m compileall), so a
 #            broken edit never reaches main.
-#   sample   the sample project's own tests pass at the committed state
-#            (working/sample-project). The evals plant the discount bug in the
-#            working copy only; what is committed must stay green.
+#   sample   the sample projects' own tests pass at the committed state
+#            (working/sample-project and sample-project-2). The evals plant their
+#            bugs in the working copy only; what is committed must stay green.
+#   evals    the eval set files are valid (evals.py validate, no model).
 #
 # STAGE 2 (ADR-0001: small checks, not model-run evals):
 #   harness  Steward's harness checked with no model, as Microsoft's builder skill
@@ -71,6 +72,10 @@ jobs:
           python -m pip install --quiet --require-hashes --no-deps -r requirements.lock
           python -m pip install --quiet --no-deps --no-build-isolation .
       - name: sample
-        run: python -m pytest -q harness/steward/working/sample-project
+        run: python -m pytest -q harness/steward/working/sample-project harness/steward/working/sample-project-2
+      - name: evals
+        # Every eval set file in harness/steward/evals/ checked with no model (evals.py validate): schema, checks,
+        # a RESULT check per case, each precondition failing on its fixture, and each version's fingerprint.
+        run: python -W ignore harness/steward/step04_production_ready/evals.py validate
       - name: harness
         run: python -m pytest -q -p no:cacheprovider harness/steward/step04_production_ready/test_harness.py

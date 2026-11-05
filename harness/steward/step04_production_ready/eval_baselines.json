@@ -1,8 +1,0 @@
-{
-  "small": {
-    "checks": 10,
-    "of": 16,
-    "from": "2026-11-02, the first clean small-ask run: each run with its own throwaway memory, his shell on his own Python",
-    "note": "2026-11-04: of 14 became 16 with the two result checks (item_count_works, discount_test_passes); the bar of 10 is kept until a live run re-measures it, since the honest answer_on_topic and edit_keeps_file_whole may score fewer passes than the 10 first measured"
-  }
-}

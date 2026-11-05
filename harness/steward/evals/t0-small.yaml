@@ -1,0 +1,44 @@
+# T0, regression: Step 4's small asks, frozen. They run before every merge to main and stay a regression gate for good.
+# Run: python harness/steward/step04_production_ready/evals.py small [--gate]
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: small
+tier: T0
+version: 1
+owner: operator
+runner: asks
+split: full
+bar: {passed: 3, of: 3, runs_in_a_row: 2}
+changes:
+  1: >-
+    The small asks as evals.py ran them on 2026-11-05 (Steward 0071746), moved into this file unchanged, with one
+    addition the validator requires: the README ask's result check, readme_says_how_to_run_tests (the README names
+    unittest or pytest after the run). Before it the README ask had process checks only.
+cases:
+  - id: item_count
+    ask: >-
+      Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total
+      quantity of all the items, with a docstring.
+    fixture: {project: harness/steward/working/sample-project, plant: null}
+    subject: [item_count]
+    precondition: item_count_works
+    checks:
+      - plan_is_approval
+      - edit_keeps_file_whole
+      - check_covers_writes
+      - commit_by_tool
+      - commit_message_specific
+      - no_nudge_in_reply
+      - answer_on_topic
+      - item_count_works
+  - id: discount
+    ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
+    fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
+    subject: [discount]
+    precondition: discount_test_passes
+    checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, discount_test_passes]
+  - id: readme
+    ask: Add one line to harness/steward/working/sample-project/README.md that says how to run its tests.
+    fixture: {project: harness/steward/working/sample-project, plant: readme_run_tests_removed}
+    subject: [readme, test]
+    precondition: readme_says_how_to_run_tests
+    checks: [plan_is_approval, no_nudge_in_reply, answer_on_topic, readme_says_how_to_run_tests]
