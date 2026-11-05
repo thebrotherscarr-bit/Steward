@@ -5561,3 +5561,38 @@ def test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run() -> N
     [result] = function_results(client.calls[1])
     assert "Todo input title must be a non-empty string" in result, result
     assert response.text == "I will name the todo.", "the run went on"
+
+
+def test_an_empty_last_reply_is_asked_once_more_with_tools_off() -> None:
+    """The bar at 98d54d5: runs ended on an empty reply (the item_count ask's last reply was ''). MAF's harness loop asks
+    once more (plan_reply_loop, "answer"): the turn's message carries ANSWER_NOW_KEY, tools_off_to_answer_now makes it a
+    tool_choice "none" call, and answer_when_tools_are_off adds TOOLS_OFF_ANSWER_NOW. Once only; never for a plan-mode
+    reply (the plan is asked for by READ_PLAN), but for the workflow's ANSWER step, which answers in words."""
+    import steward_workflow as wf
+
+    def sent(call: dict[str, Any]) -> str:
+        return " ".join(m.text or "" for m in call["messages"])
+
+    client, _, response = run_steward(["", "order_total sums the prices."], "What does order_total do?", mode="execute")
+    assert len(client.calls) == 2 and response.text.endswith("order_total sums the prices."), response.text
+    assert client.calls[0]["options"].get("tool_choice") != "none"
+    assert client.calls[1]["options"].get("tool_choice") == "none", "the answer-now turn is a tools-off call"
+    assert steward.EMPTY_REPLY_NUDGE in sent(client.calls[1]) and steward.TOOLS_OFF_ANSWER_NOW in sent(client.calls[1])
+
+    client, _, _ = run_steward(["", "", "never"], "What does order_total do?", mode="execute")
+    assert len(client.calls) == 2, "asked once, not in a loop"
+
+    client, _, _ = run_steward(["", "never"], "Plan a docstring.")
+    assert len(client.calls) == 1, "a plan-mode reply is not asked here"
+
+    client = ScriptedChatClient(["", "It sums the prices."], routes=['{"kind": "answer"}'])
+
+    async def _question() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                return [e async for e in wf.build_steward_workflow(agent).run("What does order_total do?", stream=True)]
+
+    outputs = said(asyncio.run(_question()))
+    assert len(client.calls) == 2 and client.calls[1]["options"].get("tool_choice") == "none"
+    assert any("It sums the prices." in o for o in outputs), outputs
