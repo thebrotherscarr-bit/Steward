@@ -30,6 +30,9 @@ Environment variables:
     SECONDBRAIN_MCP_KEY        — its share key (SecondBrain → Settings → Share); never printed
     STEWARD_SAFETY_OBSERVE     — "off" turns off MAF's FIDES in its record-only mode (default on); it only
                                  records, to halo_traces/fides.jsonl, and never refuses or changes a call
+    STEWARD_FIDES_ENFORCE      — "on" turns on MAF's FIDES block_on_violation for his sinks (default off): a write,
+                                 shell, commit, push or other change called after untrusted content (a web page, a
+                                 note, an Estate log) is in his context is refused, and the refusal is his tool result
     STEWARD_CODE_SEARCH        — "off" drops his search_code tool (default on): the workspace's tracked .py and .md
                                  files searched by meaning, embedded on the CPU with embeddinggemma-2:270m; the
                                  vectors are kept in storage/code-search/embeddings.json (gitignored)
@@ -2561,6 +2564,11 @@ def _build_governance_middleware() -> list[ChatMiddleware]:
 #     read-only, so every sink stays a direct tool, the page's arrangement; nothing in Monty refuses FIDES beside it.
 #   * SecondBrain's web tools are labelled untrusted at their source too (secondbrain_web_tools, audit 2026-11-04), on
 #     WebResearchAgent, which records with its own fides_observer; web_search and web_fetch are its data fetchers.
+#   * STEWARD_FIDES_ENFORCE=on (off by default: "FIDES later") turns on the enforcer's blocking branch,
+#     block_on_violation=True (:3204-3205, _block_policy_violation :3035-3054): for his sinks (_CHANGES_THINGS) only, a
+#     second enforcer sets the refusal as context.result and raises MiddlewareTermination, which the tool loop returns
+#     as the function result (_tools.py:2412-2437, :2529-2538). Every other tool keeps the record-only enforcer, so a
+#     read after a note still runs. The record carries "blocked".
 #   * Not labelled, because MAF has no option for it yet (#7455 B1): harness-made tools. What WebResearchAgent found
 #     reaches Steward through its background results (background_agents_get_task_results,
 #     _harness/_background_agents.py:585), and SecondBrain's skill notes through load_skill and read_skill_resource.
@@ -2582,6 +2590,20 @@ def safety_observe_on() -> bool:
     return os.environ.get(SAFETY_OBSERVE_ENV, "on").strip().lower() not in {"off", "0", "false", "no"}
 
 
+FIDES_ENFORCE_ENV = "STEWARD_FIDES_ENFORCE"
+
+
+def fides_enforce_on() -> bool:
+    """Whether FIDES refuses his sinks in an untrusted context (STEWARD_FIDES_ENFORCE, off unless "on", "1", "true" or
+    "yes")."""
+    return os.environ.get(FIDES_ENFORCE_ENV, "off").strip().lower() in {"on", "1", "true", "yes"}
+
+
+def fides_on() -> bool:
+    """Whether FIDES is wired at all: recording (safety_observe_on) or enforcing (fides_enforce_on)."""
+    return safety_observe_on() or fides_enforce_on()
+
+
 def fides_observer() -> list[Any]:
     """FIDES in record-only mode, for the end of his middleware list: (recorder, MAF's label tracker, MAF's enforcer).
 
@@ -2589,11 +2611,28 @@ def fides_observer() -> list[Any]:
     and the recorder outermost of the three, so it reads the enforcer's audit log after each call. Each entry is one line
     of halo_traces/fides.jsonl, marked with whether the tool is one of his sinks (_CHANGES_THINGS), then the log is
     cleared (PolicyEnforcementFunctionMiddleware.clear_audit_log), so it never grows in his session.
+
+    With STEWARD_FIDES_ENFORCE on, his sinks go to a second enforcer with block_on_violation=True: in an untrusted context
+    the sink is refused, MAF's refusal is his tool result, and its record says "blocked": true. Both enforcers keep one
+    audit log, the session's standalone FIDES scope (_STANDALONE_SESSION_STATE_KEY, security.py:1184-1193), so the
+    recorder reads and clears it once.
     """
     labels = LabelTrackingFunctionMiddleware(default_integrity=IntegrityLabel.TRUSTED, auto_hide_untrusted=False)
+    fetchers = set(_UNTRUSTED_NOTE_READS | _DOOR_READS | _ESTATE_READ_TOOLS | _WEB_READS)
     policy = PolicyEnforcementFunctionMiddleware(
-        allow_untrusted_tools=set(_UNTRUSTED_NOTE_READS | _DOOR_READS | _ESTATE_READ_TOOLS | _WEB_READS), block_on_violation=False, approval_on_violation=False
+        allow_untrusted_tools=fetchers, block_on_violation=False, approval_on_violation=False
     )
+    blocker = (
+        PolicyEnforcementFunctionMiddleware(allow_untrusted_tools=fetchers, block_on_violation=True)
+        if fides_enforce_on()
+        else None
+    )
+
+    async def enforce(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        if blocker is not None and context.function.name in _CHANGES_THINGS:
+            await blocker.process(context, call_next)
+        else:
+            await policy.process(context, call_next)
 
     async def record_would_block(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
         try:
@@ -2606,7 +2645,13 @@ def fides_observer() -> list[Any]:
                 stamp = datetime.now(timezone.utc).isoformat()
                 lines = [
                     json.dumps(
-                        {"ts": stamp, "session_id": session_id, "sink": entry.get("function") in _CHANGES_THINGS, **entry},
+                        {
+                            "ts": stamp,
+                            "session_id": session_id,
+                            "sink": entry.get("function") in _CHANGES_THINGS,
+                            "blocked": blocker is not None and entry.get("function") in _CHANGES_THINGS,
+                            **entry,
+                        },
                         default=str,
                     )
                     for entry in entries
@@ -2618,13 +2663,13 @@ def fides_observer() -> list[Any]:
                 except OSError as exc:  # a record that cannot be written never fails his call
                     logger.warning("FIDES record not written: %s", exc)
 
-    return [record_would_block, labels, policy]
+    return [record_would_block, labels, enforce]
 
 
 async def labelled_mcp_tool(stack: AsyncExitStack, mcp_tool: MCPStreamableHTTPTool, integrity: IntegrityLabel) -> Any:
     """Connect mcp_tool, under MAF's SecureMCPToolProxy when FIDES records: every function it loads, now or later, is
     labelled with integrity (source_integrity) and marked a sink (security.py:4368-4403, :4882). Returns the MCP tool."""
-    if not safety_observe_on():
+    if not fides_on():
         return await stack.enter_async_context(mcp_tool)
     proxy = await stack.enter_async_context(SecureMCPToolProxy(mcp_tool, default_integrity=integrity))
     return proxy.mcp_tool
@@ -2794,7 +2839,7 @@ def _build_web_research_agent(client: OllamaChatClient, web_tools: MCPStreamable
         name="WebResearchAgent",
         description="Searches the web for recent news and documentation about a single library, tool or topic.",
         tools=[web_tools],
-        middleware=[withhold_untrusted_errors([web_tools]), *(fides_observer() if safety_observe_on() else [])],
+        middleware=[withhold_untrusted_errors([web_tools]), *(fides_observer() if fides_on() else [])],
         instructions=(
             "You research a single library, tool or topic. Use the web search tool to find the most recent, "
             "relevant news and documentation, then return a short, factual summary (3-4 bullet points) "
@@ -3093,7 +3138,7 @@ async def build_steward_agent(
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files, refuse_unicode_punctuation_in_code,
                 repair_tool_names, recover_text_tool_calls, record_called_tools, withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
-                *(fides_observer() if safety_observe_on() else []),
+                *(fides_observer() if fides_on() else []),
             ],
             mode_provider=mode_provider,
             todo_provider=todo_provider,

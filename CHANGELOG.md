@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- `STEWARD_FIDES_ENFORCE` (off by default, so nothing changes until it is turned on): `on` turns on MAF's FIDES
+  `block_on_violation` for his sinks (file writes, `run_shell`, `git_commit`, the door's branch, commit, push and PR,
+  note writes and the Estate's asks). A sink called after untrusted content (a web page, a note, an Estate log) is in
+  his context is refused, MAF's refusal is his tool result, and its `halo_traces/fides.jsonl` line says `"blocked":
+  true`. Every other tool keeps the record-only enforcer. Test:
+  `test_fides_enforce_refuses_an_untrusted_write_and_leaves_a_trusted_one`.
 - Two read skills for the Estate's own record. `eval-history` (`scripts/eval_history.py`) compares the last runs of
   a set in `storage/evals/history.jsonl`: each run's counts, commit and model, its failed checks, and which checks
   flipped between the last two. `telemetry` (`scripts/telemetry.py`) summarises the newest spans of
