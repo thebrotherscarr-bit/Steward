@@ -656,7 +656,10 @@ ANSWER_LEAVES_OUT = frozenset({*_CHANGES_THINGS, *_MODE_TOOLS, *_FILE_MEMORY_WRI
 # agent_framework_hyperlight/_execute_code_tool.py:1566). CodeAct is for counting and calculation (the Charter): an
 # answer's tool. The steps set at 6d8b127 (2026-11-05 03:08Z): EXECUTE called execute_code seven times and file_access_ls
 # four, and never wrote inventory.py. So EXECUTE is not offered it, unless the Hyperlight sandbox is on, where it is the
-# shell's stand-in after untrusted content (agent.SANDBOX_SHELL_REFUSAL sends that step to execute_code).
+# shell's stand-in after untrusted content (agent.SANDBOX_SHELL_REFUSAL sends that step to execute_code). Only then:
+# T1 heldout v1 run 2 (e94cb90, 2026-11-05 14:57Z, sandbox on, nothing untrusted read) EXECUTE wrote units.py with
+# execute_code, into the sandbox's copy of harness/ (read-only to the workspace, <sandbox>), the tool answered "", and
+# no .py file changed. So EXECUTE is offered it only once the session's shell is closed (agent.sandbox_shell_closed).
 CODEACT_TOOL = "execute_code"
 # todos_add (the steps set at a0fb3ca, 2026-11-05 04:49Z): EXECUTE's one call was todos_add, then it ended with no write
 # to inventory.py. EXECUTE's todos are the approved plan's steps (approved_plan_turn writes them), so it is offered
@@ -664,8 +667,9 @@ CODEACT_TOOL = "execute_code"
 EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, "todos_add", *_MODE_TOOLS})
 
 
-def offered_in_step(name: str, step: str | None) -> bool:
-    """Whether a step's model calls are offered the tool named name (a step of None is offered every tool)."""
+def offered_in_step(name: str, step: str | None, shell_closed: bool = False) -> bool:
+    """Whether a step's model calls are offered the tool named name (a step of None is offered every tool); shell_closed
+    is whether the sandbox has closed the session's run_shell (agent.sandbox_shell_closed)."""
     if step == EXPLORE_STEP:
         return name in PLAN_TOOLS
     if step == PLAN_STEP:
@@ -674,7 +678,7 @@ def offered_in_step(name: str, step: str | None) -> bool:
         return name not in ANSWER_LEAVES_OUT
     if step == EXECUTE_STEP:
         if name == CODEACT_TOOL:
-            return _agent.hyperlight_sandbox_on()
+            return shell_closed and _agent.hyperlight_sandbox_on()
         return name not in EXECUTE_LEAVES_OUT
     return True
 
@@ -691,7 +695,8 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
     step = session.state.get(STEP_KEY) if session is not None else None
     tools = (context.options or {}).get("tools")
     if step is not None and isinstance(tools, list):
-        tools[:] = [t for t in tools if offered_in_step(getattr(t, "name", "") or "", step)]
+        closed = _agent.sandbox_shell_closed(session)
+        tools[:] = [t for t in tools if offered_in_step(getattr(t, "name", "") or "", step, closed)]
     await call_next()
 
 
