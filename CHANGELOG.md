@@ -98,6 +98,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- EXECUTE's message says the checks run the tests of the files it changes, so a step that only runs the tests is
+  theirs and is marked complete (`CHECKS_RUN_THE_TESTS` in `execute_message`). The confirmation bar at 5039e0e (the
+  discount ask): a "Run the sample project tests" step sent him to run_shell("pytest -q") twice, both denied, and his
+  last reply asked to be allowed to run tests. Test:
+  `test_execute_is_told_the_checks_run_the_tests_so_a_test_step_is_marked_complete`.
 - The plan call's own turn (`PLAN_NOW`) asks a step that changes a file to name that file by its path. The steps set
   at 416ba41: the steps named order_total but never inventory.py, and EXECUTE worked from todos that did not say where.
   Test: `test_the_plan_call_asks_each_step_that_changes_a_file_to_name_it_by_its_path`.

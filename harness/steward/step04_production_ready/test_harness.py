@@ -6599,3 +6599,14 @@ def test_a_run_that_ends_on_a_tool_result_with_no_reply_is_asked_for_its_answer(
     decision = asyncio.run(should_continue(session=session, last_result=on_result, iteration=1, messages=[]))
     assert decision == (True, "answer"), decision
     assert steward.EMPTY_REPLY_NUDGE in asyncio.run(next_message(feedback="answer", session=session)).text
+
+
+def test_execute_is_told_the_checks_run_the_tests_so_a_test_step_is_marked_complete() -> None:
+    """The confirmation bar at 5039e0e (2026-11-05 09:05Z, the discount ask): the plan's step "Run the sample project
+    tests" sent EXECUTE to run_shell("pytest -q") twice, both denied, and his last reply asked to be allowed to run
+    tests. CHECK runs them itself (python_tests_for_changes); EXECUTE's message says so (CHECKS_RUN_THE_TESTS)."""
+    import steward_workflow as wf
+
+    message = wf.execute_message("Fix the discount bug.", "Fix it.", ["Fix order_total in inventory.py", "Run the tests"])
+    assert wf.CHECKS_RUN_THE_TESTS in message.text and "mark it complete without running them" in message.text
+    assert "Do not commit" in message.text and message.additional_properties[steward.REQUEST_KEY] == "Fix the discount bug."
