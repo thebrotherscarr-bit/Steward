@@ -2619,6 +2619,39 @@ async def point_a_missed_path_at_the_named_one(
             context.result = f"{shown}\n{hint}".strip()
 
 
+# The bar at f7b5120 (2026-11-05 06:26Z, the discount ask): his plan's step was an object ("Edit file" and a path), he
+# called todos_complete with {"title": "Edit file", "reason": ...}, MAF answered "Argument parsing failed. Exception:
+# Invalid arguments for 'todos_complete'" twice, and his last reply was the call written as raw text. MAF shows a call
+# whose arguments fail validation to function middleware before it refuses it (_tools.py: "Invalid provider arguments
+# are intentionally exposed to middleware"); here a todos_complete item with no id is answered with what was wrong and
+# the open todos by id, and nothing is completed. His call is never rewritten for him.
+TODO_IDS_REFUSAL = (
+    "Not completed: todos_complete takes each item's id (a number) and a reason, not its title. Your open todos: "
+    "{open}. Call todos_complete again with items like {{\"id\": {first}, \"reason\": \"...\"}}."
+)
+
+
+def todo_ids_by_name(todo_provider: TodoProvider | None) -> Callable[..., Awaitable[None]]:
+    """Function middleware: a todos_complete whose items lack an id is answered with TODO_IDS_REFUSAL."""
+
+    async def todo_ids_by_name_(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        if todo_provider is not None and context.function.name == "todos_complete":
+            arguments = context.arguments
+            arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+            items = arguments.get("items")
+            if isinstance(items, list) and any(not isinstance(i, dict) or i.get("id") is None for i in items):
+                session = context.session or _RUN_SESSION.get()
+                todos = await todo_provider.store.load_items(session, source_id=todo_provider.source_id) if session is not None else []
+                left = [t for t in todos if not t.is_complete]
+                if left:
+                    named = "; ".join(f'id {t.id}: "{t.title}"' for t in left)
+                    context.result = TODO_IDS_REFUSAL.format(open=named, first=left[0].id)
+                    return
+        await call_next()
+
+    return todo_ids_by_name_
+
+
 async def refuse_unicode_punctuation_in_code(
     context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
 ) -> None:
@@ -3529,7 +3562,7 @@ async def build_steward_agent(
             context_providers=part3_providers,
             middleware=[
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files,
-                refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code,
+                refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code, todo_ids_by_name(todo_provider),
                 point_a_missed_path_at_the_named_one,
                 # Before the three that read tool_choice: an empty reply's answer-now turn is a tools-off call.
                 tools_off_to_answer_now,
