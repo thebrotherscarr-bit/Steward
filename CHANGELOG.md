@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- Two read skills for the Estate's own record. `eval-history` (`scripts/eval_history.py`) compares the last runs of
+  a set in `storage/evals/history.jsonl`: each run's counts, commit and model, its failed checks, and which checks
+  flipped between the last two. `telemetry` (`scripts/telemetry.py`) summarises the newest spans of
+  `halo_traces/traces.jsonl` (runs, model calls by model, tool calls by tool, errors), reading only the file's tail
+  (`--kb`, 1024 by default, at most 4096), never the whole file. Both are reads and run through the skills' script
+  runner. Test: `test_the_eval_history_and_telemetry_skills_compare_runs_and_read_only_the_traces_tail`.
 - Approvals cross the MCP door: a turn through `mcp_app.py` (Manjuel's `maf` face, Aurora's `ask_steward`) that
   reaches a tool needing approval no longer ends with the card unanswered. Each `function_approval_request` is asked on
   SecondBrain's `approval_ask` (its MCP server, `SECONDBRAIN_MCP_URL` and `SECONDBRAIN_MCP_KEY`, on a client of its own

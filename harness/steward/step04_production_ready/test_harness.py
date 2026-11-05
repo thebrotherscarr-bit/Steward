@@ -101,7 +101,10 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
-SKILLS = ("agent-framework-builder-python", "code-review", "codebase-map", "estate", "evals", "github", "improve", "run-tests", "secondbrain-notes")
+SKILLS = (
+    "agent-framework-builder-python", "code-review", "codebase-map", "estate", "eval-history", "evals", "github", "improve",
+    "run-tests", "secondbrain-notes", "telemetry",
+)
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelemetryLayer, BaseChatClient):
@@ -4949,6 +4952,58 @@ def test_a_malformed_tool_call_in_execute_is_recovered_or_corrected_and_the_writ
     correction = sent[3]["messages"][-1]
     assert correction["role"] == "user" and "could not be read: error parsing tool call" in correction["content"], correction
     assert all("could not be read" not in str(m) for m in sent[0]["messages"]), "only the correction turn carries it"
+
+
+def test_the_eval_history_and_telemetry_skills_compare_runs_and_read_only_the_traces_tail(tmp_path: Path) -> None:
+    """eval-history compares the last two runs of a set and names each check that flipped; telemetry summarises runs,
+    model calls, tool calls and errors from the traces file's tail only (--kb), never its whole."""
+    import json
+    import subprocess
+
+    skills = steward._SKILLS_DIR
+
+    def run(script: Path, *args: str) -> dict[str, Any]:
+        done = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, timeout=60)
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    def case(text: str, *failed: str) -> dict[str, Any]:
+        return {"input": text, "passed": not failed, "failed_checks": [{"name": n, "reason": "r"} for n in failed]}
+
+    history = tmp_path / "history.jsonl"
+    lines = [
+        {"ts": "1", "set": "small", "passed": 1, "total": 2, "git_head": "a1", "cases": [case("ask A", "answer_on_topic"), case("ask B")]},
+        {"ts": "2", "set": "steps", "passed": 0, "total": 1, "git_head": "a2", "cases": [case("plan", "plan_step")]},
+        {"ts": "3", "set": "small", "passed": 1, "total": 2, "git_head": "a3", "cases": [case("ask A"), case("ask B", "run_completed")]},
+    ]
+    history.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+    report = run(skills / "eval-history" / "scripts" / "eval_history.py", "small", "--file", str(history))
+    assert [r["git_head"] for r in report["runs"]] == ["a1", "a3"], report
+    assert report["flipped"] == [
+        {"case": "ask A", "check": "answer_on_topic", "now": "pass"},
+        {"case": "ask B", "check": "run_completed", "now": "fail"},
+    ], report
+    assert run(skills / "eval-history" / "scripts" / "eval_history.py", "--file", str(history))["set"] == "small"
+
+    def span(name: str, attributes: dict[str, Any], error: str = "") -> str:
+        status = {"code": "STATUS_CODE_ERROR", "message": error} if error else {"code": "STATUS_CODE_OK", "message": ""}
+        return json.dumps({"name": name, "start_time": "t0", "end_time": "t1", "status": status, "attributes": attributes})
+
+    traces = tmp_path / "traces.jsonl"
+    early = span("execute_tool early", {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "early"})
+    newest = [
+        span("workflow.run", {"workflow.name": "steward"}),
+        span("chat steward:1", {"gen_ai.operation.name": "chat", "gen_ai.request.model": "steward:1"}),
+        span("execute_tool file_access_write", {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "file_access_write"}),
+        span("MCP send tools/call", {}, error="method not found"),
+    ]
+    padding = json.dumps({"name": "pad", "attributes": {}, "status": {}, "pad": "x" * 2000})
+    traces.write_text("\n".join([early, *([padding] * 200), *newest]) + "\n", encoding="utf-8")
+    summary = run(skills / "telemetry" / "scripts" / "telemetry.py", "--kb", "2", "--file", str(traces))
+    assert summary["runs"] == {"workflow steward": 1} and summary["model_calls"] == {"steward:1": 1}, summary
+    assert summary["tool_calls"] == {"file_access_write": 1}, "only the tail is read: the early span is not in it"
+    assert summary["errors"] == 1 and summary["last_errors"][0]["error"] == "method not found", summary
+    assert summary["read_kb"] == 2 and summary["spans"] < 10, summary
 
 
 def test_the_readme_ask_runs_with_the_readmes_how_to_taken_out_and_put_back_after(monkeypatch: Any) -> None:
