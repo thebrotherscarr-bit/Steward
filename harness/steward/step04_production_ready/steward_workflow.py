@@ -103,6 +103,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
+import agent as _agent  # noqa: E402 - hyperlight_sandbox_on, read at call time (offered_in_step)
 from agent import _CHANGES_THINGS, ESTATE_READS, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,11 @@ _COMMIT_SUMMARY_MAX = 72
 # The approved request and plan, kept in the workflow's state (so in its checkpoint) for the commit message.
 _APPROVED_REQUEST_KEY = "steward_approved_request"
 # Sent to PLAN once when its reply was empty; ReadPlan keeps whether it has been sent in the workflow's state.
-PLAN_AGAIN = "Your reply was empty. Reply with your plan for the request above."
+# Names the structured plan, as PLAN_NOT_A_CALL does (the steps set at 6d8b127: PLAN's first reply was '').
+PLAN_AGAIN = (
+    "Your reply was empty. Reply now with your plan for the request above as the JSON object asked for: type "
+    "approval, a summary of the plan as its one question, and your steps."
+)
 _PLAN_ASKED_AGAIN_KEY = "steward_plan_asked_again"
 # Sent to PLAN once when its reply was a clarification offering no choices (live 2026-11-02, three times in one
 # conversation: "Should I proceed?" with the whole plan in its steps). The cookbook's repair loops: "failures become
@@ -286,20 +291,68 @@ def clarification_text(plan: StewardPlan) -> str:
 
 
 def steward_plan_in(text: str) -> StewardPlan | None:
-    """The StewardPlan ending a reply, or None: an approval needs its steps, a clarification its questions."""
+    """The StewardPlan ending a reply, or None: an approval needs its steps, a clarification its questions.
+
+    A plan written in its own shape (plan_in_its_own_shape) is read as the approval it is."""
     plan = planning_response_in(text, model=StewardPlan)
-    if plan is None or (plan.type == PlanningResponseType.APPROVAL and not plan.steps):
+    if plan is None:
+        return plan_in_its_own_shape(text)
+    if plan.type == PlanningResponseType.APPROVAL and not plan.steps:
         return None
     return plan
 
 
-def ends_with_a_json_object(text: str) -> bool:
-    """Whether text is, or ends with, one non-empty JSON object (fenced or not)."""
+# A plan step written as an object (the bar at 6d8b127, the README ask's run 2: {"title": ..., "action": ...}): its
+# line is the title, then the action (or description) after a colon.
+_STEP_LINE_KEYS = ("action", "description")
+
+
+def _step_line(step: Any) -> str | None:
+    """One plan step as one line, or None when it holds no line."""
+    if isinstance(step, dict):
+        title = step.get("title")
+        detail = next((step[key] for key in _STEP_LINE_KEYS if isinstance(step.get(key), str) and step[key].strip()), None)
+        parts = [p for p in (title if isinstance(title, str) else None, detail) if p and p.strip()]
+        step = ": ".join(parts) if parts else None
+    if not isinstance(step, str):
+        return None
+    return " ".join(step.split()) or None
+
+
+def plan_in_its_own_shape(text: str) -> StewardPlan | None:
+    """The approval a reply's trailing JSON object holds when the model wrote its plan in its own shape, or None.
+
+    The bar at 6d8b127 (2026-11-05, the README ask's run 2): '{"summary": "Add a line to the sample-project README ...",
+    "steps": [{"title": "Locate README.md", "action": "read file ..."}, ...]}' ended the run with no card. The cookbook's
+    "Validate JSON ... in code": a plan-shaped object (no "type"; a summary or question; a steps list of strings, or of
+    objects with a title, action or description) is read as the approval, its steps one line each (_step_line), its
+    summary the card's question. A step with no line, a blank one, or no summary: no plan, as StewardPlan's own schema
+    has it, so READ_PLAN asks again (PLAN_NOT_A_CALL)."""
+    found = trailing_json_object(text)
+    if found is None or "type" in found:
+        return None
+    question = next((found[key] for key in ("summary", "question") if isinstance(found.get(key), str)), "")
+    steps = found.get("steps")
+    if not question.strip() or not isinstance(steps, list) or not steps:
+        return None
+    lines = [_step_line(step) for step in steps]
+    if not all(lines):
+        return None
+    try:
+        return StewardPlan(
+            type=PlanningResponseType.APPROVAL, questions=[PlanningQuestion(message=" ".join(question.split()))], steps=lines
+        )
+    except ValueError:
+        return None
+
+
+def trailing_json_object(text: str) -> dict[str, Any] | None:
+    """The one non-empty JSON object text is, or ends with (fenced or not), or None."""
     body = (text or "").strip()
     if fenced := _TRAILING_FENCE.search(body):
         body = fenced.group(1)
     if not body.endswith("}"):
-        return False
+        return None
     decoder = json.JSONDecoder()
     for start in (i for i, char in enumerate(body) if char == "{"):
         try:
@@ -307,8 +360,13 @@ def ends_with_a_json_object(text: str) -> bool:
         except ValueError:
             continue
         if end == len(body):
-            return isinstance(value, dict) and bool(value)
-    return False
+            return value if isinstance(value, dict) and value else None
+    return None
+
+
+def ends_with_a_json_object(text: str) -> bool:
+    """Whether text is, or ends with, one non-empty JSON object (fenced or not)."""
+    return trailing_json_object(text) is not None
 
 
 def offers_no_choices(plan: StewardPlan) -> bool:
@@ -469,7 +527,7 @@ def step_options_turn(step_options: Mapping[str, Mapping[str, Any]]) -> Callable
 #     search, his file memory's reads, his notes' and the Estate's reads, and the todo tools that write the plan.
 #   ANSWER offers everything that changes nothing (all but agent._CHANGES_THINGS, the mode tools, the todos and file
 #     memory's writes): a question may need CodeAct, a background agent or a skill's script (REQUEST_HINTS).
-#   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own) and the mode tools.
+#   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own), the mode tools and CodeAct (CODEACT_TOOL).
 #   ROUTE and COMMIT call the client with no tools; REPORT makes no call.
 PLAN_TOOLS = frozenset({
     *FileAccessProvider._READ_ONLY_TOOL_NAMES,  # MAF's own set: file_access_read, _read_lines, _ls, _grep
@@ -487,7 +545,13 @@ _MODE_TOOLS = frozenset({"mode_set", "mode_get"})
 _FILE_MEMORY_WRITES = frozenset({"file_memory_write", "file_memory_replace", "file_memory_replace_lines", "file_memory_delete"})
 _TODO_TOOLS = frozenset({"todos_add", "todos_complete", "todos_get_all", "todos_get_remaining", "todos_remove"})
 ANSWER_LEAVES_OUT = frozenset({*_CHANGES_THINGS, *_MODE_TOOLS, *_FILE_MEMORY_WRITES, *_TODO_TOOLS})
-EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, *_MODE_TOOLS})
+# CodeAct's tool (agent_framework_monty/_execute_code_tool.py:41, EXECUTE_CODE_TOOL_NAME; Hyperlight's is the same name,
+# agent_framework_hyperlight/_execute_code_tool.py:1566). CodeAct is for counting and calculation (the Charter): an
+# answer's tool. The steps set at 6d8b127 (2026-11-05 03:08Z): EXECUTE called execute_code seven times and file_access_ls
+# four, and never wrote inventory.py. So EXECUTE is not offered it, unless the Hyperlight sandbox is on, where it is the
+# shell's stand-in after untrusted content (agent.SANDBOX_SHELL_REFUSAL sends that step to execute_code).
+CODEACT_TOOL = "execute_code"
+EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, *_MODE_TOOLS})
 
 
 def offered_in_step(name: str, step: str | None) -> bool:
@@ -497,6 +561,8 @@ def offered_in_step(name: str, step: str | None) -> bool:
     if step == ANSWER_STEP:
         return name not in ANSWER_LEAVES_OUT
     if step == EXECUTE_STEP:
+        if name == CODEACT_TOOL:
+            return _agent.hyperlight_sandbox_on()
         return name not in EXECUTE_LEAVES_OUT
     return True
 
