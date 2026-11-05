@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Added
 
+- The steps set's eval history line carries its CHECK and REPAIR progress (`progress`: the run's `StewardProgress`
+  lines, in order: "checking: pytest -q ...", "check passed"/"check failed", "repair attempt n/3"), so SecondBrain's
+  Evals shelf can show what CHECK and REPAIR did in a bar run; sets with no progress write no key. Test:
+  `test_a_steps_run_records_its_check_and_repair_progress_in_the_eval_history`.
 - `STEWARD_SANDBOX=hyperlight` (off by default, so nothing changes until it is turned on): CodeAct runs in MAF's
   Hyperlight sandbox (`HyperlightCodeActProvider`, harness/ at `/input/harness`) instead of Monty, and a `run_shell`
   after untrusted content (a note, an Estate log, the web) is refused without running and sent to `execute_code`.

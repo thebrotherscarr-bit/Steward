@@ -444,9 +444,10 @@ def _git_head() -> str | None:
     return (head.stdout.strip() or None) if head.returncode == 0 else None
 
 
-def history_entry(name: str, results: dict[str, Any], code: int) -> dict[str, Any]:
+def history_entry(name: str, results: dict[str, Any], code: int, progress: list[str] | None = None) -> dict[str, Any]:
     """One run's line: the set, its settings set, its counts (applicable_checks for the checks), the exit code, each
-    case with its failed checks (a step's cases carry the step's name), the repo's HEAD and the model's name."""
+    case with its failed checks (a step's cases carry the step's name), the repo's HEAD and the model's name; a steps
+    run also carries its CHECK and REPAIR progress lines (StewardProgress events, in order) as "progress"."""
     items = [(step, item) for step, result in results.items() for item in result.items]
     checks_passed, checks_total = applicable_checks(item for _, item in items)
     return {
@@ -473,15 +474,18 @@ def history_entry(name: str, results: dict[str, Any], code: int) -> dict[str, An
         ],
         "git_head": _git_head(),
         "model": os.environ.get("OLLAMA_MODEL") or None,  # the model's name only; never a key
+        **({"progress": list(progress)} if progress else {}),
     }
 
 
-def record_history(name: str, results: dict[str, Any], code: int, path: Path | None = None) -> None:
+def record_history(
+    name: str, results: dict[str, Any], code: int, path: Path | None = None, progress: list[str] | None = None,
+) -> None:
     """Append the run's line to the history (EVAL_HISTORY), keeping the newest EVAL_HISTORY_KEEP lines; written to a
     temp file and moved into place. Any failure is a logged warning: the report and the exit code are never touched."""
     path = path or EVAL_HISTORY
     try:
-        line = json.dumps(history_entry(name, results, code), default=str)
+        line = json.dumps(history_entry(name, results, code, progress), default=str)
         old = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
         kept = [*(old_line for old_line in old if old_line.strip()), line][-EVAL_HISTORY_KEEP:]
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -721,7 +725,7 @@ async def steps_main() -> int:
             for score in item.scores:
                 if (score.sample or {}).get("reason") != "Not this case.":
                     print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
-    record_history("steps", scored, code)
+    record_history("steps", scored, code, progress=[str(e.data) for e in events if e.type == wf.PROGRESS])
     return code
 
 
