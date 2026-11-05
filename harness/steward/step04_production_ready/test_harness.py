@@ -6479,3 +6479,40 @@ def test_the_steps_set_judges_the_fix_by_test_percent_discount_not_by_its_spacin
     assert overall((True, "test_percent_discount passes."))["passed"], "a fix the test passes is fixed, however it is spaced"
     failed = overall((False, "test_percent_discount does not pass (exit 1): 1 failed"))
     assert not failed["passed"] and "test_percent_discount does not pass" in failed["failed_checks"][0]["reason"], failed
+
+
+def test_a_file_tool_write_of_memory_md_at_the_root_is_refused_with_write_memory() -> None:
+    """The bar at 1b56963 (2026-11-05 07:32-07:40Z, the README ask): his memory's context says "Use MEMORY.md", and he
+    wrote MEMORY.md at the repository root with file_access_write nine times. That is his memory's index, kept by MAF's
+    memory store: a file-tool write of it at the root, approved, is refused with MEMORY_INDEX_REFUSAL (write_memory),
+    and nothing is written; another file is written as before."""
+    root_index = steward._WORKING_DIR / "MEMORY.md"
+    assert not root_index.exists(), "the repository has no MEMORY.md at its root"
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "MEMORY.md", "content": "# MEMORY\n\n- done\n"})
+    client, agent, response = run_steward([write, "Done."], "Remember that it is done.", mode="execute")
+    cards = approval_requests(response)
+    assert [c.function_call.name for c in cards] == ["file_access_write"], "the write asks its card as ever"
+
+    async def _answer() -> list[str]:
+        async with AsyncExitStack() as stack:
+            again = ScriptedChatClient([write, "Done."])
+            built = await steward.build_steward_agent(stack, client=again, enable_shell=False)
+            from agent_framework import AgentModeProvider, set_agent_mode
+
+            async with built:
+                session = built.create_session()
+                for modes in [p for p in built.context_providers if isinstance(p, AgentModeProvider)]:
+                    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                first = await built.run("Remember that it is done.", session=session)
+                await built.run(Message(role="user", contents=[c.to_function_approval_response(True) for c in approval_requests(first)]), session=session)
+            return function_results(again.calls[-1])
+
+    try:
+        results = asyncio.run(_answer())
+    finally:
+        written = root_index.exists()
+        root_index.unlink(missing_ok=True)
+    assert not written, "MEMORY.md was written at the repository root"
+    assert results == [steward.MEMORY_INDEX_REFUSAL.format(file_name="MEMORY.md")], results
+    assert steward.writes_memory_index("./MEMORY.md") and not steward.writes_memory_index("docs/MEMORY.md")
+    assert not steward.writes_memory_index("README.md")

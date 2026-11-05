@@ -120,6 +120,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A file-tool write of MEMORY.md at the workspace root (MAF's memory index, which his memory store keeps) is refused
+  with the tool to use, write_memory (`writes_memory_index`, `MEMORY_INDEX_REFUSAL`); nothing is written. The bar at
+  1b56963 (the README ask): his memory's context says "Use MEMORY.md", and he wrote MEMORY.md at the repository root
+  with file_access_write nine times over twenty rounds of cards. Test:
+  `test_a_file_tool_write_of_memory_md_at_the_root_is_refused_with_write_memory`.
 - A todos_complete item with a title that names exactly one open todo (backticks, case and spacing aside, or the start
   of it) is given that todo's id through MAF's argument-repair hook (`todo_id_for_title` in `todo_ids_by_name`); an
   unclear title is still answered with the open todos by id. The bar at 1b56963 (the README ask): answered with the
