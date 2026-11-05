@@ -1174,6 +1174,10 @@ class RequestHints(ContextProvider):
     async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
         asked = asked_request(context.input_messages or [])
         matched =[[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
+        # The paths the request names, kept for its work (refuse_a_bare_name_the_request_put_in_a_folder); a turn that
+        # names none (a loop nudge, a repair's "") keeps the request's.
+        if session is not None and (paths := named_paths(asked)):
+            session.state[NAMED_PATHS_KEY] = paths
         if session is None:
             hints = matched
         else:
@@ -1286,7 +1290,13 @@ async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaita
 # hands ToolApprovalMiddleware (READ_ONLY_RULES). A tool that skips its card (approval_mode "never_require") is not
 # read-only by that alone: file_memory_delete never asks. A write or delete is never chosen; zero or several read-only
 # fits stay his text.
-_FENCED_JSON = re.compile(r"\A```(?:json)?\s*(.*?)\s*```\Z", re.S | re.I)
+# Steps set 2026-11-04 (head 0016cf4): the PLAN step's last reply was {"edits": [...], "file_name": ".../inventory.py"},
+# which fits file_access_replace_lines and file_memory_replace_lines, neither read-only, so it stayed text and no plan
+# card came. In a call that asked for a Pydantic format (the plan step: plan_mode_turns' StewardPlan) a write written as
+# text is made the call when exactly one of the fits is one of his gated writes (_CHANGES_THINGS), and only so that his
+# plan-mode gate (plan_mode_gate's refuse_in_plan_mode) answers it with PLAN_MODE_REFUSAL as its plain tool result:
+# "plan first; writes come after approval". It never runs there, and file memory's never-asking write is never chosen.
+_FENCED_JSON =re.compile(r"\A```(?:json)?\s*(.*?)\s*```\Z", re.S | re.I)
 READ_ONLY_RULES: tuple[Callable[[Content], bool], ...] = (
     FileAccessProvider.read_only_tools_auto_approval_rule,
     SkillsProvider.read_only_tools_auto_approval_rule,
@@ -1320,9 +1330,9 @@ def is_the_asked_format(text: str, response_format: Any) -> bool:
     return True
 
 
-def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, Any]] | None:
+def tool_call_in_text(text: str, tools: Sequence[Any], planning: bool = False) -> tuple[str, dict[str, Any]] | None:
     """(tool name, arguments) when text is one JSON object that fits exactly one of the tools, or fits several of which
-    exactly one is read-only (is_read_only_tool), else None."""
+    exactly one is read-only (is_read_only_tool), or, ``planning``, exactly one is a gated write; else None."""
     body = (text or "").strip()
     if fenced := _FENCED_JSON.match(body):
         body = fenced.group(1)
@@ -1335,19 +1345,24 @@ def tool_call_in_text(text: str, tools: Sequence[Any]) -> tuple[str, dict[str, A
     if not isinstance(arguments, dict) or not arguments:
         return None
     schemas = {offered.name: offered.parameters() or {} for offered in tools if isinstance(offered, FunctionTool)}
-    return _the_tool_it_fits(arguments, schemas)
+    return _the_tool_it_fits(arguments, schemas, planning)
 
 
-def _the_tool_it_fits(arguments: dict[str, Any], schemas: Mapping[str, Mapping[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+def _the_tool_it_fits(
+    arguments: dict[str, Any], schemas: Mapping[str, Mapping[str, Any]], planning: bool = False
+) -> tuple[str, dict[str, Any]] | None:
     """(tool name, arguments) when the arguments fit exactly one tool's parameter schema (its required keys present, no
-    key it lacks), or fit several of which exactly one is read-only (is_read_only_tool), else None."""
+    key it lacks), or fit several of which exactly one is read-only (is_read_only_tool), or, ``planning``, exactly one
+    is a gated write (_CHANGES_THINGS, which the plan-mode gate refuses); else None."""
     keys = set(arguments)
     fits = {
         name for name, schema in schemas.items()
         if set(schema.get("required") or ()) <= keys <= set(schema.get("properties") or {})
     }
     if len(fits) > 1:
-        fits = {name for name in fits if is_read_only_tool(name)}
+        reads = {name for name in fits if is_read_only_tool(name)}
+        gated = {name for name in fits if name in _CHANGES_THINGS}
+        fits = reads if reads or not planning else gated
     return (fits.pop(), arguments) if len(fits) == 1 else None
 
 
@@ -1361,7 +1376,7 @@ def recovered_tool_call(
     spoken = [m for m in response.messages if m.role == "assistant" and (m.text or "").strip()]
     if len(spoken) != 1 or is_the_asked_format(spoken[0].text, response_format):
         return None
-    if (found := tool_call_in_text(spoken[0].text, tools)) is None:
+    if (found := tool_call_in_text(spoken[0].text, tools, planning=_pydantic_format(response_format))) is None:
         return None
     name, arguments = found
     logger.info("Tool call recovered from the reply's text: %s", name)
@@ -2313,6 +2328,65 @@ def _written_text(name: str, arguments: dict[str, Any]) -> str | None:
         return None  # MAF's tool answers it itself, with its reason, and writes nothing
 
 
+# Small run 1 (2026-11-04, head 0016cf4, the item_count ask): the request named
+# harness/steward/working/sample-project/inventory.py, and besides it he wrote a bare "inventory.py", which MAF's file
+# store took from its root, the repository's, so a stray inventory.py was left at the root and the checks failed on it.
+# Such a write is refused, not moved: MAF's file tools take the path the model gives (FileAccessProvider resolves it
+# under its store root), and the harness never rewrites a call's arguments (as recover_text_tool_calls keeps "only ever
+# the model's own"). The refusal is his tool result, as refuse_in_plan_mode's is, and names the path the request meant,
+# so his next call is right and the tool result says why. It applies only when the bare name is not a file at the root
+# and the request names a folder holding a file of that name (or that file itself); anything else goes on as before.
+NAMED_PATHS_KEY = "steward_named_paths"
+_NAMED_PATH = re.compile(r"(?<![\w./-])(?:[\w.-]+/)+[\w-]+(?:\.\w+)?")
+BARE_NAME_REFUSAL = (
+    "Refused: '{file_name}' has no folder, so it would be written at the repository root, where no such file is. The "
+    "request names {path}. Call the tool again with file_name '{path}'. Nothing was written."
+)
+
+
+def named_paths(text: str) -> list[str]:
+    """The paths with a folder that text names (e.g. harness/steward/working/sample-project/inventory.py), once each."""
+    return list(dict.fromkeys(_NAMED_PATH.findall((text or "").replace("\\", "/"))))
+
+
+def bare_name_meant(file_name: str, named: Sequence[str]) -> str | None:
+    """The one existing file a bare file_name means in a request naming ``named`` paths, or None: the name has no
+    folder, is no file at the workspace root, and exactly one named path is that file or a folder holding it."""
+    if not file_name or "/" in file_name or "\\" in file_name:
+        return None
+    try:
+        if _inside_workspace(file_name).exists():
+            return None
+    except ValueError:
+        return None
+    meant = set()
+    for path in named:
+        candidate = path if path.rsplit("/", 1)[-1] == file_name else f"{path}/{file_name}"
+        try:
+            if _inside_workspace(candidate).is_file():
+                meant.add(candidate)
+        except ValueError:
+            continue
+    return meant.pop() if len(meant) == 1 else None
+
+
+async def refuse_a_bare_name_the_request_put_in_a_folder(
+    context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
+) -> None:
+    """Function middleware on MAF's file writes: a bare file name the request meant in a named folder (bare_name_meant,
+    over the paths RequestHints keeps in NAMED_PATHS_KEY) is refused with BARE_NAME_REFUSAL as the tool result."""
+    if context.function.name in FileAccessProvider._WRITE_TOOL_NAMES:  # MAF's own set of its write tools
+        session = context.session or _RUN_SESSION.get()
+        named = (session.state.get(NAMED_PATHS_KEY) if session is not None else None) or []
+        arguments = context.arguments
+        arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+        file_name = str(arguments.get("file_name") or "")
+        if named and (path := bare_name_meant(file_name, named)):
+            context.result = BARE_NAME_REFUSAL.format(file_name=file_name, path=path)
+            return
+    await call_next()
+
+
 async def refuse_unicode_punctuation_in_code(
     context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
 ) -> None:
@@ -3177,8 +3251,8 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[
-                memory_owner, estate_door_gate, *gate_middleware, record_written_files, refuse_unicode_punctuation_in_code,
-                repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,
+                memory_owner, estate_door_gate, *gate_middleware, record_written_files,
+                refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code, repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,
                 withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if fides_on() else []),

@@ -274,6 +274,33 @@ def sample_project_as_committed() -> None:
     subprocess.run(["git", "checkout", "HEAD", "--", SAMPLE_PROJECT], cwd=_WORKING_DIR, check=True, capture_output=True)
 
 
+# Small run 1 (2026-11-04, head 0016cf4): the item_count ask left a stray inventory.py at the repository root, outside
+# the sample project the resets put back, so it outlived the run. A run's reset now also removes every untracked file
+# (git ls-files --others --exclude-standard: not ignored, not tracked) that was not there when the run began; what was
+# untracked before it, and everything ignored, is left alone.
+def untracked_files() -> set[str]:
+    """The repository's untracked, not-ignored files (repository-relative, "/"-separated)."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    listed = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=_WORKING_DIR, check=True, capture_output=True,
+        timeout=60,
+    ).stdout.decode("utf-8", errors="replace")
+    return {name for name in listed.split("\0") if name}
+
+
+def remove_new_untracked(before: set[str]) -> list[str]:
+    """Delete the untracked files that are not in ``before`` (a run's own new files); the names removed, sorted."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    removed = sorted(untracked_files() - before)
+    for name in removed:
+        (_WORKING_DIR / name).unlink(missing_ok=True)
+    if removed:
+        logger.info("Removed the run's new untracked files: %s", removed)
+    return removed
+
+
 @contextmanager
 def discount_bug_planted() -> Any:
     """The discount bug, planted in the working copy for the run and put back after it, whatever happens.
@@ -642,7 +669,9 @@ async def steps_main() -> int:
             sample_project_as_committed()
             CASE_ERRORS.pop(STEPS_QUERY, None)
             events = []
+            untracked_before = untracked_files()
             with contextlib.ExitStack() as fixtures:
+                fixtures.callback(remove_new_untracked, untracked_before)  # last out: after the bug is put back
                 if fixture_entered(fixtures, STEPS_QUERY, discount_bug_planted):  # else overall fails with its reason
                     try:
                         events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
@@ -996,6 +1025,7 @@ async def run_small_asks(
     SMALL_ASK_ORIGINALS.clear()
     SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
     originals = {p: p.read_bytes() for p in project.iterdir() if p.is_file()}
+    untracked_before = untracked_files()  # anything a run adds elsewhere in the repository goes in reset()
     # Writes approved, and a shell card only for the sample project's pytest (card_approved), as the steps set and the
     # user approve them; every other shell command and git_commit denied.
     approve = set(FileAccessProvider._WRITE_TOOL_NAMES)  # noqa: SLF001
@@ -1003,12 +1033,14 @@ async def run_small_asks(
     responses: list[AgentResponse[Any]] = []
     steward = None
     def reset() -> None:
-        """The sample project as committed: every file put back, anything a run added removed."""
+        """The sample project as committed: every file put back, anything a run added removed, in it or anywhere else
+        in the repository (remove_new_untracked)."""
         for path in project.iterdir():
             if path.is_file() and path not in originals:
                 path.unlink()
         for path, data in originals.items():
             path.write_bytes(data)
+        remove_new_untracked(untracked_before)
 
     try:
         for query in asks:
