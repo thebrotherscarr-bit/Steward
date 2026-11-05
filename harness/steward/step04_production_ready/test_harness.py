@@ -6552,3 +6552,26 @@ def test_an_empty_reply_while_exploring_is_asked_once_to_go_on_reading(tmp_path:
     assert any("order_total" in r for c in client.calls for r in function_results(c)), "and the reading went on"
     client, cards = run([listed, "", ""])
     assert nudged(client) == 1, "asked once, not in a loop"
+
+
+def test_the_todo_reminder_says_his_words_are_shown_only_when_he_said_some(monkeypatch: Any) -> None:
+    """The bar at e532fea (2026-11-05 08:46Z, the README ask): his reply was empty, the open-todo reminder still said
+    his replies were already shown and to say only what is new (TODOS_ALREADY_SHOWN), and after the write his whole
+    answer was "Todos marked complete." The reminder carries that line only when the iteration held his own words."""
+    from agent_framework import AgentModeProvider, AgentResponse, AgentSession, TodoProvider
+
+    async def reminder(**kwargs: Any) -> str:
+        return "You still have 1 open todo item(s)."
+
+    monkeypatch.setattr(steward, "todos_remaining_message", reminder)
+    _, next_message = steward.plan_reply_loop(AgentModeProvider(default_mode="plan"), None, TodoProvider())
+    session = AgentSession()
+
+    def nudge(*said: str) -> str:
+        result = AgentResponse(messages=[Message(role="assistant", contents=[s]) for s in said])
+        return asyncio.run(next_message(feedback=None, session=session, last_result=result)).text
+
+    assert steward.TODOS_ALREADY_SHOWN in nudge("The README now says how to run its tests."), "words shown: say only what is new"
+    assert steward.TODOS_ALREADY_SHOWN not in nudge(""), "an empty reply showed nothing"
+    assert steward.TODOS_ALREADY_SHOWN not in nudge(), "no reply showed nothing"
+    assert nudge("").startswith("You still have 1 open todo item(s)."), "the reminder itself is MAF's, as before"

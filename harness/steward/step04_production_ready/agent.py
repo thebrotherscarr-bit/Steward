@@ -1693,6 +1693,11 @@ _REPEAT_SHARE = 0.5
 _REPEAT_MIN_RUN = 20
 
 
+def said_something(result: Any) -> bool:
+    """Whether a loop iteration's result holds his own words (an assistant message with text)."""
+    return any(m.role == "assistant" and (m.text or "").strip() for m in getattr(result, "messages", None) or [])
+
+
 def repeats_what_was_shown(shown: str, words: str) -> bool:
     """Whether ``words`` (his passage after a loop nudge) mostly repeats ``shown`` (what the tab already shows)."""
     new, old = " ".join(words.split()), " ".join(shown.split())
@@ -1881,7 +1886,10 @@ def plan_reply_loop(
         if feedback == "background":
             return loop_turn(background_tasks_running_message(session=session, **kwargs))
         reminder = await todos_remaining_message(feedback=feedback, session=session, **kwargs)
-        return loop_turn(f"{reminder}\n\n{TODOS_ALREADY_SHOWN}" if reminder else reminder)
+        # Only when he has said something: the bar at e532fea (2026-11-05 08:46Z, the README ask) had an empty reply,
+        # the reminder still said "your replies are already shown ... say only what is new", and after the write his
+        # whole answer was "Todos marked complete."
+        return loop_turn(f"{reminder}\n\n{TODOS_ALREADY_SHOWN}" if reminder and said_something(kwargs.get("last_result")) else reminder)
 
     return should_continue, next_message
 
