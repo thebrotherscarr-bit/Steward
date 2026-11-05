@@ -56,7 +56,6 @@ from agent import (  # noqa: E402
     build_steward_agent,
     steward_history_provider,
     steward_memory_store,
-    warn_model_drift,
 )
 
 MCP_SESSIONS_DIR = _WORKING_DIR / "storage" / "mcp-sessions"
@@ -203,7 +202,6 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # Every span goes to halo_traces/traces.jsonl, as hosted.py does.
     setup_halo_tracing()
-    await warn_model_drift()  # one warning line per model that drifted from the Estate lock; never fails the start
 
     async with AsyncExitStack() as stack:
         # Each session_id's history is kept on disk by MAF's FileHistoryProvider (storage/history, 2026-11-04).

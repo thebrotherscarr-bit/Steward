@@ -6,7 +6,8 @@ description: Save and send work on the estate's repositories the user's way - a 
 ## Usage
 
 The door addresses each repository by its `project`: `steward` (yours), `research` (Manjuel, the ground), `atlas`
-(Aurora), `secondbrain` (Jesster) and `neiro` (the Estate lock; the door does not carry it yet and says so). Every
+(Aurora) and `secondbrain` (Jesster). Neiro, the Estate lock, is retired (2026-11-05, archived read-only): the
+Estate's versions come from `secondbrain_estate_status`, and each repository's own checks are its gate. Every
 `atlas_*` call names one of them; any other, or none, is refused. Use `steward` unless the user names another part.
 The door's writes (opening a line, push, pull request open and merge) are held as cards in the user's SecondBrain
 window: each waits for the user's Approve. Main is protected on GitHub: it changes only through a pull request whose

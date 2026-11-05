@@ -545,49 +545,6 @@ def code_embedder() -> OllamaEmbeddingClient:
     return OllamaEmbeddingClient(model=CODE_EMBED_MODEL, client=CpuOllamaClient(host=os.environ.get("OLLAMA_HOST")))
 
 
-# The Estate lock (Neiro, worlds/neiro/estate.lock.json): each model's digest as the Estate was locked, and who uses it.
-# It is read only, from beside this repo (the Steward repo's parent's parent is the ground).
-ESTATE_LOCK = _STEWARD_DIR.parents[1].parent.parent / "worlds" / "neiro" / "estate.lock.json"
-_LOCK_USER = "steward"
-
-
-async def _installed_models() -> dict[str, str]:
-    """Ollama's installed models, name to digest: GET /api/tags through ollama's AsyncClient.list, as MAF's Ollama
-    client talks to Ollama (agent_framework_ollama builds on ollama.AsyncClient). Five seconds at most."""
-    listed = await OllamaAsyncClient(host=os.environ.get("OLLAMA_HOST"), timeout=5).list()
-    return {m.model: m.digest or "" for m in listed.models if m.model}
-
-
-async def warn_model_drift(
-    lock_path: Path = ESTATE_LOCK, installed: Callable[[], Awaitable[Mapping[str, str]]] = _installed_models
-) -> list[str]:
-    """At a host's start: one warning line for each model the Estate lock gives Steward ("used_by": "steward") whose
-    installed digest differs from the lock's, or that is not installed. Never fails the start: a missing or unreadable
-    lock, or Ollama down, is one info line. Returns the lines logged as warnings."""
-    try:
-        locked = json.loads(lock_path.read_text(encoding="utf-8")).get("models") or []
-    except (OSError, ValueError) as exc:
-        logger.info("Model drift not checked: the Estate lock %s could not be read (%s).", lock_path, exc)
-        return []
-    try:
-        present = await installed()
-    except Exception as exc:  # noqa: BLE001 - Ollama down or refusing: the start goes on
-        logger.info("Model drift not checked: Ollama's model list could not be read (%s).", exc)
-        return []
-    lines: list[str] = []
-    for model in locked:
-        name, digest = model.get("name"), model.get("digest")
-        if not name or _LOCK_USER not in (model.get("used_by") or []):
-            continue
-        if name not in present:
-            lines.append(f"Model drift: {name} is in the Estate lock but not installed in Ollama.")
-        elif digest and present[name] != digest:
-            lines.append(f"Model drift: {name} is installed as {present[name][:12]}, the Estate lock has {digest[:12]}.")
-    for line in lines:
-        logger.warning(line)
-    return lines
-
-
 @vectorstoremodel(collection_name="steward_code")
 @dataclass
 class CodeChunk:
@@ -800,14 +757,13 @@ def code_search_tool(index: CodeIndex | None = None) -> FunctionTool:
 _ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "git_pr", "records")
 _STEWARD_WORLD = "steward"
 # The Estate's repositories, by the names the door addresses them (2026-11-04, Kyle: Steward is the agent of the Estate).
-# The door carries research, atlas, secondbrain and steward (SecondBrain electron/door/index.cjs worldsFor); neiro is
-# the Estate lock's repository, which the door does not carry yet, so the door itself refuses it by name until it does.
+# The door carries research, atlas, secondbrain and steward (SecondBrain electron/door/index.cjs worldsFor). Neiro, the
+# Estate lock's repository, was retired as a gate on 2026-11-05 and archived: the versions are in estate_status.
 ESTATE_WORLDS: dict[str, str] = {
     "research": "Manjuel, the ground (Desktop\\Research)",
     "atlas": "Aurora, Atlas (atlas/ in the ground)",
     "secondbrain": "Jesster, SecondBrain (worlds/jesster)",
     "steward": "Steward, your own repository (worlds/steward)",
-    "neiro": "Neiro, the Estate lock (worlds/neiro)",
 }
 # The Estate as SecondBrain runs it, served on its MCP to him (SecondBrain electron/estate.cjs, 2026-11-04). The reads
 # never ask; the writes always ask the user's card. app_update always asks: one name covers its check and its apply.

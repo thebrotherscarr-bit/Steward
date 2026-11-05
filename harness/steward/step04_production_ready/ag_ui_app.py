@@ -62,7 +62,6 @@ from fastapi import FastAPI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hosted  # noqa: E402
-from agent import warn_model_drift  # noqa: E402
 
 logger = logging.getLogger(__name__)
 HOST = "127.0.0.1"  # loopback only
@@ -124,7 +123,6 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     port = int(os.environ.get("STEWARD_AG_UI_PORT", str(PORT)))
     hosted.steward_observability()  # the same local telemetry as hosted.py: nothing of it on stdout
-    await warn_model_drift()
     logger.info("Steward serving on http://%s:%d%s (AG-UI, MAF workflow).", HOST, port, PATH)
     await uvicorn.Server(uvicorn.Config(build_ag_ui_app(), host=HOST, port=port, log_level="info")).serve()
 
