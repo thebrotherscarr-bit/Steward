@@ -134,6 +134,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- `test_harness.py` runs with every `STEWARD_*` switch in the environment cleared (`clear_his_switches`, an autouse
+  fixture; `STEWARD_CHECK_RUNNING` stays) and the sandbox's cached answer forgotten, as on GitHub's runners. With
+  `STEWARD_SANDBOX=hyperlight` in the user environment, three CodeAct tests failed locally and passed in CI. Test:
+  `test_his_user_level_sandbox_switch_does_not_change_a_codeact_test`.
 - A run that stopped on a tool's result (no reply after it) is asked once to go on with its tools on (`GO_ON_NUDGE`,
   `ended_on_a_result`); only a second stop gets the answer-now turn, and an empty reply gets it as before. The
   confirmation bar at 1c23f70 (the item_count ask): the run stopped on a tool's error, the answer-now turn (#134) said
