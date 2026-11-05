@@ -1486,6 +1486,43 @@ TOOLS_OFF_ANSWER_NOW = (
 )
 
 
+# The bar at 98d54d5 (2026-11-05): runs ended on an empty reply (small run 1's item_count ask: "Last reply misses
+# ('item_count',): ''"; one EXECUTE call in the traces came back with no text and no call). An empty last reply is asked
+# once more through MAF's harness loop (loop_should_continue/loop_next_message, plan_reply_loop): the next turn's
+# message carries ANSWER_NOW_KEY, tools_off_to_answer_now turns that turn's tools off (tool_choice "none", which
+# OllamaChatClient sends without tools), and answer_when_tools_are_off adds TOOLS_OFF_ANSWER_NOW, as when a limit trips.
+# Not in plan mode, where READ_PLAN (the workflow) or plan_missing (a host's plan_reply_check) asks for the plan
+# itself, unless the session answers in words (the workflow's ANSWER step) or his work there is done (returned to plan).
+ANSWER_NOW_KEY = "steward_answer_now"
+EMPTY_REPLY_NUDGE = "Your last reply was empty."
+# A session whose state holds this answers in words: plan_mode_turns asks it for no plan (the workflow's answer step).
+IN_WORDS_KEY = "steward_answers_in_words"
+
+
+def ended_empty(response: Any) -> bool:
+    """Whether a run's last assistant message holds no text and no call (or there is no assistant message)."""
+    messages = [m for m in getattr(response, "messages", None) or [] if m.role == "assistant"]
+    if not messages:
+        return True
+    last = messages[-1]
+    return not (last.text or "").strip() and not any(
+        c.type in ("function_call", "function_approval_request") for c in last.contents
+    )
+
+
+def asks_to_answer_now(messages: Sequence[Any]) -> bool:
+    """Whether the last user message is the harness loop's answer-now turn (ANSWER_NOW_KEY)."""
+    last = next((m for m in reversed(messages or []) if m.role == "user"), None)
+    return bool((getattr(last, "additional_properties", None) or {}).get(ANSWER_NOW_KEY))
+
+
+async def tools_off_to_answer_now(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Chat middleware: the answer-now turn (asks_to_answer_now) is a call with tool_choice "none"."""
+    if asks_to_answer_now(context.messages):
+        context.options = {**(context.options or {}), "tool_choice": "none"}
+    await call_next()
+
+
 async def answer_when_tools_are_off(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
     """Chat middleware: the call MAF makes with tool_choice "none" (a limit tripped) asks him for his answer in text."""
     if (context.options or {}).get("tool_choice") == "none":
@@ -1767,6 +1804,18 @@ def plan_reply_loop(
         nudged.extend(pair[0] for pair in fresh)
         return True
 
+    def answer_missing(session: Any, last_result: Any, messages: Any) -> bool:
+        """A finished run whose last reply is empty, not already the answer-now turn, and not a plan to ask for."""
+        if session is None or not ended_empty(last_result) or asks_to_answer_now(messages):
+            return False
+        mode = get_agent_mode(
+            session,
+            source_id=mode_provider.source_id,
+            default_mode=mode_provider.default_mode,
+            available_modes=mode_provider.available_modes,
+        )
+        return mode != _PLAN_MODE or bool(session.state.get(IN_WORDS_KEY)) or bool(session.state.get(RETURNED_TO_PLAN_KEY))
+
     async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
         if denied_by_user(kwargs.get("messages")):
             return False
@@ -1778,9 +1827,13 @@ def plan_reply_loop(
             return (True, "required")
         if background_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
             return (True, "background")
+        if answer_missing(session, last_result, kwargs.get("messages")):
+            return (True, "answer")
         return False
 
-    async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> str | None:
+    async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> Any:
+        if feedback == "answer":
+            return Message(role="user", contents=[Content.from_text(EMPTY_REPLY_NUDGE)], additional_properties={ANSWER_NOW_KEY: True})
         if feedback == "plan":
             return PLAN_REPLY_NUDGE
         if feedback == "todos":
@@ -3357,7 +3410,10 @@ async def build_steward_agent(
             context_providers=part3_providers,
             middleware=[
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files,
-                refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code, repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,
+                refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code,
+                # Before the three that read tool_choice: an empty reply's answer-now turn is a tools-off call.
+                tools_off_to_answer_now,
+                repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,
                 withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if fides_on() else []),

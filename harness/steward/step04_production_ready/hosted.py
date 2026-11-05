@@ -73,6 +73,7 @@ from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import (  # noqa: E402
+    IN_WORDS_KEY,
     STATE_RETENTION_DAYS,
     STATE_RETENTION_DAYS_ENV,
     build_steward_agent,
@@ -94,8 +95,8 @@ AGENT_MODE_KEY = "agent_mode"
 IMPROVE_KEY = "steward_workflow"
 IMPROVE = "improve"
 PLAN_MODE = "plan"
-# A session whose state holds this answers in words: plan_mode_turns asks it for no plan (the workflow's answer step).
-IN_WORDS_KEY = "steward_answers_in_words"
+# A session whose state holds IN_WORDS_KEY (agent.py's, imported above) answers in words: plan_mode_turns asks it for
+# no plan (the workflow's answer step), and the harness loop asks it once more when its reply is empty.
 # The response chain is kept on disk so a conversation continues after a restart.
 _STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "responses"
 # The host's own state (the workflow's checkpoints, sessions, approvals) defaults to ~/.agentserver

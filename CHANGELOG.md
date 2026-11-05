@@ -109,6 +109,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A run no longer ends on an empty reply (the bar at 98d54d5: the item_count ask's last reply was `''`). MAF's harness
+  loop asks once more (`plan_reply_loop`, feedback `answer`): the turn's message carries `ANSWER_NOW_KEY`,
+  `tools_off_to_answer_now` makes it a `tool_choice` "none" call, and `answer_when_tools_are_off` adds
+  `TOOLS_OFF_ANSWER_NOW`, as when a limit trips. Once per run; not for a plan-mode reply (READ_PLAN asks for the
+  plan), but for the ANSWER step and for work that is done. `IN_WORDS_KEY` now lives in agent.py (hosted.py imports
+  it). Test: `test_an_empty_last_reply_is_asked_once_more_with_tools_off`.
 - A blank plan step no longer ends the run (the bar at 98d54d5, the README ask: an approved plan's steps held `""`
   lines, they were stored as todos, and MAF's todo store refused the blank title on its next load: `ValueError: Todo
   item title must be a non-empty string`). `StewardPlan`'s steps are non-blank in the schema Ollama is sent, so a
