@@ -1338,15 +1338,23 @@ def readme_run_tests_result() -> tuple[bool, str]:
     return ok, ("The README says how to run the tests." if ok else "The README names neither unittest nor pytest.")
 
 
+def _fresh_bytecode(cache: str) -> dict[str, str]:
+    """The environment for a measurement's Python: its bytecode cache in ``cache`` (a new folder), so no .pyc from
+    before reads as the module. A plant and its fix can be the same size within the same second (the fix_bug case's
+    5 / 9 and 9 / 5), and Python's cache, checked by size and mtime, then ran the planted code (the gate, 2026-11-05)."""
+    return {**os.environ, "PYTHONPYCACHEPREFIX": cache}
+
+
 def _module_probe(project: str, code: str, expected: str, what: str) -> tuple[bool, str]:
     """``code`` run in a fresh Python in a sample project: passed when it prints ``expected``."""
     from agent import _WORKING_DIR  # noqa: PLC0415
 
     try:
-        done = subprocess.run(
-            [sys.executable, "-c", code], cwd=_WORKING_DIR / project, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=60,
-        )
+        with tempfile.TemporaryDirectory() as cache:
+            done = subprocess.run(
+                [sys.executable, "-c", code], cwd=_WORKING_DIR / project, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60, env=_fresh_bytecode(cache),
+            )
     except (OSError, subprocess.SubprocessError) as error:
         return False, f"{what} was not run: {error}"
     got = done.stdout.strip()
@@ -1364,10 +1372,11 @@ def _project_tests(project: str) -> tuple[int, set[str], str]:
 
     command = [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", project]
     try:
-        done = subprocess.run(
-            command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
-            env={**os.environ, _CHECK_RUNNING: "1"},
-        )
+        with tempfile.TemporaryDirectory() as cache:
+            done = subprocess.run(
+                command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=300, env={**_fresh_bytecode(cache), _CHECK_RUNNING: "1"},
+            )
     except (OSError, subprocess.SubprocessError) as error:
         return -1, set(), str(error)
     passed = {line.split()[1].rsplit("::", 1)[-1] for line in done.stdout.splitlines() if line.startswith("PASSED ")}
