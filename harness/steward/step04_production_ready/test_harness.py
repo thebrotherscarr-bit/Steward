@@ -6114,3 +6114,34 @@ def test_a_manjuel_face_turn_needing_a_card_goes_through_the_mcp_host_to_secondb
     assert asked[-1] == ("probe_write", {"text": "no"}, "manjuel-face-2")
     assert ran == ["hello"], "a Deny from SecondBrain runs nothing"
     assert texts and texts[-1] == "Not written."
+
+
+def test_the_loops_own_turns_name_no_request_so_a_todo_quoting_percent_raises_no_number_hint(monkeypatch: Any) -> None:
+    """The bar at 416ba41 (2026-11-05, the discount ask): the open-todo reminder quoted the todo "interpret
+    discount_percent as a percentage", RequestHints matched the number hint on it, and the evidence check sent him to
+    count the harness folder's lines. Every turn plan_reply_loop's next_message writes carries REQUEST_KEY "", so
+    asked_request reads no request in it, MAF's "Progress so far" before it included; a None stays None."""
+    from agent_framework import AgentModeProvider, AgentSession, TodoProvider
+
+    said = "You still have 1 open todo item(s):\n- Interpret discount_percent as a percentage (divide by 100)."
+
+    async def reminder(**kwargs: Any) -> str | None:
+        return said if reminding[0] else None
+
+    reminding = [True]
+    monkeypatch.setattr(steward, "todos_remaining_message", reminder)
+    monkeypatch.setattr(steward, "background_tasks_running_message", lambda **kwargs: "Background task: count how many percent.")
+    modes = AgentModeProvider(default_mode="plan")
+    _, next_message = steward.plan_reply_loop(modes, None, TodoProvider())
+    session = AgentSession()
+    session.state[steward.HINTS_KEY] = [["count it", ["execute_code"]]]
+    progress = Message(role="user", contents=["Progress so far:\n- Fix the discount percent bug."])
+    for feedback in (None, "answer", "plan", "todos", "required", "background"):
+        turn = asyncio.run(next_message(feedback=feedback, session=session))
+        assert isinstance(turn, Message) and turn.role == "user" and turn.text, (feedback, turn)
+        assert steward.asked_request([progress, turn]) == "", f"{feedback}: the loop's turn was read as a request"
+    assert steward.asks_to_answer_now([asyncio.run(next_message(feedback="answer", session=session))])
+    assert said in asyncio.run(next_message(feedback=None, session=session)).text
+    reminding[0] = False
+    assert asyncio.run(next_message(feedback=None, session=session)) is None, "no reminder: MAF reuses the messages"
+    assert steward.asked_request([Message(role="user", contents=["Count how many lines."])]) == "Count how many lines."

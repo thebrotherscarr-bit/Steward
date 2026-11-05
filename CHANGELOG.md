@@ -117,6 +117,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The harness loop's own turns (the open-todo reminder, the plan and todos asks, the required-tool and background
+  nudges, the answer-now turn) carry `REQUEST_KEY` "", so `RequestHints` never reads a request in them. The bar at
+  416ba41: the reminder quoted the todo "interpret discount_percent as a percentage", the number hint matched, and the
+  evidence check sent him to count the harness folder's lines instead of finishing the fix. Test:
+  `test_the_loops_own_turns_name_no_request_so_a_todo_quoting_percent_raises_no_number_hint`.
 - The evals answer up to 20 rounds of cards in a run (`CARD_ROUNDS`, was 8 for the small set and 12 for the steps
   set): in the small set's item_count ask, REPAIR's write took the 8th and last answer and the re-check's card was
   never answered, so the case failed silently. A run still asking after 20 rounds fails with "the eval stopped

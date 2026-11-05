@@ -1835,20 +1835,29 @@ def plan_reply_loop(
             return (True, "answer")
         return False
 
+    # Every turn the loop writes names no request (REQUEST_KEY ""), so RequestHints never matches the loop's own words.
+    # The bar at 416ba41 (2026-11-05 04:57Z, the discount ask): the open-todo reminder quoted the plan's todo,
+    # "interpret discount_percent as a percentage", the number hint matched "percentage", and the evidence check then
+    # sent him to count the harness folder's lines in CodeAct; his last reply asked to run that, not the fix.
+    def loop_turn(text: str | None, **properties: Any) -> Message | None:
+        if not text:
+            return None  # MAF's loop: None reuses the previous messages, as todos_remaining_message's None did
+        return Message(role="user", contents=[Content.from_text(text)], additional_properties={**properties, REQUEST_KEY: ""})
+
     async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> Any:
         if feedback == "answer":
-            return Message(role="user", contents=[Content.from_text(EMPTY_REPLY_NUDGE)], additional_properties={ANSWER_NOW_KEY: True})
+            return loop_turn(EMPTY_REPLY_NUDGE, **{ANSWER_NOW_KEY: True})
         if feedback == "plan":
-            return PLAN_REPLY_NUDGE
+            return loop_turn(PLAN_REPLY_NUDGE)
         if feedback == "todos":
-            return PLAN_TODOS_NUDGE
+            return loop_turn(PLAN_TODOS_NUDGE)
         if feedback == "required":
             lines = "\n".join(f"- {pair[0]}" for pair in unmet_requirements(session))
-            return f"{REQUIRED_TOOLS_NUDGE}\n{lines}"
+            return loop_turn(f"{REQUIRED_TOOLS_NUDGE}\n{lines}")
         if feedback == "background":
-            return background_tasks_running_message(session=session, **kwargs)
+            return loop_turn(background_tasks_running_message(session=session, **kwargs))
         reminder = await todos_remaining_message(feedback=feedback, session=session, **kwargs)
-        return f"{reminder}\n\n{TODOS_ALREADY_SHOWN}" if reminder else reminder
+        return loop_turn(f"{reminder}\n\n{TODOS_ALREADY_SHOWN}" if reminder else reminder)
 
     return should_continue, next_message
 
