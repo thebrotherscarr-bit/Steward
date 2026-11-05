@@ -96,9 +96,10 @@ its own, as the guide's console ships: a workflow's cards resume from checkpoint
 Responses host keeps, and not from a console's session (MAF issue #5818). In SecondBrain, the Agent
 tab is Steward's console.
 
-### The Agent tab: a MAF workflow (`steward_workflow.py`, served by `hosted.py`)
+### The Agent tab: a MAF workflow (`steward_workflow.py`, served by `ag_ui_app.py` and `hosted.py`)
 
-SecondBrain's Agent tab talks to `hosted.py`, which serves Steward as a MAF workflow on MAF's own
+SecondBrain's Agent tab talks to `ag_ui_app.py` over AG-UI on 43122 by default, and falls back to
+`hosted.py` on 43120 when that host is down (ADR-0003, `docs/ARCHITECTURE.md`). `hosted.py` serves Steward as a MAF workflow on MAF's own
 `ResponsesHostServer(workflow=...)`, a fresh Steward per request. His work in execute streams to
 the tab as it happens (MAF's `intermediate_output_from`):
 
@@ -141,9 +142,9 @@ With the factory (SecondBrain's Agent tab or `console_app.py`), Step 3's list ad
 
 | Port  | What                                                                          |
 |-------|-------------------------------------------------------------------------------|
-| 43120 | Steward's service, `hosted.py` (Responses protocol; `STEWARD_PORT`)           |
+| 43120 | Steward's service, `hosted.py` (Responses protocol; Jesster's fallback; `STEWARD_PORT`) |
 | 43121 | Steward as an MCP tool, `mcp_app.py` (`http://127.0.0.1:43121/mcp`)           |
-| 43122 | Steward over AG-UI, `ag_ui_app.py` (not yet used by Jesster; `STEWARD_AG_UI_PORT`) |
+| 43122 | Steward over AG-UI, `ag_ui_app.py` (Jesster's default, ADR-0003; `STEWARD_AG_UI_PORT`) |
 | 43110 | SecondBrain's MCP (`SECONDBRAIN_MCP_URL`)                                     |
 | 43111 | The Atlas door                                                                |
 | 8091  | The glass                                                                     |

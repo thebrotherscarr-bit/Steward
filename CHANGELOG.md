@@ -216,6 +216,8 @@ was never merged and has no entry.
 
 ### Fixed
 
+- `harness/steward/README.md` no longer says the AG-UI host (43122) is unused by Jesster: it is Jesster's default
+  transport, with Responses (43120) the fallback, as `docs/ARCHITECTURE.md` and ADR-0003 record.
 - Both hosts import the code a request builds as they are built (`hosted.HOST_CODE`, `load_host_code`, called by
   `steward_server` and `ag_ui_app.build_ag_ui_app`), so a pull while a host runs is not mixed into its requests. The
   transport comparison (08:26, `--transport ag-ui`): the AG-UI host started at 08:12 on e94cb90's agent.py, main was
