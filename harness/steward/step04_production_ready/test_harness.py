@@ -5210,3 +5210,132 @@ def test_an_approved_plans_wording_never_matches_a_request_hint_only_the_request
 
 
 STEWARD_SHARE_ASK = "What percentage of harness/steward/working/sample-project's lines are tests?"
+
+
+# The bar at 0016cf4 (2026-11-04): the PLAN step's last reply was a tool call's arguments as text, so no plan card came.
+QUERY_AS_TEXT = '{"query":"pytest"}'
+EDITS_AS_TEXT = (
+    r'{"edits":[{"line_number":25,"new_line":"    return round(subtotal * (1 - discount_percent / 100), 2)\n"}],'
+    r'"file_name":"harness/steward/working/sample-project/inventory.py"}'
+)
+
+
+def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Small run 2 (the README ask) ended its PLAN step on '{"query":"pytest"}', the steps set on the discount fix's
+    file_access_replace_lines arguments. A write written as text in the plan step is the one gated write it fits, which
+    the plan-mode gate answers with PLAN_MODE_REFUSAL as its tool result (nothing written); a reply that is still no
+    plan but a JSON object is asked once more (PLAN_NOT_A_CALL) for the structured plan. Both texts replayed: a card."""
+    import json
+
+    import steward_workflow as wf
+    from agent_framework import tool
+
+    index = steward.CodeIndex(code_repo(tmp_path), WordEmbeddings())  # search_code offered, as live; nothing embeds
+    monkeypatch.setattr(steward, "code_index", lambda: index)
+
+    @tool(name="secondbrain_search_notes", approval_mode="never_require")
+    def notes(query: str) -> str:
+        """As the live build's SecondBrain notes search: a second tool {"query": ...} fits, neither read-only by MAF."""
+        return "never"
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix it"]}'
+    inventory = steward._WORKING_DIR / INVENTORY
+
+    def run(replies: list[Any]) -> tuple[ScriptedChatClient, list[str], list[str]]:
+        client = ScriptedChatClient(replies)
+
+        async def _go() -> tuple[list[str], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=[notes])
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+            cards = [e.data.function_call.name for e in events if e.type == "request_info"]
+            return cards, [str(e.data) for e in events if e.type == "output"]
+
+        cards, outputs = asyncio.run(_go())
+        return client, cards, outputs
+
+    before = inventory.read_bytes()
+    client, cards, _ = run([EDITS_AS_TEXT, plan])
+    assert cards == [wf.APPROVE_PLAN], "the steps set's text: a plan card"
+    refusal = steward.PLAN_MODE_REFUSAL.format(name="file_access_replace_lines")
+    assert refusal in function_results(client.calls[1]), function_results(client.calls[1])
+    assert inventory.read_bytes() == before, "the write never ran"
+    tools = client.calls[0]["options"]["tools"]
+    assert {"file_access_replace_lines", "file_memory_replace_lines"} <= offered_tools(client.calls[0])
+    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools) is None, "outside the plan step, two writes stay text"
+    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools, planning=True) == (
+        "file_access_replace_lines", json.loads(EDITS_AS_TEXT)
+    ), "never file memory's write, which asks no card"
+
+    client, cards, _ = run([QUERY_AS_TEXT, plan])
+    assert {"search_code", "secondbrain_search_notes"} <= offered_tools(client.calls[0])
+    assert steward.tool_call_in_text(QUERY_AS_TEXT, client.calls[0]["options"]["tools"], planning=True) is None
+    assert cards == [wf.APPROVE_PLAN] and len(client.calls) == 2, "the README ask's text: asked again, then a card"
+    assert not function_results(client.calls[1]), "nothing ran on a guess"
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+
+    client, cards, outputs = run([QUERY_AS_TEXT, QUERY_AS_TEXT])
+    assert cards == [] and len(client.calls) == 2 and outputs == [QUERY_AS_TEXT], "asked again once, not in a loop"
+    assert wf.ends_with_a_json_object('I will search.\n```json\n{"query": "pytest"}\n```')
+    assert not wf.ends_with_a_json_object("Just words.") and not wf.ends_with_a_json_object("{}")
+
+
+def test_a_bare_file_name_the_request_put_in_a_folder_is_refused_and_the_evals_remove_a_runs_stray_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Small run 1 (the item_count ask) wrote a bare 'inventory.py' at the repository root beside the sample project's,
+    and check_covers_writes failed on it. A write of a bare name the request means in a named folder is refused with
+    BARE_NAME_REFUSAL (the path it meant), even with its card approved; the evals' reset removes any untracked file a
+    run created anywhere in the repository and leaves what was untracked before it."""
+    import evals
+    from agent_framework import AgentModeProvider, AgentResponse, set_agent_mode
+
+    meant = INVENTORY
+    assert steward.named_paths(evals.SMALL_ASK_NEW_CODE) == [meant]
+    assert steward.bare_name_meant("inventory.py", steward.named_paths(evals.SMALL_ASK_NEW_CODE)) == meant
+    assert steward.bare_name_meant("inventory.py", steward.named_paths(evals.SMALL_ASK_DISCOUNT)) == meant, "a named folder"
+    assert steward.bare_name_meant("README.md", steward.named_paths(evals.SMALL_ASK_README)) is None, "a root file is its own"
+    assert steward.bare_name_meant("new_module.py", [meant]) is None, "no such file in the folder"
+    assert steward.bare_name_meant(meant, [meant]) is None, "a path with its folder goes on"
+
+    stray = steward._WORKING_DIR / "inventory.py"
+    assert not stray.exists()
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "inventory.py", "content": "x = 1\n"})
+    client = ScriptedChatClient([write, "Done."])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                session = agent.create_session()
+                modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                cards = approval_requests(await agent.run(evals.SMALL_ASK_NEW_CODE, session=session))
+                assert [c.function_call.name for c in cards] == ["file_access_write"]
+                await agent.run(Message(role="user", contents=[c.to_function_approval_response(True) for c in cards]), session=session)
+
+    try:
+        asyncio.run(_go())
+        assert not stray.exists(), "the bare name was not written at the root"
+    finally:
+        stray.unlink(missing_ok=True)
+    assert steward.BARE_NAME_REFUSAL.format(file_name="inventory.py", path=meant) in function_results(client.calls[-1])
+
+    kept = steward._WORKING_DIR / "test_harness_untracked_before.txt"
+    made = steward._WORKING_DIR / "test_harness_stray_probe.py"
+    kept.write_text("there before the run\n", encoding="utf-8")
+
+    async def one_run(query: str, approve: set[str], **build: Any) -> Any:
+        made.write_text("x = 1\n", encoding="utf-8")
+        return None, AgentResponse(messages=[])
+
+    monkeypatch.setattr(evals, "run_steward", one_run)
+    monkeypatch.setattr(evals, "SMALL_ASK_RESULT_CHECKS", {})
+    try:
+        asyncio.run(evals.run_small_asks([evals.SMALL_ASK_NEW_CODE]))
+        assert not made.exists(), "the run's stray file was removed"
+        assert kept.exists(), "a file untracked before the run is left"
+    finally:
+        kept.unlink(missing_ok=True)
+        made.unlink(missing_ok=True)

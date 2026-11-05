@@ -55,6 +55,7 @@ Run one request through it on Ollama (PLAN only reads; it stops at the approval)
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -162,6 +163,16 @@ PLAN_IS_APPROVAL = (
     "question, and your steps. If you need an answer first, reply with a clarification whose question lists the "
     "choices."
 )
+# Sent to PLAN once when its reply was (or ended with) a JSON object that is no plan: a tool call's arguments written
+# as text (the bar at 0016cf4, 2026-11-04: '{"query":"pytest"}' in the README ask, the discount fix's
+# '{"edits": [...], "file_name": ".../inventory.py"}' in the steps set). recover_text_tool_calls already runs such a
+# reply when it names one read (and refuses one gated write); this is what is left, asked again as PLAN_AGAIN is.
+PLAN_NOT_A_CALL = (
+    "Your reply was a tool call's arguments written as text, not your plan, so nothing ran. A tool runs only as a "
+    "tool call. In plan mode only reads run; writes come after the user approves the plan. Reply now with your plan "
+    "as the JSON object asked for: type approval, a summary of the plan as its one question, and your steps."
+)
+_TRAILING_FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```\s*\Z", re.S | re.I)
 # The router's one instruction, and the line the answer step is given with a question: short, since the graph routes.
 ROUTE_PROMPT = (
     'Classify the user\'s request. "answer": a question to answer in words, reading files or read-only tools at '
@@ -275,6 +286,24 @@ def steward_plan_in(text: str) -> StewardPlan | None:
     if plan is None or (plan.type == PlanningResponseType.APPROVAL and not plan.steps):
         return None
     return plan
+
+
+def ends_with_a_json_object(text: str) -> bool:
+    """Whether text is, or ends with, one non-empty JSON object (fenced or not)."""
+    body = (text or "").strip()
+    if fenced := _TRAILING_FENCE.search(body):
+        body = fenced.group(1)
+    if not body.endswith("}"):
+        return False
+    decoder = json.JSONDecoder()
+    for start in (i for i, char in enumerate(body) if char == "{"):
+        try:
+            value, end = decoder.raw_decode(body, start)
+        except ValueError:
+            continue
+        if end == len(body):
+            return isinstance(value, dict) and bool(value)
+    return False
 
 
 def offers_no_choices(plan: StewardPlan) -> bool:
@@ -591,7 +620,12 @@ class ReadPlan(Executor):
     ) -> None:
         last = _last_text(response)
         plan = steward_plan_in(last)
-        again = PLAN_AGAIN if not last.strip() else PLAN_IS_APPROVAL if plan is not None and offers_no_choices(plan) else None
+        if not last.strip():
+            again = PLAN_AGAIN
+        elif plan is not None:
+            again = PLAN_IS_APPROVAL if offers_no_choices(plan) else None
+        else:
+            again = PLAN_NOT_A_CALL if ends_with_a_json_object(last) else None
         if again and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
             ctx.set_state(_PLAN_ASKED_AGAIN_KEY, True)
             await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(again)])]), target_id=PLAN_STEP)
