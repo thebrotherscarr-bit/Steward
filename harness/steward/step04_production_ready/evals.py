@@ -174,23 +174,33 @@ def explorer_names_files(query: str, response: str) -> dict[str, object]:
     return {"passed": len(found) == 2, "reason": f"Found files: {found}."}
 
 
+# MAF's own results for a call it never ran: a tool not offered (_tools.py:2226) and arguments that fail validation
+# (_tools.py:2041). The steps set at f7b5120 (2026-11-05 06:41Z): EXPLORE called run_shell, which it is not offered,
+# MAF answered 'Error: Requested function "run_shell" not found.', and plan_step failed "Changed things while planning".
+NOT_RUN_RESULTS = ('Error: Requested function "', "Error: Argument parsing failed.")
+
+
 def _calls_in_order(conversation: list[Any]) -> list[tuple[str, Any, str]]:
     """Every tool call in the run, in order, with its arguments and its outcome: "ran", "card" (left on an
-    approval card) or "refused" (the plan-mode gate's corrective feedback)."""
+    approval card), "refused" (the plan-mode gate's corrective feedback) or "not run" (MAF never ran it:
+    NOT_RUN_RESULTS)."""
     from agent import PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
     markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE)
-    refused = {
-        content.call_id
+    results = {
+        content.call_id: str(content.result or "")
         for message in conversation or []
         for content in getattr(message, "contents", None) or []
-        if content.type == "function_result" and str(content.result or "").startswith(markers)
+        if content.type == "function_result"
     }
+    refused = {call_id for call_id, result in results.items() if result.startswith(markers)}
+    not_run = {call_id for call_id, result in results.items() if result.startswith(NOT_RUN_RESULTS)}
     calls: list[tuple[str, Any, str]] = []
     for message in conversation or []:
         for content in getattr(message, "contents", None) or []:
             if content.type == "function_call":
-                calls.append((content.name, content.parse_arguments(), "refused" if content.call_id in refused else "ran"))
+                outcome = "refused" if content.call_id in refused else "not run" if content.call_id in not_run else "ran"
+                calls.append((content.name, content.parse_arguments(), outcome))
             elif content.type == "function_approval_request" and content.function_call is not None:
                 calls.append((content.function_call.name, content.function_call.parse_arguments(), "card"))
     return calls
