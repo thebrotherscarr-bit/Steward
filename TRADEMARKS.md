@@ -2,7 +2,8 @@
 
 This policy is the Estate's, the same as in
 [Neiro's TRADEMARKS.md](https://github.com/thebrotherscarr-bit/Neiro/blob/main/TRADEMARKS.md).
-A license grants rights to the **work**. It grants no rights to the **names**.
+The license in this repository (MIT) grants broad rights to the **work**. It grants no rights to
+the **names**.
 
 The following names identify these projects and these projects only:
 
