@@ -6191,3 +6191,43 @@ def test_an_edit_that_leaves_a_parsing_py_file_unparsable_is_refused_with_the_li
     results, after = approved_edit(fixed, good.replace("    return", "        return"))
     assert not results[0].startswith("Refused"), "a file that did not parse before is not judged"
     assert steward.edit_breaks_python("a.md", "  x") is None
+
+
+def test_a_plan_call_answering_with_reads_sends_explore_to_make_them_once_then_plans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bar at 416ba41 (2026-11-05 05:28Z, the discount ask): EXPLORE stopped after listing the folder, the plan
+    call (tools off) answered twice with file_access_read, nothing ran, and the run ended empty with no card. ReadPlan
+    now sends a plan call's read calls back to EXPLORE once (PLAN_READ_FIRST), where they run, and the plan call comes
+    after: a card. A second plan call answering with reads is not sent back again: the run ends, as an empty plan did."""
+    import steward_workflow as wf
+
+    index = steward.CodeIndex(code_repo(tmp_path), WordEmbeddings())
+    monkeypatch.setattr(steward, "code_index", lambda: index)
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix order_total in inventory.py"]}'
+
+    def read_call(call_id: str) -> Content:
+        return Content.from_function_call(call_id=call_id, name="file_access_read", arguments={"file_name": INVENTORY})
+
+    def run(replies: list[Any], plans: list[Any]) -> tuple[ScriptedChatClient, list[str], list[str]]:
+        client = ScriptedChatClient(replies, plans=plans)
+
+        async def _go() -> tuple[list[str], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+            cards = [e.data.function_call.name for e in events if e.type == "request_info"]
+            return cards, [str(e.data) for e in events if e.type == "output"]
+
+        cards, outputs = asyncio.run(_go())
+        return client, cards, outputs
+
+    client, cards, _ = run(["I listed the folder.", read_call("r2"), "Read it."], [read_call("p1"), plan])
+    assert cards == [wf.APPROVE_PLAN], "the reads ran in EXPLORE, then the plan call planned: a card"
+    assert len(client.plan_calls) == 2
+    asked = [m.text for c in client.calls for m in c["messages"] if m.role == "user" and wf.PLAN_READ_FIRST.split("{calls}")[0] in (m.text or "")]
+    assert asked and "file_access_read" in asked[0] and INVENTORY in asked[0], asked
+    assert any("order_total" in r for c in client.calls for r in function_results(c)), "EXPLORE read inventory.py"
+    assert wf.EXPLORE_STEP in {"explore"} and wf.READ_PLAN_STEP == "read_plan"
+
+    client, cards, outputs = run(["I listed the folder.", "Nothing more."], [read_call("p1"), read_call("p2")])
+    assert cards == [] and len(client.plan_calls) == 2, "sent back once, not in a loop"

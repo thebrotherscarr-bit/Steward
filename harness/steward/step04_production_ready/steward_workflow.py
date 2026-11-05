@@ -190,6 +190,14 @@ PLAN_NOT_A_CALL = (
     "tool call. In plan mode only reads run; writes come after the user approves the plan. Reply now with your plan "
     "as the JSON object asked for: type approval, a summary of the plan as its one question, and your steps."
 )
+# Sent to EXPLORE once when the plan call answered only with read calls (tools off there, so none ran). The bar at
+# 416ba41 (2026-11-05 05:28Z, the discount ask's second run): EXPLORE listed the folder and stopped; the plan call
+# answered with file_access_read twice, nothing ran, the run ended with an empty reply and no card. EXPLORE is where
+# reads run, so it reads them, and its conversation goes on to the plan call as the first did.
+PLAN_READ_FIRST = (
+    "Your plan call asked to read {calls}, but tools are off in the plan call, so nothing ran. Make those reads now "
+    "with your tools, then stop; your plan comes after."
+)
 # The plan call's own turn, after EXPLORE's conversation (plan_call_input): its tools are off, so it says so, and says
 # what the steps become (approved_plan_turn writes them as his todos; no todo tool is offered while planning).
 PLAN_NOW = (
@@ -415,6 +423,16 @@ def offers_no_choices(plan: StewardPlan) -> bool:
 def _last_text(response: AgentExecutorResponse) -> str:
     messages = response.agent_response.messages
     return next((m.text for m in reversed(messages) if m.role == "assistant" and (m.text or "").strip()), "")
+
+
+def plan_call_reads(response: AgentExecutorResponse) -> list[str]:
+    """The read calls (PLAN_TOOLS) a plan call answered with, as 'name(arguments)', in order; none ran (tools off)."""
+    return [
+        f"{c.name}({json.dumps(c.parse_arguments() or {}, ensure_ascii=False)})"
+        for m in response.agent_response.messages
+        for c in m.contents
+        if c.type == "function_call" and c.name in PLAN_TOOLS
+    ]
 
 
 def _first_user_text(response: AgentExecutorResponse) -> str:
@@ -829,6 +847,15 @@ class ReadPlan(Executor):
     ) -> None:
         last = _last_text(response)
         plan = steward_plan_in(last)
+        reads = plan_call_reads(response)
+        if not last.strip() and reads and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
+            ctx.set_state(_PLAN_ASKED_AGAIN_KEY, True)
+            # REQUEST_KEY "": the reads are no new request (agent.asked_request).
+            read_first = Message(
+                role="user", contents=[Content.from_text(PLAN_READ_FIRST.format(calls=", ".join(reads)))], additional_properties={REQUEST_KEY: ""}
+            )
+            await ctx.send_message(AgentExecutorRequest(messages=[read_first]), target_id=EXPLORE_STEP)
+            return
         if not last.strip():
             again = PLAN_AGAIN
         elif plan is not None:
@@ -1194,6 +1221,7 @@ def build_steward_workflow(
         .add_edge(explore, plan)
         .add_edge(plan, read_plan)
         .add_edge(read_plan, plan)  # an empty plan reply, asked again once
+        .add_edge(read_plan, explore)  # a plan call that answered with reads: EXPLORE makes them, once (PLAN_READ_FIRST)
         .add_edge(read_plan, ask_approval)
         .add_edge(ask_approval, execute)
         .add_edge(execute, check)
