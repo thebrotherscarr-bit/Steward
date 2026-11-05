@@ -58,6 +58,8 @@ notes and door tools, or ask Kyle.
 | `secondbrain_service_control` | start, stop or restart one server (never SecondBrain; never the door in a sitting) | always |
 | `secondbrain_ollama_unload` | one model out of memory | always |
 | `secondbrain_app_update` | `check` the newest build, or `apply` it (restarts SecondBrain) | always |
+| `secondbrain_eval_start` | start eval sets in their own window (`sets`, `runs` 1-3, `tag`); a bounded action | none |
+| `secondbrain_eval_status` | one eval run's progress lines and whether it said BAR DONE (`tag`; the newest if none) | none |
 
 ## The repositories, as the door names them
 | `project=` | Part | Where |

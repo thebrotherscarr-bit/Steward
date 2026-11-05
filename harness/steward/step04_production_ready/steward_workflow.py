@@ -232,6 +232,11 @@ _CHANGE_WORDS = re.compile(rf"\b({_CHANGE_VERBS})\b", re.IGNORECASE)
 # classifying it ("Let's imagine the test fails"), so ANSWER replied with the fixed file in prose and no plan card.
 _OPENS_WITH_A_CHANGE = re.compile(rf"\A\W*(?:please\W+)?({_CHANGE_VERBS})\b", re.IGNORECASE)
 ANSWER_IN_WORDS = "Answer this question in plain words. Read what you need; change nothing; no plan."
+# A turn from one of SecondBrain's automations (Jesster electron/agent/service.cjs, its first line "[from an automation
+# (<name>)]"): nobody is watching, and an automation never approves its own card, so a plan card would wait its ten
+# minutes and be answered No. Its workflow has already gathered what it needs (Jesster electron/agent/workflows.cjs)
+# and asks for words, so it is the answer branch, whatever the model or its opening verb says ("Write the daily ...").
+_FROM_AN_AUTOMATION = re.compile(r"\A\s*\[from an automation \(")
 
 
 class Route(BaseModel):
@@ -251,6 +256,11 @@ class RoutedRequest(AgentExecutorRequest):
 def asks_only_to_read(request: str) -> bool:
     """Whether the request names one of the Estate's read-only tools (ESTATE_READS) and no change (_CHANGE_WORDS)."""
     return any(name in request for name in ESTATE_READS) and not _CHANGE_WORDS.search(request)
+
+
+def from_an_automation(request: str) -> bool:
+    """Whether the request is an automation's turn (_FROM_AN_AUTOMATION): it is answered in words, never planned."""
+    return bool(_FROM_AN_AUTOMATION.match(request or ""))
 
 
 def asks_for_a_change(request: str) -> bool:
@@ -297,7 +307,7 @@ class Router(Executor):
             kind: str | None = Route.model_validate_json((reply.text or "").strip()).kind
         except ValueError:
             kind = None  # no Route: the Default branch, the plan as before
-        if asks_only_to_read(request):
+        if asks_only_to_read(request) or from_an_automation(request):
             kind = "answer"
         elif asks_for_a_change(request):
             kind = "task"

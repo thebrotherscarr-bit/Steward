@@ -123,8 +123,8 @@ for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
 os.environ["STEWARD_CHECK_RUNNING"] = "1"
 
 SKILLS = (
-    "agent-framework-builder-python", "approvals", "code-review", "codebase-map", "estate", "eval-history", "evals", "github",
-    "improve", "ollama-ops", "run-tests", "secondbrain-notes", "telemetry",
+    "agent-framework-builder-python", "approvals", "automations", "bar-runner", "code-review", "codebase-map", "estate",
+    "eval-history", "evals", "github", "improve", "ollama-ops", "run-tests", "secondbrain-notes", "telemetry",
 )
 
 
@@ -4077,6 +4077,14 @@ def _estate_server() -> Any:
     def app_update(action: str) -> str:
         return "checked"
 
+    @server.tool()
+    def eval_start(sets: list[str], runs: int = 1, tag: str = "") -> str:
+        return '{"started": true, "tag": "aider-py-2026-11-05"}'
+
+    @server.tool()
+    def eval_status(tag: str = "") -> str:
+        return '{"done": false, "lines": []}'
+
     return server
 
 
@@ -4140,6 +4148,61 @@ def test_an_eval_build_gets_only_the_estates_reads(monkeypatch: Any) -> None:
     offered = offered_tools(asyncio.run(_go()).calls[0])
     assert {f"secondbrain_{t}" for t in steward.ESTATE_READS} <= offered
     assert not offered & {f"secondbrain_{t}" for t in steward.ESTATE_ASKS}, sorted(offered)
+    assert not offered & {f"secondbrain_{t}" for t in steward.ESTATE_ACTIONS}, "no eval starts an eval"
+
+
+def test_eval_start_is_a_bounded_estate_action_that_never_asks_and_eval_status_is_a_read(monkeypatch: Any) -> None:
+    """2026-11-05, the operator: "Steward can automate on his own". SecondBrain's eval_start (estate.cjs) only runs eval
+    sets, so it is on his live build with no card, never in plan mode's list of what changes things, and reported so on
+    the tool-policy shelf; eval_status reads its progress like the Estate's other reads. Red if either starts asking."""
+    import json
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    assert steward.ESTATE_ACTIONS == ("eval_start",) and "eval_status" in steward.ESTATE_READS
+    assert "secondbrain_eval_start" not in steward._CHANGES_THINGS
+    assert steward.estate_approval(["eval_start", "eval_status"])["never_require_approval"] == ["eval_start", "eval_status"]
+
+    for name, arguments, seen in (
+        ("secondbrain_eval_start", {"sets": ["aider-py"], "runs": 1}, "started"),
+        ("secondbrain_eval_status", {"tag": "aider-py-2026-11-05"}, "lines"),
+    ):
+        call = Content.from_function_call(call_id="v1", name=name, arguments=arguments)
+        client, _, response = run_steward([call, "Done."], "Start aider-py and read its progress.", mode="execute")
+        assert not approval_requests(response), f"{name} asked a card"
+        assert seen in function_results(client.calls[1])[0], name
+    rows = {row["name"]: row for row in json.loads(steward.TOOL_POLICY_PATH.read_text(encoding="utf-8"))["tools"]}
+    assert rows["secondbrain_eval_start"]["approval"] == "never", rows["secondbrain_eval_start"]
+    assert "bounded Estate action" in rows["secondbrain_eval_start"]["notes"]
+    assert rows["secondbrain_eval_status"]["approval"] == "never"
+    bar = (steward._SKILLS_DIR / "bar-runner" / "SKILL.md").read_text(encoding="utf-8")
+    assert "secondbrain_eval_start" in bar and "secondbrain_eval_status" in bar and "eval-history" in bar
+
+
+def test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task() -> None:
+    """SecondBrain's automations (Jesster electron/agent/workflows.cjs) send one turn, first line "[from an automation
+    (<name>)]", asking for words from what they gathered. Nobody is watching and an automation never approves its own
+    card, so it goes to ANSWER whatever the router's model or its opening verb says; without that line "Write ..." is
+    still a task."""
+    import steward_workflow as wf
+
+    request = "[from an automation (Startup)]\nWrite the daily what-happened from this: a short plain summary.\n\n## Commits on main"
+    assert wf.from_an_automation(request)
+    assert not wf.from_an_automation("Write the daily what-happened.")
+    assert not wf.from_an_automation("Hello\n[from an automation (Startup)]")
+    client = ScriptedChatClient(["Yesterday: two merges."], routes=['{"kind": "task"}'])
+
+    async def _go() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                return [e async for e in wf.build_steward_workflow(agent).run(request, stream=True)]
+
+    events = asyncio.run(_go())
+    assert not [e for e in events if e.type == "request_info"], "an automation's turn raises no plan card"
+    assert said(events) == ["Yesterday: two merges."], said(events)
 
 
 def test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell() -> None:

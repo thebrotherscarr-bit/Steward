@@ -813,16 +813,24 @@ ESTATE_WORLDS: dict[str, str] = {
 # never ask; the writes always ask the user's card. app_update always asks: one name covers its check and its apply.
 # hold_status (2026-11-04, the approvals skill) is the door's read of how one held call ended (SecondBrain
 # electron/door/registry.cjs), served on the same MCP; read here beside approvals_history, so the door's gate is not on it.
-ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status")
+# eval_status (2026-11-05, the bar-runner skill) reads one eval_start run's progress file: a read like the rest.
+ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status", "eval_status")
 ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
+# The Estate's bounded actions (2026-11-05, the operator: "Steward can automate on his own"): eval_start starts his
+# eval sets (run-bar.ps1 in its own window) and nothing else, only for set files in harness/steward/evals/ and only
+# while no eval runs, and a set writes only his eval history and throwaway working copies (SecondBrain estate.cjs
+# serves it with the reads). So it never asks; an eval's own build is never offered it (no eval starts an eval).
+ESTATE_ACTIONS = ("eval_start",)
 
 
 def estate_approval(tools: Sequence[str]) -> dict[str, Any]:
     """MAF's per-tool approval_mode for SecondBrain's Estate tools (MCPSpecificApproval): the writes always ask, the
-    reads never do, and any other name asks (default "always_require"), so a tool added later is never let through."""
+    reads and the bounded actions (ESTATE_ACTIONS) never do, and any other name asks (default "always_require"), so a
+    tool added later is never let through."""
+    never = (*ESTATE_READS, *ESTATE_ACTIONS)
     return {
-        "always_require_approval": [t for t in tools if t not in ESTATE_READS],
-        "never_require_approval": [t for t in tools if t in ESTATE_READS],
+        "always_require_approval": [t for t in tools if t not in never],
+        "never_require_approval": [t for t in tools if t in never],
         "default": "always_require",
     }
 # Hard refusals, at run time, whatever card would follow (the ground's RULE 1, RULE 6 and RULE 12; never the Archive).
@@ -3337,6 +3345,8 @@ async def tool_policy(agent: Agent[Any], rules: Sequence[Any], scratch: Path) ->
             notes.append("refused without a card in plan mode (the plan-mode gate)")
         if source == "mcp:door" and name != PR_CHECKS_TOOL:
             notes.append("SecondBrain's door holds its writes for approval there")
+        if name in {f"secondbrain_{t}" for t in ESTATE_ACTIONS}:
+            notes.append("a bounded Estate action: it only runs eval sets, so it never asks a card")
         if name in {f"secondbrain_{t}" for t in ESTATE_ASKS}:
             notes.append("an Estate write: SecondBrain serves it only while it allows writes (Settings, Share)")
         if notes:
@@ -3602,7 +3612,7 @@ async def build_steward_agent(
             # The Estate (2026-11-04, Kyle: Steward is the agent of the Estate): SecondBrain's estate tools on the same
             # client, MAF's allowed_tools and per-tool approval_mode (estate_approval): the reads never ask, the writes
             # always ask the user's card. An eval's build gets the reads only. A server's log is untrusted to FIDES.
-            estate_tools = list(ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS))
+            estate_tools = list(ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS, *ESTATE_ACTIONS))
             estate = await labelled_mcp_tool(
                 stack,
                 MCPStreamableHTTPTool(
