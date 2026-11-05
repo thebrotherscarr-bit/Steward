@@ -109,6 +109,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A blank plan step no longer ends the run (the bar at 98d54d5, the README ask: an approved plan's steps held `""`
+  lines, they were stored as todos, and MAF's todo store refused the blank title on its next load: `ValueError: Todo
+  item title must be a non-empty string`). `StewardPlan`'s steps are non-blank in the schema Ollama is sent, so a
+  reply with a blank step is no plan and PLAN is asked again; `approved_plan_turn` never stores a blank step. A
+  tool's own argument error (`todos_add` with an empty title) already comes back to him as the tool's error result,
+  and the run goes on. Test: `test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run`.
 - The PLAN step ended on a tool call's arguments written as text, so no plan card came (the bar at 0016cf4: the
   README ask's `{"query":"pytest"}`, which fits `search_code` and `secondbrain_search_notes`; the steps set's
   `{"edits": [...], "file_name": ".../inventory.py"}`, which fits `file_access_replace_lines` and
