@@ -6147,6 +6147,52 @@ def test_the_loops_own_turns_name_no_request_so_a_todo_quoting_percent_raises_no
     assert steward.asked_request([Message(role="user", contents=["Count how many lines."])]) == "Count how many lines."
 
 
+def test_an_edit_that_leaves_a_parsing_py_file_unparsable_is_refused_with_the_lines_and_nothing_is_written() -> None:
+    """The steps set at 416ba41 (2026-11-05 05:33Z): file_access_replace_lines put order_total's body at 8 spaces under
+    its 4-space docstring, inventory.py stopped parsing, and the check failed on collection. Such an edit, approved, is
+    refused (edit_breaks_python in refuse_unicode_punctuation_in_code): the file is untouched, and the refusal names the
+    error and shows the numbered lines as they would be. A good edit is written; a file that did not parse is not judged."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    name = "test_harness_edit_probe.py"
+    path = steward._WORKING_DIR / name
+    good = 'def total(items):\n    """Sum."""\n    subtotal = sum(items)\n    return subtotal\n'
+
+    def approved_edit(edits: list[dict[str, Any]], before: str) -> tuple[list[str], str]:
+        """One approved file_access_replace_lines on a probe file: (its tool results, the file's text after)."""
+        path.write_text(before, encoding="utf-8")
+        edit = Content.from_function_call(call_id="e1", name="file_access_replace_lines", arguments={"file_name": name, "edits": edits})
+        client = ScriptedChatClient([edit, "Done."])
+
+        async def _go() -> None:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                session = agent.create_session()
+                for modes in [p for p in agent.context_providers if isinstance(p, AgentModeProvider)]:
+                    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+                cards = approval_requests(await agent.run("Edit the file.", session=session))
+                await agent.run(Message(role="user", contents=[c.to_function_approval_response(True) for c in cards]), session=session)
+
+        try:
+            asyncio.run(_go())
+            return function_results(client.calls[-1]), path.read_text(encoding="utf-8")
+        finally:
+            path.unlink(missing_ok=True)
+
+    bad = [{"line_number": 3, "new_line": "        subtotal = sum(items) * 2\n"}, {"line_number": 4, "new_line": "        return subtotal\n"}]
+    results, after = approved_edit(bad, good)
+    assert after == good, "the edit that broke the file was written"
+    [refusal] = results
+    assert refusal.startswith(f"Refused: after this edit {name} would not be Python") and "line 3" in refusal, refusal
+    assert "   3|         subtotal = sum(items) * 2" in refusal and "   2|     \"\"\"Sum.\"\"\"" in refusal, refusal
+    fixed = [{"line_number": 3, "new_line": "    subtotal = sum(items) * 2\n"}]
+    results, after = approved_edit(fixed, good)
+    assert "subtotal = sum(items) * 2" in after and not results[0].startswith("Refused"), results
+    results, after = approved_edit(fixed, good.replace("    return", "        return"))
+    assert not results[0].startswith("Refused"), "a file that did not parse before is not judged"
+    assert steward.edit_breaks_python("a.md", "  x") is None
+
+
 def test_a_plan_call_answering_with_reads_sends_explore_to_make_them_once_then_plans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The bar at 416ba41 (2026-11-05 05:28Z, the discount ask): EXPLORE stopped after listing the folder, the plan
     call (tools off) answered twice with file_access_read, nothing ran, and the run ended empty with no card. ReadPlan

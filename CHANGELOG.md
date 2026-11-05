@@ -117,6 +117,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- An edit (`file_access_replace`, `file_access_replace_lines`) that would leave a .py file that parsed unparsable is
+  refused, even once approved (`edit_breaks_python`, in `refuse_unicode_punctuation_in_code`): nothing is written, and
+  the refusal names Python's error and shows the numbered lines around it as they would be. The steps set at 416ba41:
+  `file_access_replace_lines` put order_total's body at 8 spaces under its 4-space docstring, inventory.py stopped
+  parsing and the check failed on collection; REPAIR made the same edit twice. A file that did not parse is not judged.
+  Test: `test_an_edit_that_leaves_a_parsing_py_file_unparsable_is_refused_with_the_lines_and_nothing_is_written`.
 - A plan call that answers only with read calls (tools are off there, so none run) sends them back to EXPLORE once
   (`PLAN_READ_FIRST`, a new edge read_plan -> explore), where they run, and the plan call follows as before. The bar
   at 416ba41 (the discount ask's second run): EXPLORE stopped after listing the folder, the plan call answered with
