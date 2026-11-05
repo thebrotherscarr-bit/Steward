@@ -46,9 +46,30 @@ import pytest  # noqa: E402
 # His real trace file, as halo_traces resolved it on import (HALO_TRACE_PATH, or <repo>/halo_traces/traces.jsonl).
 REAL_HALO_TRACES = halo_traces.HALO_TRACE_PATH
 
+# The one STEWARD_* name the tests set for themselves at import (below); every other one is a switch of his.
+_TEST_OWN_SWITCHES = frozenset({"STEWARD_CHECK_RUNNING"})
+
+
+def clear_his_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every STEWARD_* switch in his environment (STEWARD_SANDBOX, STEWARD_FIDES_ENFORCE, STEWARD_SENSITIVE_TELEMETRY,
+    a step's options, ...) is cleared for the test, as on GitHub's runners where none is set, and the sandbox's
+    once-per-process answer is forgotten. A test that wants a switch sets it with monkeypatch after this ran."""
+    for name in [n for n in os.environ if n.upper().startswith("STEWARD_") and n.upper() not in _TEST_OWN_SWITCHES]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(steward, "_SANDBOX_STATE", {})
+
 
 @pytest.fixture(autouse=True)
-def _his_memory_is_never_the_real_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _his_switches_are_never_in_the_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-05: STEWARD_SANDBOX=hyperlight in his user environment turned three CodeAct tests red on his PC while
+    they passed in CI. The tests run as CI runs them, whatever his shell has set."""
+    clear_his_switches(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _his_memory_is_never_the_real_one(
+    _his_switches_are_never_in_the_tests: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Step 5: hosts pass steward_memory_store(); in the tests its default store is off (an extraction call would take
     a scripted reply), and in any case it would never be his real memory folder."""
     monkeypatch.setenv("STEWARD_AUTOMATIC_MEMORY", "off")
@@ -1179,6 +1200,32 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     assert not (steward._WORKING_DIR / "harness" / "test_harness_codeact_probe.txt").exists(), "and nothing written"
     asked = [hint for pattern, hint, _ in steward.REQUEST_HINTS if pattern.search("Report the pass count and every failing line.")]
     assert asked == []
+
+
+def test_his_user_level_sandbox_switch_does_not_change_a_codeact_test(monkeypatch: Any) -> None:
+    """2026-11-05: STEWARD_SANDBOX=hyperlight in his environment, with a sandbox that would start and its answer already
+    cached "on", reddened the CodeAct test above on his PC. Cleared as the autouse fixture clears it, the build is
+    Monty's and that test passes, as in CI."""
+    from agent_framework.monty import MontyCodeActProvider
+
+    monkeypatch.setenv(steward.SANDBOX_ENV, "hyperlight")
+    monkeypatch.setenv("STEWARD_FIDES_ENFORCE", "on")
+    monkeypatch.setenv("STEWARD_SENSITIVE_TELEMETRY", "on")
+    monkeypatch.setattr(steward, "_SANDBOX_STATE", {"on": True})
+    monkeypatch.setattr(steward, "_probe_hyperlight", lambda: None)
+    clear_his_switches(monkeypatch)
+
+    assert not any(n in os.environ for n in (steward.SANDBOX_ENV, "STEWARD_FIDES_ENFORCE", "STEWARD_SENSITIVE_TELEMETRY"))
+    assert os.environ.get("STEWARD_CHECK_RUNNING") == "1", "the tests' own recursion guard stays"
+    assert steward.hyperlight_sandbox_on() is False
+
+    async def _go() -> Any:
+        async with AsyncExitStack() as stack:
+            return await steward.build_steward_agent(stack, client=ScriptedChatClient(["Done."]), enable_shell=False)
+
+    agent = asyncio.run(_go())
+    assert any(isinstance(p, MontyCodeActProvider) for p in agent.context_providers)
+    test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_question()
 
 
 def test_a_run_that_added_todos_is_never_told_its_list_is_empty(monkeypatch: Any) -> None:
