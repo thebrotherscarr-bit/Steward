@@ -105,7 +105,7 @@ from console.observers.planning_models import PlanningQuestion, PlanningResponse
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
 import agent as _agent  # noqa: E402 - hyperlight_sandbox_on, read at call time (offered_in_step)
-from agent import _CHANGES_THINGS, ESTATE_READS, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -1202,7 +1202,10 @@ def build_steward_workflow(
     answer_session = step_session(agent, ANSWER_STEP)
     answer_session.state[IN_WORDS_KEY] = True
     answer = AgentExecutor(agent, session=answer_session, id=ANSWER_STEP)
-    explore = AgentExecutor(agent, session=step_session(agent, EXPLORE_STEP), id=EXPLORE_STEP)
+    # EXPLORE's session reads for the plan: an empty reply there is asked once to go on reading (agent.READS_FIRST_KEY).
+    explore_session = step_session(agent, EXPLORE_STEP)
+    explore_session.state[READS_FIRST_KEY] = True
+    explore = AgentExecutor(agent, session=explore_session, id=EXPLORE_STEP)
     # PLAN takes EXPLORE's conversation and PLAN_NOW (MAF's chaining, AgentExecutor.from_response, context_mode custom).
     plan = AgentExecutor(
         agent, session=step_session(agent, PLAN_STEP), id=PLAN_STEP, context_mode="custom", context_filter=plan_call_input

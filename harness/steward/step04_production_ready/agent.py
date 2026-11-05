@@ -1497,6 +1497,16 @@ ANSWER_NOW_KEY = "steward_answer_now"
 EMPTY_REPLY_NUDGE = "Your last reply was empty."
 # A session whose state holds this answers in words: plan_mode_turns asks it for no plan (the workflow's answer step).
 IN_WORDS_KEY = "steward_answers_in_words"
+# A session whose state holds this reads for a plan (the workflow's EXPLORE step). The bar at 1b56963 (2026-11-05
+# 07:55Z, the steps set): EXPLORE listed two folders, its next reply came back empty, and its reading ended there;
+# the plan call then answered with reads twice and the run ended with no plan. An empty reply there is asked once to
+# go on reading, with its tools on (READ_ON_NUDGE, a loop turn carrying READ_ON_KEY).
+READS_FIRST_KEY = "steward_reads_first"
+READ_ON_KEY = "steward_read_on"
+READ_ON_NUDGE = (
+    "Your last reply was empty. Go on reading what the plan needs with your tools (open the files the request is "
+    "about), then say in a few lines what you found."
+)
 
 
 def ended_empty(response: Any) -> bool:
@@ -1820,9 +1830,21 @@ def plan_reply_loop(
         )
         return mode != _PLAN_MODE or bool(session.state.get(IN_WORDS_KEY)) or bool(session.state.get(RETURNED_TO_PLAN_KEY))
 
+    def reading_stopped(session: Any, last_result: Any, messages: Any) -> bool:
+        """A reading session (READS_FIRST_KEY) whose reply came back empty after it had begun reading (a tool call in
+        this run), not already after READ_ON_NUDGE."""
+        if session is None or not session.state.get(READS_FIRST_KEY) or not ended_empty(last_result):
+            return False
+        if not any(c.type == "function_call" for m in getattr(last_result, "messages", None) or [] for c in m.contents):
+            return False  # nothing read yet: the plan call is asked for the plan, as before (ReadPlan)
+        last = next((m for m in reversed(messages or []) if m.role == "user"), None)
+        return not (getattr(last, "additional_properties", None) or {}).get(READ_ON_KEY)
+
     async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
         if denied_by_user(kwargs.get("messages")):
             return False
+        if reading_stopped(session, last_result, kwargs.get("messages")):
+            return (True, "read on")
         if missing := await plan_missing(session, last_result, iteration):
             return (True, missing)
         if await todo_loop(session=session, last_result=last_result, iteration=iteration, **kwargs):
@@ -1845,6 +1867,8 @@ def plan_reply_loop(
         return Message(role="user", contents=[Content.from_text(text)], additional_properties={**properties, REQUEST_KEY: ""})
 
     async def next_message(*, feedback: str | None = None, session: Any = None, **kwargs: Any) -> Any:
+        if feedback == "read on":
+            return loop_turn(READ_ON_NUDGE, **{READ_ON_KEY: True})
         if feedback == "answer":
             return loop_turn(EMPTY_REPLY_NUDGE, **{ANSWER_NOW_KEY: True})
         if feedback == "plan":

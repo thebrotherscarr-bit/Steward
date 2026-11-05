@@ -6516,3 +6516,39 @@ def test_a_file_tool_write_of_memory_md_at_the_root_is_refused_with_write_memory
     assert results == [steward.MEMORY_INDEX_REFUSAL.format(file_name="MEMORY.md")], results
     assert steward.writes_memory_index("./MEMORY.md") and not steward.writes_memory_index("docs/MEMORY.md")
     assert not steward.writes_memory_index("README.md")
+
+
+def test_an_empty_reply_while_exploring_is_asked_once_to_go_on_reading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bar at 1b56963 (2026-11-05 07:55Z, the steps set): EXPLORE listed two folders, its next reply came back
+    empty, its reading ended, and the run ended with no plan. EXPLORE's session reads first (READS_FIRST_KEY): an empty
+    reply there is asked once, tools on, to go on reading (READ_ON_NUDGE), and the plan follows; a second empty reply
+    is not asked again."""
+    import steward_workflow as wf
+
+    index = steward.CodeIndex(code_repo(tmp_path), WordEmbeddings())
+    monkeypatch.setattr(steward, "code_index", lambda: index)
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix order_total in inventory.py"]}'
+    listed = Content.from_function_call(call_id="l1", name="file_access_ls", arguments={"directory": "harness/steward/working/sample-project"})
+    read = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": INVENTORY})
+
+    def run(replies: list[Any]) -> tuple[ScriptedChatClient, list[str]]:
+        client = ScriptedChatClient(replies, plans=[plan])
+
+        async def _go() -> list[str]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+            return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+        return client, asyncio.run(_go())
+
+    def nudged(client: ScriptedChatClient) -> int:
+        return sum(1 for c in client.calls if any(steward.READ_ON_NUDGE == (m.text or "") for m in c["messages"][-1:]))
+
+    client, cards = run([listed, "", read, "inventory.py's order_total uses the percent as a fraction."])
+    assert cards == [wf.APPROVE_PLAN]
+    assert nudged(client) == 1, "the empty reply was asked to go on reading"
+    assert any("order_total" in r for c in client.calls for r in function_results(c)), "and the reading went on"
+    client, cards = run([listed, "", ""])
+    assert nudged(client) == 1, "asked once, not in a loop"
