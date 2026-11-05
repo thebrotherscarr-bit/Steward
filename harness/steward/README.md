@@ -15,7 +15,7 @@ of the guide's finance assistant. Everything runs on local Ollama and reuses the
 From the repo root:
 
 ```
-copy .env.example .env      # OLLAMA_MODEL=gpt-oss:20b by default
+copy .env.example .env      # OLLAMA_MODEL=steward:1 by default (ADR-0002)
 ```
 
 `STEWARD_WORKSPACE` (optional, in `.env`) points Steward at a real repo. It defaults to this
@@ -160,6 +160,9 @@ CodeExplorer succeeded 2 times out of 4. The failures were malformed `todos_add`
 trying to call the background tools from inside the CodeAct sandbox. A larger local model such as
 `qwen3-coder:30b` (set `OLLAMA_MODEL` in `.env`) may do better.
 
+_2026-11-05: superseded by [ADR-0002](../../docs/decisions/0002-one-model-for-everything.md): one model, `steward:1`,
+does everything; another model returns only on eval evidence._
+
 ## Where it stands
 
 The version is in `pyproject.toml`; what each version holds is in `CHANGELOG.md` at the repo root.
@@ -179,7 +182,8 @@ The order agreed for the workflow:
 
 After those, in order: safety (FIDES, Agent Hooks), long runs (summarising compaction, the loop's
 progress log, `think` per step), visibility (the workflow in DevUI, `WorkflowViz`, progress events),
-and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain). Ruled 2026-11-02:
+and hosting (AG-UI for the whole workflow with cards, planned with SecondBrain; _2026-11-05: built, and the default
+transport, [ADR-0003](../../docs/decisions/0003-ag-ui-is-the-default-transport.md)_). Ruled 2026-11-02:
 web search and web fetch go only through SecondBrain's route, the one Steward already uses (no Ollama
 web search); Steward's embedding model is `embeddinggemma-2:270m` (303 MB, 8K context, MTEB code
 78.68), for semantic code search and memory, on the CPU beside the chat model on the GPU (Ollama's
