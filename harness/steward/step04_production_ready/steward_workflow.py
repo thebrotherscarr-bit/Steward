@@ -101,7 +101,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
-from agent import ESTATE_READS, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import ESTATE_READS, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +299,11 @@ def execute_message(request: str, plan: str, steps: list[str]) -> Message:
         f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. Do not commit: "
         "the checks run when you finish, and once they pass you will be asked to commit."
     )
-    return Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: list(steps)})
+    # REQUEST_KEY: his request hints match the request alone, never the plan's wording (agent.asked_request).
+    return Message(
+        role="user", contents=[Content.from_text(text)],
+        additional_properties={APPROVED_PLAN_KEY: list(steps), REQUEST_KEY: request},
+    )
 
 
 def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProvider) -> Callable[..., Awaitable[None]]:
@@ -831,7 +835,10 @@ class Repair(Executor):
             f"The checks failed after attempt {report.attempt} of {MAX_ATTEMPTS}. Fix the cause, then stop and say "
             f"what you changed.\n\nCheck output:\n{report.output}"
         )
-        message = Message(role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [REPAIR_TODO]})
+        # REQUEST_KEY "": the check output is no new request, so the work's own hints stay (agent.asked_request).
+        message = Message(
+            role="user", contents=[Content.from_text(text)], additional_properties={APPROVED_PLAN_KEY: [REPAIR_TODO], REQUEST_KEY: ""}
+        )
         await ctx.add_event(StewardProgress(f"repair attempt {report.attempt + 1}/{MAX_ATTEMPTS}", executor_id=self.id))
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
 

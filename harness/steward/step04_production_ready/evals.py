@@ -296,6 +296,40 @@ def discount_bug_planted() -> Any:
         module.write_bytes(original)
 
 
+# The README's own how-to, from its "Run the tests:" line through the code fence closing the command (c17cd62).
+README_RUN_TESTS = ("Run the tests:", "python -m unittest -v")
+
+
+@contextmanager
+def readme_run_tests_removed() -> Any:
+    """The README's how-to-run-the-tests lines taken out of the working copy for the README ask, put back after it.
+
+    Bar run B (2026-11-04 22:09Z, head 06657a1): the committed README already says "Run the tests:" and "python -m
+    unittest -v" (since c17cd62), so "Add one line ... that says how to run its tests" asked for what was there, and he
+    rightly asked instead of planning. Like discount_bug_planted, the ask's precondition is made in the working copy
+    only: the block goes (the blank line before it too), its line endings kept, and the committed file never changes.
+    """
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    readme = _WORKING_DIR / SAMPLE_PROJECT / "README.md"
+    original = readme.read_bytes()
+    lines = original.decode("utf-8").splitlines(keepends=True)
+    start = next((n for n, line in enumerate(lines) if line.strip() == README_RUN_TESTS[0]), None)
+    command = next((n for n, line in enumerate(lines) if line.strip() == README_RUN_TESTS[1]), None)
+    if start is None or command is None or command < start:
+        raise RuntimeError(f"{readme} no longer holds its run-the-tests lines; update readme_run_tests_removed.")
+    end = command + 1
+    if end < len(lines) and lines[end].strip().startswith("```"):
+        end += 1  # the fence closing the command
+    while start > 0 and not lines[start - 1].strip():
+        start -= 1  # the blank lines before the block
+    readme.write_bytes("".join(lines[:start] + lines[end:]).encode("utf-8"))
+    try:
+        yield
+    finally:
+        readme.write_bytes(original)
+
+
 def exit_code(results: Iterable[EvalResults]) -> int:
     """A set's exit code: 0 when every result passed, 1 when any case failed or errored, or nothing was scored (MAF's
     EvalResults.all_passed, agent_framework/_evaluation.py:457, the check its raise_for_status makes for CI)."""
@@ -797,13 +831,14 @@ def commit_message_specific(query: str, conversation: list[Any]) -> dict[str, ob
 def no_nudge_in_reply(query: str, conversation: list[Any]) -> dict[str, object]:
     """Failure 6, the loop's nudge in his reply: no assistant text repeats a harness message meant for him."""
     import steward_workflow as wf  # noqa: PLC0415
-    from agent import PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN  # noqa: PLC0415
+    from agent import PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN, TOOLS_OFF_ANSWER_NOW  # noqa: PLC0415
 
     if skip := _not_this_case("no_nudge_in_reply", query):
         return skip
     said = _assistant_text(conversation)
     harness_texts = [
-        PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN, wf.PLAN_IS_APPROVAL, wf.PLAN_AGAIN, wf.COMMIT_NOW,
+        PLAN_REPLY_NUDGE, PLAN_TODOS_NUDGE, REQUIRED_TOOLS_NUDGE, TODOS_ALREADY_SHOWN, TOOLS_OFF_ANSWER_NOW,
+        wf.PLAN_IS_APPROVAL, wf.PLAN_AGAIN, wf.COMMIT_NOW,
         "open todo item(s) that must be addressed before you can finish",  # MAF's todos_remaining_message
     ]
     echoed = [text[:60] for text in harness_texts if text.split("{")[0][:60] in said]
@@ -977,9 +1012,11 @@ async def run_small_asks(
 
     try:
         for query in asks:
-            # Only the discount ask has the bug planted: in the others a failing test would send the run to repair.
+            # Only the discount ask has the bug planted: in the others a failing test would send the run to repair. Only
+            # the README ask has its how-to taken out: otherwise it asks for a line the README already has.
+            fixture = {SMALL_ASK_DISCOUNT: discount_bug_planted, SMALL_ASK_README: readme_run_tests_removed}.get(query)
             with (around or contextlib.nullcontext)(query), contextlib.ExitStack() as fixtures:
-                if query == SMALL_ASK_DISCOUNT and not fixture_entered(fixtures, query, discount_bug_planted):
+                if fixture is not None and not fixture_entered(fixtures, query, fixture):
                     responses.append(AgentResponse(messages=[]))  # the case fails with the fixture's reason; the set goes on
                     SMALL_ASK_FILES[query] = {}
                     continue

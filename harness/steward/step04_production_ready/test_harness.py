@@ -5100,3 +5100,113 @@ def test_fides_enforce_refuses_an_untrusted_write_and_leaves_a_trusted_one(monke
 
     written, _, records = run(read_first=False)
     assert written and not records, "on: a write in a trusted context runs"
+
+
+def test_the_readme_ask_runs_with_the_readmes_how_to_taken_out_and_put_back_after(monkeypatch: Any) -> None:
+    """Bar run B (2026-11-04 22:09Z): the committed README already says how to run its tests (c17cd62), so the README ask
+    asked for what was there and he rightly made no plan. Its run sees the README without the how-to (the working copy
+    only, line endings kept); the other asks see it as committed, and it is put back after."""
+    import evals
+    from agent import _WORKING_DIR
+    from agent_framework import AgentResponse
+
+    readme = _WORKING_DIR / evals.SAMPLE_PROJECT / "README.md"
+    seen: dict[str, bytes] = {}
+
+    async def one_run(query: str, approve: set[str], **build: Any) -> Any:
+        seen[query] = readme.read_bytes()
+        return None, AgentResponse(messages=[])
+
+    monkeypatch.setattr(evals, "run_steward", one_run)
+    monkeypatch.setattr(evals, "SMALL_ASK_RESULT_CHECKS", {})
+    committed = readme.read_bytes()
+    assert b"python -m unittest -v" in committed, "the committed README holds its how-to"
+    asyncio.run(evals.run_small_asks([evals.SMALL_ASK_README, evals.SMALL_ASK_NEW_CODE]))
+    during = seen[evals.SMALL_ASK_README]
+    assert b"Run the tests:" not in during and b"unittest" not in during and b"```" not in during, during
+    assert b"# sample-project" in during and b"treats it as a fraction" in during, "the rest of the README stays"
+    assert during.endswith(b"fraction).\r\n" if b"\r\n" in committed else b"fraction).\n"), during[-40:]
+    assert (b"\r\n" in during) == (b"\r\n" in committed) and (b"\n" in during.replace(b"\r\n", b"")) == (
+        b"\n" in committed.replace(b"\r\n", b"")
+    ), "line endings kept"
+    assert seen[evals.SMALL_ASK_NEW_CODE] == committed, "only the README ask has it taken out"
+    assert readme.read_bytes() == committed, "put back after"
+    assert not evals.CASE_ERRORS.get(evals.SMALL_ASK_README), evals.CASE_ERRORS
+
+
+def test_when_the_tool_call_limit_trips_the_last_call_asks_for_his_answer_and_his_answer_is_the_reply() -> None:
+    """Bar run A (2026-11-04 22:05Z, item_count): MAF's limit tripped, its tools-off call got one more todos_complete, and
+    his reply was MAF's "Function invocation limit reached ..." text. That call now says the tools are off and asks for
+    the answer, so the reply is his, streamed or not; the line is that call's only, never in his transcript."""
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    class KeepsCalling(ScriptedChatClient):
+        """A model that calls mode_get until it is told its tools are off, then answers."""
+
+        def _inner_get_response(self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any) -> Any:
+            told = (messages[-1].text or "") == steward.TOOLS_OFF_ANSWER_NOW if messages else False
+            self.replies = ["Added item_count to inventory.py."] if told else [
+                Content.from_function_call(call_id=f"m{len(self.calls)}", name="mode_get", arguments={})
+            ]
+            return super()._inner_get_response(messages=messages, stream=stream, options=options, **kwargs)
+
+    def run(stream: bool) -> tuple[KeepsCalling, str, Any]:
+        async def _go() -> tuple[KeepsCalling, str, Any]:
+            client = KeepsCalling()
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                client.function_invocation_configuration["max_function_calls"] = 2
+                async with agent:
+                    session = agent.create_session()
+                    provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                    set_agent_mode(session, "execute", source_id=provider.source_id, available_modes=provider.available_modes)
+                    if stream:
+                        response = await agent.run("Add item_count.", session=session, stream=True).get_final_response()
+                    else:
+                        response = await agent.run("Add item_count.", session=session)
+            return client, response.text, response
+
+        return asyncio.run(_go())
+
+    for stream in (False, True):
+        client, text, response = run(stream)
+        assert "Function invocation limit reached" not in text and "Added item_count" in text, (stream, text)
+        last = client.calls[-1]
+        assert last["options"].get("tool_choice") == "none", "MAF's own tools-off call"
+        assert last["messages"][-1].text == steward.TOOLS_OFF_ANSWER_NOW
+        assert all(m.text != steward.TOOLS_OFF_ANSWER_NOW for call in client.calls[:-1] for m in call["messages"]), "that call only"
+        assert all(m.text != steward.TOOLS_OFF_ANSWER_NOW for m in response.messages), "not in his transcript"
+
+
+def test_an_approved_plans_wording_never_matches_a_request_hint_only_the_request_does() -> None:
+    """Bar run A (2026-11-04 22:05Z, the discount ask): the execute turn's plan said "divide the discount percent by 100",
+    the number hint matched "percent", he counted the harness folder's lines in CodeAct and answered "**42**". The hints
+    now match the request the turn names (execute_message's REQUEST_KEY), never the plan's text."""
+    import evals
+    import steward_workflow as wf
+    from agent_framework import AgentModeProvider, set_agent_mode
+
+    def hints_for(message: Message) -> str:
+        async def _go() -> str:
+            client = ScriptedChatClient(["ok"])
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    session = agent.create_session()
+                    provider = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
+                    set_agent_mode(session, "execute", source_id=provider.source_id, available_modes=provider.available_modes)
+                    await agent.run(message, session=session)
+            text = str(client.calls[0]["options"].get("instructions") or "")
+            return text.split("## For this request", 1)[1] if "## For this request" in text else ""
+
+        return asyncio.run(_go())
+
+    plan = "Modify inventory.py to divide the discount percent by 100 when computing the total."
+    discount = wf.execute_message(evals.SMALL_ASK_DISCOUNT, plan, ["Use discount_percent / 100 in order_total."])
+    assert "percent by 100" in discount.text, "the plan's wording is on the turn"
+    assert "execute_code" not in hints_for(discount), "the plan's 'percent' is not the request"
+    share = wf.execute_message(STEWARD_SHARE_ASK, "Count the lines.", ["Count each file's lines."])
+    assert "execute_code" in hints_for(share), "a request that asks for a number still gets its hint"
+
+
+STEWARD_SHARE_ASK = "What percentage of harness/steward/working/sample-project's lines are tests?"
