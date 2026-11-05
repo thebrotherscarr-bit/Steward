@@ -8,6 +8,7 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 |---|---|---|---|
 | `t0-small.yaml` | T0, regression (frozen) | small | `evals.py small [--gate]` |
 | `t0-steps.yaml` | T0, regression (frozen) | steps | `evals.py steps` |
+| `t0-direct.yaml` | T0, regression | direct | `evals.py direct` |
 | `t1-heldout.yaml` | T1, held out | heldout | `evals.py heldout` |
 | `ext-bfcl.yaml` | ext, calibration (outside, pinned) | bfcl | `evals.py bfcl` |
 | `ext-aider-py.yaml` | ext, calibration (outside, pinned) | aider-py | `evals.py aider-py` |
@@ -106,6 +107,25 @@ the whole set runs N times, each pass scored and recorded on its own. A gating t
    version. Keep the old version's entry: history lines carry `set_version`, so runs compare like with like.
 4. A new tier is a new file (`t2-<name>.yaml`); earlier tiers stay as regression gates.
 5. Open a pull request; it lands when its checks pass.
+
+## T0 direct: the plan phase alone (the plans runner)
+
+`t0-direct.yaml` holds direct asks, where a request names one of his tools and its arguments. They are scored on the
+plan card alone. Its one case (v1) is the operator's ask from session-20261105-1110-535a, word for word: "Run the bfcl
+eval set once with eval_start, tag ext-bfcl-first. Tell me when it has started." That ask reached its card after 18
+EXPLORE calls in 15 minutes. The runner `plans` runs each case once through the workflow, in an eval's build (which
+offers no `eval_start`), up to its plan card. Every card is denied, so nothing runs after it. `plan_reached_directly`
+scores the card with no model:
+
+- the card came within the case's `max_calls` tool calls (2);
+- none of those calls was `search_code` or a `file_access_*` read;
+- the plan's summary and steps name each `subject` term (`eval_start`, `bfcl`).
+
+A plans case is `{id, ask, subject, max_calls, checks}`. It has no fixture, plant or RESULT check: nothing on disk
+changes, and its plan card is its result. Validate checks its shape and its fingerprint like any other set. The test
+`test_a_direct_ask_reaches_its_plan_card_with_no_code_reading` runs this case on a scripted client in the gate. A model
+run is one case, about a minute:
+`powershell -File harness/steward/evals/run-bar.ps1 -Sets direct -Tag direct-first -Runs 1`.
 
 ## T1, held out
 

@@ -141,6 +141,9 @@ sequenceDiagram
 - A No on any card ends the run.
 - Starting an eval in chat (`secondbrain_eval_start`) is an action like any other: it goes on the plan, and after
   the plan is approved it raises its own card ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
+- A direct ask names one of his Estate actions by its tool name ("Run the bfcl eval set with eval_start, tag X"). It
+  goes straight to the plan: its reading is offered only the Estate's reads, with no code search and no file read, and
+  the plan and card follow as above. The T0 `direct` eval set checks it.
 
 ### A flow and an automation
 

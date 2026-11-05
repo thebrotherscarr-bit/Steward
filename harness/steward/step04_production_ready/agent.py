@@ -725,6 +725,22 @@ def code_index() -> CodeIndex:
     return _CODE_INDEXES[_WORKING_DIR]
 
 
+async def warm_code_index() -> list[str]:
+    """Bring the process's code index up to date now (CodeIndex.refresh), so his first search_code does not: the host
+    starts it in the background when it starts (ag_ui_app.py). session-20261105-1110-535a: the first search after a
+    restart read 180 files and embedded 249 chunks on the CPU, 85.7 s inside the operator's request. Off with
+    STEWARD_CODE_SEARCH; a failure is a warning only, and the first search builds it as before. Returns the paths read."""
+    if not code_search_on():
+        return []
+    try:
+        read = await code_index().refresh()
+    except Exception as exc:  # noqa: BLE001 - a warm-up that fails leaves the first search to build the index
+        logger.warning("Code search not warmed at start (%s): the first search builds the index.", exc)
+        return []
+    logger.info("Code search warmed at start: %d file(s) read.", len(read))
+    return read
+
+
 def _code_hit(result: Any) -> str:
     chunk = result["record"]
     return f"{chunk.path}:{chunk.start_line}-{chunk.end_line}\n{chunk.text}"
@@ -1146,6 +1162,31 @@ def unmet_requirements(session: Any) -> list[list[str]]:
     return [pair for pair in session.state.get(HINTS_KEY) or [] if any(tool not in called for tool in pair[1])]
 
 
+# The direct ask (2026-11-05, session-20261105-1110-535a): "Run the bfcl eval set once with eval_start, tag
+# ext-bfcl-first." took 15 minutes before his plan card. The evals hint above matched "eval set" and sent him to the
+# evals skill and run_shell, and EXPLORE then made 18 model calls (load_skill, 13 search_code, 2 file_access_read,
+# read_skill_resource, load_skill, estate_status, eval_status twice) for a plan that was one call. A request that names
+# one of his Estate actions (ESTATE_ACTIONS, ESTATE_ASKS) by its tool name already says the work: the cookbook's
+# "Task-specific guidance injected only when it is needed", as REQUEST_HINTS does, and fewer tools for the step
+# (steward_workflow.offered_in_step: EXPLORE is offered only the Estate's reads). It replaces the pattern hints for that
+# request, so no hint sends him to another tool. The plan and its card stay (ADR-0009: an eval in chat is planned).
+DIRECT_ACTIONS = (*ESTATE_ACTIONS, *ESTATE_ASKS)
+_DIRECT_ACTION = re.compile(r"(?<![\w-])(?:secondbrain_)?(" + "|".join(DIRECT_ACTIONS) + r")(?![\w-])")
+# His session's direct action for the request (its secondbrain_ tool name, or None), read by step_tools_turn.
+DIRECT_ACTION_KEY = "steward_direct_action"
+DIRECT_ASK_HINT = (
+    "This request names your tool {tool} and gives what it needs: that call is the work. Do not search code, read "
+    "files or load a skill to find out how. At most one read first ({reads}); in plan mode, plan the call with the "
+    "request's arguments as your step; once approved, make it. If an argument it needs is missing, ask for it."
+)
+
+
+def directly_named_action(request: str) -> str | None:
+    """The Estate action (its secondbrain_ tool name) the request names by its tool name, or None."""
+    found = _DIRECT_ACTION.search(request or "")
+    return f"secondbrain_{found.group(1)}" if found else None
+
+
 class RequestHints(ContextProvider):
     """The fast path: task-specific guidance for each REQUEST_HINTS pattern the request matches, kept for its work."""
 
@@ -1154,7 +1195,15 @@ class RequestHints(ContextProvider):
 
     async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
         asked = asked_request(context.input_messages or [])
-        matched =[[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
+        if session is not None and asked.strip():
+            # A turn that asks nothing new (a loop nudge, a repair's "") keeps the request's direct action.
+            session.state[DIRECT_ACTION_KEY] = directly_named_action(asked)
+        direct = session.state.get(DIRECT_ACTION_KEY) if session is not None else directly_named_action(asked)
+        if direct:
+            reads = " or ".join(f"secondbrain_{name}" for name in ESTATE_READS)
+            matched = [[DIRECT_ASK_HINT.format(tool=direct, reads=reads), []]]
+        else:
+            matched = [[hint, list(tools)] for pattern, hint, tools in REQUEST_HINTS if pattern.search(asked)]
         # The paths the request names, kept for its work (refuse_a_bare_name_the_request_put_in_a_folder); a turn that
         # names none (a loop nudge, a repair's "") keeps the request's.
         if session is not None and (paths := named_paths(asked)):
@@ -1188,13 +1237,18 @@ async def record_called_tools(context: FunctionInvocationContext, call_next: Cal
 # writes it piece by piece and mangles an odd word. The harness absorbs it: before MAF looks a call up, a name
 # that is not one of the tools offered but is a clear near match to exactly one of them (score >= 0.8, and 0.1
 # ahead of the next) is repaired. Anything unclear is left as it is, so MAF still answers "not found".
+# A name that is one of his tools the call's step left out (steward_workflow.step_tools_turn keeps them in the
+# session's LEFT_OUT_KEY; MAF does not run the chat middleware in one context, so a ContextVar set there is not seen) is
+# no misspelling and is never repaired: session-20261105-1110-535a, EXPLORE (which offers no write) called
+# secondbrain_eval_start, it was "repaired" to secondbrain_eval_status with eval_start's arguments, and failed twice.
 _NAME_CUTOFF = 0.8
 _NAME_MARGIN = 0.1
+LEFT_OUT_KEY = "steward_left_out_of_step"
 
 
-def repaired_tool_name(name: str, offered: set[str]) -> str | None:
-    """The one offered tool a misspelled name clearly means, or None."""
-    if not name or name in offered:
+def repaired_tool_name(name: str, offered: set[str], left_out: frozenset[str] = frozenset()) -> str | None:
+    """The one offered tool a misspelled name clearly means, or None (always None for a tool the step left out)."""
+    if not name or name in offered or name in left_out:
         return None
     scored = sorted(((difflib.SequenceMatcher(None, name, o).ratio(), o) for o in offered), reverse=True)
     if not scored or scored[0][0] < _NAME_CUTOFF:
@@ -1204,15 +1258,17 @@ def repaired_tool_name(name: str, offered: set[str]) -> str | None:
     return scored[0][1]
 
 
-def _repair_names(contents: Any, offered: set[str]) -> None:
+def _repair_names(contents: Any, offered: set[str], left_out: frozenset[str] = frozenset()) -> None:
     """Repair, in place, each function_call in contents whose name clearly means one offered tool."""
     for c in contents or []:
-        if c.type == "function_call" and (right := repaired_tool_name(c.name, offered)):
+        if c.type == "function_call" and (right := repaired_tool_name(c.name, offered, left_out)):
             logger.info("Tool name repaired: %s -> %s", c.name, right)
             c.name = right
 
 
-def names_repaired_as_they_pass(inner: ResponseStream[Any, Any], offered: set[str]) -> ResponseStream[Any, Any]:
+def names_repaired_as_they_pass(
+    inner: ResponseStream[Any, Any], offered: set[str], left_out: frozenset[str] = frozenset()
+) -> ResponseStream[Any, Any]:
     """The model's stream with each function_call's name repaired as its update passes; nothing is held back.
 
     Read inside a new ResponseStream, as held_back_when_it_could_be_a_call reads it and MAF's MessageInjectionMiddleware
@@ -1225,11 +1281,11 @@ def names_repaired_as_they_pass(inner: ResponseStream[Any, Any], offered: set[st
 
     async def repaired() -> Any:
         async for update in inner:
-            _repair_names(update.contents, offered)
+            _repair_names(update.contents, offered, left_out)
             yield update
         final = await inner.get_final_response()
         for message in final.messages:
-            _repair_names(message.contents, offered)
+            _repair_names(message.contents, offered, left_out)
         finals.append(final)
 
     return ResponseStream(repaired(), finalizer=lambda updates: finals[-1])
@@ -1238,14 +1294,16 @@ def names_repaired_as_they_pass(inner: ResponseStream[Any, Any], offered: set[st
 async def repair_tool_names(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
     """Chat middleware: repair clearly misspelled tool names in the model's reply, streamed or not."""
     offered = {n for n in (getattr(t, "name", None) for t in (context.options or {}).get("tools") or []) if n}
+    session = context.session
+    left_out = frozenset((session.state.get(LEFT_OUT_KEY) or []) if session is not None else [])
     await call_next()
     if isinstance(context.result, ResponseStream):
         # On the stream itself, as recover_text_tool_calls does: the context's stream_* lists are applied before
         # MAF's MessageInjectionMiddleware reads the rest of the chain (_middleware.py:1669, _sessions.py:1581).
-        context.result = names_repaired_as_they_pass(context.result, offered)
+        context.result = names_repaired_as_they_pass(context.result, offered, left_out)
     elif context.result is not None:
         for message in context.result.messages:
-            _repair_names(message.contents, offered)
+            _repair_names(message.contents, offered, left_out)
 
 
 # Live 2026-11-03 (the diagnosis traces): gpt-oss sometimes ends a turn with a tool call's arguments written as its

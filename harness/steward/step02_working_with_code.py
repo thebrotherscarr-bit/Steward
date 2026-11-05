@@ -170,7 +170,7 @@ async def _maybe_enable_local_memory() -> Any:
         host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         _MEMORY_DIR.mkdir(exist_ok=True)
         memory = AsyncMemory.from_config({
-            "llm": {"provider": "ollama", "config": {"model": os.environ.get("OLLAMA_MODEL", "gpt-oss:20b"), "ollama_base_url": host}},
+            "llm": {"provider": "ollama", "config": {"model": os.environ.get("OLLAMA_MODEL", "steward:1"), "ollama_base_url": host}},
             "embedder": {"provider": "ollama", "config": {"model": "nomic-embed-text-v2-moe", "ollama_base_url": host, "embedding_dims": 768}},
             "vector_store": {"provider": "qdrant", "config": {"path": str(_MEMORY_DIR / "qdrant"), "collection_name": "steward", "embedding_model_dims": 768, "on_disk": True}},
             "history_db_path": str(_MEMORY_DIR / "history.db"),

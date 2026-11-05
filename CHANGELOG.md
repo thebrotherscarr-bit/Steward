@@ -15,6 +15,18 @@ was never merged and has no entry.
 
 ### Added
 
+- The direct ask: a request that names one of his Estate actions by its tool name (`eval_start`, `service_control`,
+  `ollama_unload`, `app_update`) goes straight to its plan. Its plan reading (EXPLORE) is offered only the Estate's
+  reads and told that the call is the work, and this replaces the pattern hints that had sent "Run the bfcl eval set
+  once with eval_start" to the evals skill and `run_shell`. Such a request is always routed to the plan, and the plan
+  and its card stay (ADR-0009). His name repair never turns a call to one of his tools that the step left out into
+  another tool's call: live, `secondbrain_eval_start` had become `secondbrain_eval_status` and failed twice. The AG-UI
+  host also warms his code index as it starts, not inside the first search. The new eval set is T0 `direct`
+  (`t0-direct.yaml` v1) on a new `plans` runner, which runs a case to its plan card, denies every card and scores it
+  with `plan_reached_directly`. ADR-0002: step 2's mem0 model and the improvement loop default to `steward:1`.
+  Session-20261105-1110-535a took 15 minutes and 18 model calls before its card: 13 `search_code`, a first search that
+  rebuilt the index (85.7 s), and four 43K-token turns of about 84 s each after a whole-file read.
+
 - The Estate's design docs: `docs/ARCHITECTURE.md` (the parts, the wires with their ports and protocols, the data
   each keeps, how a request, an automation and an eval flow, the rules and the build plan) and `docs/decisions/`, the
   decision records in MAF's own format (MAF's `adr-template.md` and `adr-short-template.md`, copied unchanged), with

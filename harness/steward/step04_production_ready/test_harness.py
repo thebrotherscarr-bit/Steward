@@ -5695,6 +5695,170 @@ def test_each_workflow_step_is_offered_only_its_own_tools() -> None:
     assert wf.offered_in_step("git_commit", None) and wf.offered_in_step("mode_set", None)
 
 
+def _eval_tools() -> tuple[Any, Any]:
+    """SecondBrain's eval_status and eval_start as the Estate serves them to him (the read never asks, the action
+    always does); the tests have no SecondBrain. eval_start must never run here."""
+    from agent_framework import tool
+
+    @tool(name="secondbrain_eval_status", approval_mode="never_require")
+    def eval_status(run_id: str = "") -> str:
+        """An eval run's progress."""
+        return "No eval is running."
+
+    @tool(name="secondbrain_eval_start", approval_mode="always_require")
+    def eval_start(set: str, tag: str = "") -> str:  # noqa: A002 - SecondBrain's own argument name
+        """Start one eval set."""
+        raise AssertionError("an eval never starts in a test")
+
+    return eval_status, eval_start
+
+
+def test_a_direct_ask_reaches_its_plan_card_with_no_code_reading() -> None:
+    """session-20261105-1110-535a: "Run the bfcl eval set once with eval_start, tag ext-bfcl-first." reached its plan
+    card after 18 EXPLORE calls in 15 minutes: the evals hint sent him to the evals skill and run_shell, EXPLORE was
+    offered the code search and the file reads, and his call to secondbrain_eval_start (left out of EXPLORE) was
+    "repaired" to secondbrain_eval_status with eval_start's arguments. The T0 direct case (t0-direct.yaml, the plans
+    runner) on a scripted client: EXPLORE is offered only the Estate's reads and told that the call is the work, the
+    left-out call keeps its name (not found, never another tool), and the case passes within its 2 calls. Every card is
+    denied, so nothing runs after the plan."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    eval_status, eval_start = _eval_tools()
+    eval_set = evals.EVAL_SETS["direct"]
+    [case] = eval_set.cases
+    plan = json.dumps({
+        "type": "approval", "questions": [{"message": "Start the bfcl set with eval_start, tag ext-bfcl-first."}],
+        "steps": ["Call secondbrain_eval_start with set bfcl and tag ext-bfcl-first"],
+    })
+    start = Content.from_function_call(call_id="s1", name="secondbrain_eval_start", arguments={"set": "bfcl", "tag": "ext-bfcl-first"})
+    status = Content.from_function_call(call_id="s2", name="secondbrain_eval_status", arguments={})
+    client = ScriptedChatClient([start, status, "Nothing is running; I will plan it."], plans=[plan])
+    code = asyncio.run(evals.plans_main(eval_set, client=client, enable_shell=False, extra_tools=(eval_status, eval_start)))
+
+    assert len(client.calls) == 3 and len(client.plan_calls) == 1, (len(client.calls), len(client.plan_calls))
+    for call in client.calls:
+        assert offered_tools(call) <= wf.DIRECT_ASK_TOOLS, sorted(offered_tools(call) - wf.DIRECT_ASK_TOOLS)
+    assert "secondbrain_eval_status" in offered_tools(client.calls[0])
+    hints = str(client.calls[0]["options"].get("instructions") or "").split("## For this request", 1)[-1]
+    assert "names your tool secondbrain_eval_start" in hints, hints[:400]
+    assert 'load_skill("evals")' not in hints and "run_shell" not in hints, "no hint sends him to another tool"
+    assert function_results(client.calls[1]) == ['Error: Requested function "secondbrain_eval_start" not found.'], (
+        "his left-out tool is never repaired into another"
+    )
+    assert function_results(client.calls[2])[-1] == "No eval is running."
+    assert code == 0, "the T0 direct case passes"
+    [line] = evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()
+    run = json.loads(line)
+    assert (run["set"], run["set_version"], run["passed"], run["total"]) == ("direct", 1, 1, 1), run
+    assert case.max_calls == 2 and set(case.subject) == {"eval_start", "bfcl"}
+
+    # A direct ask is planned whatever its first word (ADR-0009: an Estate action in chat is planned and carded).
+    client = ScriptedChatClient(["I will plan it."], routes=['{"kind": "answer"}'], plans=[plan])
+
+    async def _routed() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=(eval_status, eval_start))
+            async with agent:
+                events = [e async for e in wf.build_steward_workflow(agent).run("Use eval_start for the bfcl set, tag x.", stream=True)]
+                return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+    assert asyncio.run(_routed()) == [wf.APPROVE_PLAN], "routed to the plan, not answered"
+    assert steward.directly_named_action("Use secondbrain_service_control to restart it.") == "secondbrain_service_control"
+    assert steward.directly_named_action("Read it with eval_status.") is None, "a read is no action"
+    assert steward.directly_named_action("Run the evals skill.") is None, "only a tool's own name"
+
+
+def test_plan_reached_directly_fails_a_plan_card_reached_by_reading_code() -> None:
+    """The T0 direct case's check (evals.plan_reached_directly), with no model: the plan card must come within the
+    case's max_calls tool calls, none a code search or a file read, and the plan must name its subject terms."""
+    import evals
+    import steward_workflow as wf
+
+    [case] = evals.EVAL_SETS["direct"].cases
+
+    def run(*names: str, steps: tuple[str, ...] = ("Call secondbrain_eval_start with set bfcl",), card: bool = True) -> Any:
+        conversation = [
+            Message(role="assistant", contents=[Content.from_function_call(call_id=f"c{n}", name=name, arguments={})])
+            for n, name in enumerate(names)
+        ]
+        if card:
+            call = Content.from_function_call(
+                call_id="p1", name=wf.APPROVE_PLAN, arguments={"request": case.ask, "plan": "Start it.", "steps": list(steps)}
+            )
+            conversation.append(Message(role="assistant", contents=[Content.from_function_approval_request(id="p1", function_call=call)]))
+        return scored(evals.plan_reached_directly, case.ask, conversation)
+
+    assert run("secondbrain_eval_status").passed is True
+    assert run().passed is True, "no call at all"
+    assert "Read code" in run("search_code").reason
+    assert "Read code" in run("file_access_read").reason
+    assert run("load_skill", "secondbrain_eval_status", "secondbrain_estate_status").passed is False, "over 2 calls"
+    assert run("secondbrain_eval_status", card=False).passed is False, "no plan card"
+    assert run(steps=("Run the set with run_shell",)).passed is False, "the plan names neither eval_start nor bfcl"
+    assert scored(evals.plan_reached_directly, "Something else.", []).reason == "Not this case."
+
+
+def test_the_ag_ui_host_warms_the_code_index_as_it_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """session-20261105-1110-535a: the first search_code after a restart read 180 files and embedded 249 chunks, 85.7 s
+    inside the operator's request. The AG-UI host's main starts agent.warm_code_index as the app starts (its lifespan);
+    a test's app (warm off) never does. warm_code_index refreshes the process's index, is off with
+    STEWARD_CODE_SEARCH=off, and a failure is a warning only."""
+    import time
+    from types import SimpleNamespace
+
+    import ag_ui_app
+    from starlette.testclient import TestClient
+
+    warmed: list[str] = []
+    real_warm = steward.warm_code_index
+
+    async def warm() -> list[str]:
+        warmed.append("warm")
+        return []
+
+    monkeypatch.setattr(steward, "warm_code_index", warm)
+    with TestClient(ag_ui_app.build_ag_ui_app(enable_shell=False)):
+        pass
+    assert warmed == [], "a test's app does not warm"
+    with TestClient(ag_ui_app.build_ag_ui_app(warm=True, enable_shell=False)):
+        for _ in range(100):
+            if warmed:
+                break
+            time.sleep(0.02)
+    assert warmed == ["warm"], "the host's app warms as it starts"
+    assert "build_ag_ui_app(warm=True)" in Path(ag_ui_app.__file__).read_text(encoding="utf-8"), "main() warms"
+    monkeypatch.setattr(steward, "warm_code_index", real_warm)
+
+    refreshed: list[str] = []
+
+    async def refresh() -> list[str]:
+        refreshed.append("refresh")
+        return ["harness/x.py"]
+
+    async def broken() -> list[str]:
+        raise OSError("Ollama is down")
+
+    monkeypatch.setattr(steward, "code_index", lambda: SimpleNamespace(refresh=refresh))
+    assert asyncio.run(steward.warm_code_index()) == ["harness/x.py"] and refreshed == ["refresh"]
+    monkeypatch.setenv("STEWARD_CODE_SEARCH", "off")
+    assert asyncio.run(steward.warm_code_index()) == [] and refreshed == ["refresh"], "off: not refreshed"
+    monkeypatch.delenv("STEWARD_CODE_SEARCH")
+    monkeypatch.setattr(steward, "code_index", lambda: SimpleNamespace(refresh=broken))
+    assert asyncio.run(steward.warm_code_index()) == [], "a failure is a warning only"
+
+
+def test_eval_and_improvement_models_default_to_steward_1() -> None:
+    """ADR-0002, one model for everything: the guide's step 2 (its mem0 model) and the improvement loop default to
+    steward:1 when OLLAMA_MODEL is unset, never gpt-oss:20b."""
+    here = Path(__file__).resolve().parent
+    for path in (here.parent / "step02_working_with_code.py", here / "improvement_loop.py"):
+        text = path.read_text(encoding="utf-8")
+        assert 'os.environ.get("OLLAMA_MODEL", "steward:1")' in text and '"gpt-oss:20b")' not in text, path.name
+
+
 def test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run() -> None:
     """The bar at 98d54d5 (2026-11-05 01:47Z, the README ask): an approved plan's steps held "" lines, approved_plan_turn
     stored them as todos, and MAF's todo store refused a blank title on its next load, ending the run with ValueError.

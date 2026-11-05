@@ -76,7 +76,7 @@ def _ollama_base_url() -> str:
 
 # Every model is local Ollama (OpenAI-compatible at /v1). Edit these in one place, as in the notebook.
 OLLAMA_V1 = _ollama_base_url() + "/v1"
-AGENT_MODEL = os.environ.get("OLLAMA_MODEL", "gpt-oss:20b")
+AGENT_MODEL = os.environ.get("OLLAMA_MODEL", "steward:1")
 ANALYSIS_MODEL = os.environ.get("LOOP_ANALYSIS_MODEL", AGENT_MODEL)
 EVAL_GENERATION_MODEL = os.environ.get("LOOP_EVAL_GENERATION_MODEL", ANALYSIS_MODEL)
 JUDGE_MODEL = os.environ.get("LOOP_JUDGE_MODEL", ANALYSIS_MODEL)
