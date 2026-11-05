@@ -117,6 +117,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A plan object typed "approval" with a summary in place of questions is read as the approval in its own shape
+  (`plan_in_its_own_shape`), as one with no type already was; another type is still no plan. The steps set at 416ba41:
+  `{"type":"approval","summary":"Modify order_total ...","steps":[...]}` was no plan and was asked again. Test:
+  `test_an_approval_typed_plan_with_a_summary_in_place_of_questions_is_read_as_the_approval`.
 - An edit (`file_access_replace`, `file_access_replace_lines`) that would leave a .py file that parsed unparsable is
   refused, even once approved (`edit_breaks_python`, in `refuse_unicode_punctuation_in_code`): nothing is written, and
   the refusal names Python's error and shows the numbered lines around it as they would be. The steps set at 416ba41:

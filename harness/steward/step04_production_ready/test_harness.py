@@ -5706,7 +5706,7 @@ def test_a_plan_written_as_json_text_in_its_own_shape_gets_the_plan_card() -> No
         '{"summary": "s", "steps": [{"file": "a.py"}]}',
         '{"summary": "s", "steps": []}',
         '{"steps": ["Read it"]}',
-        '{"type": "approval", "summary": "s", "steps": ["Read it"]}',
+        '{"type": "clarification", "summary": "s", "steps": ["Read it"]}',  # type approval: read since 416ba41's steps set
         README_WRITE_AS_TEXT,
     ):
         assert wf.steward_plan_in(no_plan) is None, no_plan
@@ -6231,3 +6231,20 @@ def test_a_plan_call_answering_with_reads_sends_explore_to_make_them_once_then_p
 
     client, cards, outputs = run(["I listed the folder.", "Nothing more."], [read_call("p1"), read_call("p2")])
     assert cards == [] and len(client.plan_calls) == 2, "sent back once, not in a loop"
+
+
+def test_an_approval_typed_plan_with_a_summary_in_place_of_questions_is_read_as_the_approval() -> None:
+    """The steps set at 416ba41 (2026-11-05 05:32Z): PLAN answered '{"type":"approval","summary":...,"steps":[...]}',
+    StewardPlan's shape but for its summary in place of questions; plan_in_its_own_shape read only an object with no
+    "type", so it was no plan and was asked again. A "type" of "approval" is now read as the approval in its own shape;
+    another type, or no summary, is still no plan."""
+    import steward_workflow as wf
+
+    text = '{"type":"approval","summary":"Fix order_total in inventory.py.","steps":["Divide discount_percent by 100 in inventory.py","Run the tests"]}'
+    plan = wf.steward_plan_in(text)
+    assert plan is not None and plan.type.value == "approval", plan
+    assert plan.questions[0].message == "Fix order_total in inventory.py."
+    assert plan.steps == ["Divide discount_percent by 100 in inventory.py", "Run the tests"]
+    assert wf.steward_plan_in(text.replace('"approval"', '"clarification"')) is None, "another type is not an approval"
+    assert wf.steward_plan_in('{"type":"approval","steps":["Run the tests"]}') is None, "no summary, no plan"
+    assert wf.steward_plan_in('{"summary":"Fix it.","steps":["Fix it"]}') is not None, "no type, as before"
