@@ -22,8 +22,10 @@ their wires, their data and the build plan) and the decision records in [`docs/d
 Every architectural change gets a decision record before it is built.
 
 Steward himself, built step by step on MAF's "Build your own claw" guide, is in `harness/steward/`
-(see its README). His service, `harness/steward/step04_production_ready/hosted.py`, listens on
-127.0.0.1:43120 for SecondBrain's Agent tab; his MCP endpoint (`mcp_app.py`) is on 127.0.0.1:43121.
+(see its README). SecondBrain's Agent tab reaches him over AG-UI on 127.0.0.1:43122 by default
+(`harness/steward/step04_production_ready/ag_ui_app.py`), with his Responses service (`hosted.py`) on 127.0.0.1:43120
+as the fallback (2026-11-05, [ADR-0003](docs/decisions/0003-ag-ui-is-the-default-transport.md)); his MCP endpoint
+(`mcp_app.py`) is on 127.0.0.1:43121.
 
 ## Install on another PC (Windows)
 

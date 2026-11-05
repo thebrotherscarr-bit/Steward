@@ -28,7 +28,8 @@ answered on the same running host (a restart drops it; hosted.py keeps its check
 A turn whose forwardedProps carry ``{"steward_workflow": "improve"}`` runs the improvement loop, as hosted.py's
 request metadata does.
 
-Loopback only, unauthenticated, one user (``single_user=True``), off unless started. Jesster does not use it yet.
+Loopback only, unauthenticated, one user (``single_user=True``), off unless started. Since 2026-11-05 it is the
+default transport of Jesster's Agent tab, with hosted.py's Responses service (43120) the fallback (ADR-0003).
 
 Environment variables:
     OLLAMA_HOST, OLLAMA_MODEL, STEWARD_WORKSPACE, SECONDBRAIN_MCP_* - see agent.py

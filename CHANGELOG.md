@@ -180,6 +180,12 @@ was never merged and has no entry.
   part; `docs/ARCHITECTURE.md` (a flow and an automation, the card rule), AGENTS.md and the `bar-runner`,
   `automations` and `estate` skills follow it (no night-only rule). Restart required (Steward's hosts).
 
+- Stale text brought to ADR-0002 and ADR-0003 (findings C9, C10, C11 of the SecondBrain note
+  `findings-the-11-04-05-work-checked-again-2486a6`): the root README and `ag_ui_app.py`'s docstring say AG-UI on
+  43122 is the Agent tab's default and Responses on 43120 the fallback; `.env.example` and the harness README name
+  `OLLAMA_MODEL=steward:1`; the harness README's `qwen3-coder:30b` suggestion and "AG-UI planned" carry dated
+  pointers to ADR-0002 and ADR-0003.
+
 - Eval sets t1-heldout v2 and t0-small v2: `answer_on_topic` takes a wider subject per case (the cookbook: an
   answer-level check tests what matters). Heldout v1 run 2 (e94cb90) fixed `test_boiling_point` and failed only on a
   reply naming units.py and the corrected formula; each case now also takes the file changed (units.py,
