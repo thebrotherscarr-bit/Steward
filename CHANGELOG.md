@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The evals read a call MAF never ran (its own "Requested function ... not found" and "Argument parsing failed"
+  results, `NOT_RUN_RESULTS`) as "not run", not "ran". The steps set at f7b5120: EXPLORE called run_shell, which it is
+  not offered, nothing ran, and plan_step failed "Changed things while planning: ['run_shell']". Test:
+  `test_a_call_maf_never_ran_is_no_change_made_while_planning`.
 - A todos_complete whose items have no id (a title instead) is answered with what was wrong and the open todos by id
   (`todo_ids_by_name`, `TODO_IDS_REFUSAL`); nothing is completed and his call is not rewritten. MAF shows a call that
   fails validation to function middleware first (_tools.py). The bar at f7b5120 (the discount ask): MAF's bare

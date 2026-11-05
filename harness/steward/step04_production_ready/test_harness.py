@@ -6409,3 +6409,26 @@ def test_todos_complete_by_title_is_answered_with_the_open_todos_ids_and_complet
     refusal = next(r for r in results if r.startswith("Not completed"))
     assert 'id 1: "Edit file"' in refusal and '{"id": 1, "reason": "..."}' in refusal, refusal
     assert results.index(refusal) < len(results) - 1 and "completed" in results[-1] and "1" in results[-1], results
+
+
+def test_a_call_maf_never_ran_is_no_change_made_while_planning() -> None:
+    """The steps set at f7b5120 (2026-11-05 06:41Z): EXPLORE called run_shell, which it is not offered; MAF answered
+    'Error: Requested function "run_shell" not found.', and plan_step failed "Changed things while planning:
+    ['run_shell']". A call MAF never ran (NOT_RUN_RESULTS: a tool not offered, arguments that fail validation) is
+    "not run"; a run_shell that ran still fails the plan step."""
+    import evals
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line in inventory.py"]}'
+
+    def planned(result: str) -> Any:
+        shell = Content.from_function_call(call_id="s1", name="run_shell", arguments={"command": "pytest -q"})
+        answer = Content.from_function_result(call_id="s1", result=result)
+        return scored(evals.plan_step, evals.STEPS_QUERY, [
+            Message(role="assistant", contents=[shell]), Message(role="tool", contents=[answer]),
+            Message(role="assistant", contents=[plan]),
+        ])
+
+    assert planned('Error: Requested function "run_shell" not found.').passed, "a call to a tool not offered ran nothing"
+    assert planned("Error: Argument parsing failed. Exception: Invalid arguments for 'run_shell'.").passed
+    ran = planned("4 passed in 0.02s")
+    assert not ran.passed and "run_shell" in str(ran), "a shell that ran while planning still fails"
