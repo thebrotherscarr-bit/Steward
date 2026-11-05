@@ -6432,3 +6432,40 @@ def test_a_call_maf_never_ran_is_no_change_made_while_planning() -> None:
     assert planned("Error: Argument parsing failed. Exception: Invalid arguments for 'run_shell'.").passed
     ran = planned("4 passed in 0.02s")
     assert not ran.passed and "run_shell" in str(ran), "a shell that ran while planning still fails"
+
+
+def test_the_steps_set_judges_the_fix_by_test_percent_discount_not_by_its_spacing(monkeypatch: Any) -> None:
+    """The steps set at 7a2dd79 (2026-11-05 07:13Z): his fix wrote "discount_percent/100", the checks passed, and the
+    overall check's byte test for "discount_percent / 100" read it as not fixed. STEPS_FIXED is now
+    discount_test_result(): whether test_percent_discount passes as the run left the project, with its reason."""
+    import contextlib
+    import json
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+
+    passed = wf.checks_text(wf.CheckReport(1, True, "$ pytest -q p\n(exit 0)\n4 passed", ""))
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def run_events(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        return [SimpleNamespace(type="output", data=passed)]
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "sample_project_as_committed", lambda: None)
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", run_events)
+    monkeypatch.setattr(wf, "build_steward", built)
+
+    def overall(result: tuple[bool, str]) -> dict[str, Any]:
+        monkeypatch.setattr(evals, "discount_test_result", lambda: result)
+        asyncio.run(evals.steps_main())
+        entry = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+        return next(c for c in entry["cases"] if c.get("step") == "overall")
+
+    assert overall((True, "test_percent_discount passes."))["passed"], "a fix the test passes is fixed, however it is spaced"
+    failed = overall((False, "test_percent_discount does not pass (exit 1): 1 failed"))
+    assert not failed["passed"] and "test_percent_discount does not pass" in failed["failed_checks"][0]["reason"], failed
