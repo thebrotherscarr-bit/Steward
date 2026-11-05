@@ -6248,3 +6248,14 @@ def test_an_approval_typed_plan_with_a_summary_in_place_of_questions_is_read_as_
     assert wf.steward_plan_in(text.replace('"approval"', '"clarification"')) is None, "another type is not an approval"
     assert wf.steward_plan_in('{"type":"approval","steps":["Run the tests"]}') is None, "no summary, no plan"
     assert wf.steward_plan_in('{"summary":"Fix it.","steps":["Fix it"]}') is not None, "no type, as before"
+
+
+def test_the_plan_call_asks_each_step_that_changes_a_file_to_name_it_by_its_path() -> None:
+    """The steps set at 416ba41 (2026-11-05): the plan's steps named order_total but never inventory.py, so the todo
+    EXECUTE worked from did not say where. The plan call's own turn (PLAN_NOW, after EXPLORE's conversation) asks for
+    a step that changes a file to name it by its path."""
+    import steward_workflow as wf
+
+    [now] = wf.plan_call_input([Message(role="user", contents=["Fix the discount bug."])])[1:]
+    assert "naming that file by its path" in now.text, now.text
+    assert (now.additional_properties or {}).get(steward.REQUEST_KEY) == "", "the plan call's turn is no new request"

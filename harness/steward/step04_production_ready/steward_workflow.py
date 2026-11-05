@@ -200,11 +200,14 @@ PLAN_READ_FIRST = (
 )
 # The plan call's own turn, after EXPLORE's conversation (plan_call_input): its tools are off, so it says so, and says
 # what the steps become (approved_plan_turn writes them as his todos; no todo tool is offered while planning).
+# A step that changes a file names it (the steps set at 416ba41: "Change order_total to multiply subtotal by ..." named
+# the function, not inventory.py, and EXECUTE then worked from a todo that did not say where).
 PLAN_NOW = (
     "Your reading is done, and your tools are off for this reply. Reply now with your plan for the request above as "
     "the JSON object asked for: type approval, a summary of the plan as its one question, and your steps, one short "
-    "imperative line each; they become your todo list when the user approves. If you need the user's answer first, "
-    "reply with type clarification and a question that lists the choices."
+    "imperative line each, a step that changes a file naming that file by its path; they become your todo list when "
+    "the user approves. If you need the user's answer first, reply with type clarification and a question that lists "
+    "the choices."
 )
 # The user's request, kept in the workflow's state by ROUTE (so in its checkpoint): the plan card and the commit message
 # name it. The bar at aba870f (steps set, 2026-11-04): PLAN was asked again (PLAN_AGAIN), its second run's conversation
