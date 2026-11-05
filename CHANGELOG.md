@@ -15,6 +15,17 @@ was never merged and has no entry.
 
 ### Added
 
+- Outside eval sets, tier ext, for calibration only (never a gate): `ext-bfcl.yaml` (80 cases of the Berkeley
+  Function Calling Leaderboard's simple_python, multiple, parallel, parallel_multiple and irrelevance, pinned from
+  ShishirPatil/gorilla 6ea5797, Apache-2.0) and `ext-aider-py.yaml` (20 of the Aider polyglot benchmark's Python
+  exercises, pinned from Aider-AI/polyglot-benchmark 7e0611e, Exercism's MIT), each snapshot in
+  `harness/steward/evals/data/` with its LICENSE, and its source, attribution and contamination note in the set file.
+  `step04_production_ready/ext_sets.py` runs them through MAF's `evaluate_agent` (eval_name `<set>@v<version>`):
+  bfcl offers each case's functions to a bare agent on Steward's model as declaration-only tools and scores the calls
+  with `bfcl_ast_match` and `no_tool_called`; aider-py runs Steward's workflow on a throwaway copy of each exercise
+  (`harness/steward/working/ext-aider-py/`, gitignored) and scores `exercise_tests_pass`, the pinned tests on what he
+  left, 60 s at most. `evals.py validate` checks their source, their ids against the pinned data, their checks and each
+  exercise stub failing its tests; the fingerprint covers the pinned files. Run: `evals.py bfcl`, `evals.py aider-py`.
 - `evals.py --transport in-process|responses|ag-ui` for the asks sets (small, heldout; run-bar's `-Transport`):
   `responses` drives each case against the running Responses host (hosted.py, 43120), its cards answered with
   `mcp_approval_response` as SecondBrain's steward.cjs does; `ag-ui` against the AG-UI host (ag_ui_app.py, 43122),

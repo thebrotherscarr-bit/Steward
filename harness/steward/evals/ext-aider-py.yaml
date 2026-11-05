@@ -1,0 +1,52 @@
+# EXT, calibration only: the Aider polyglot benchmark's Python exercises (Exercism's Python track), pinned.
+# Run: python harness/steward/step04_production_ready/evals.py aider-py   (in its own window: run-bar.ps1 -Sets aider-py)
+# Never a gate and never tuned on: these exercises are public, and may be in a model's training data (source.contamination).
+# Each case runs Steward's workflow on a throwaway copy of the exercise under harness/steward/working/ext-aider-py/
+# (gitignored, removed after the case), then runs the pinned tests on what he left, 60 s at most (ext_sets.py).
+name: aider-py
+tier: ext
+version: 1
+owner: operator
+runner: exercises
+split: full
+# Calibration: the bar is the whole set once; nothing gates on it.
+bar: {passed: 20, of: 20, runs_in_a_row: 1}
+source:
+  data: data/aider-py
+  repo: https://github.com/Aider-AI/polyglot-benchmark (python/exercises/practice)
+  commit: 7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f
+  license: MIT (data/aider-py/LICENSE, Exercism's Python track, github.com/exercism/python)
+  attribution: >-
+    Exercises copyright Exercism (exercism.org), from the Exercism Python track under the MIT License, as curated by
+    Aider's polyglot benchmark (Aider-AI/polyglot-benchmark). Changed here: 20 of its 34 Python exercises, each the
+    stub and the test file unchanged, and instructions.md made of .docs/instructions.md followed by
+    .docs/instructions.append.md where there is one; the reference solutions (.meta) and approaches are left out.
+  contamination: >-
+    Exercism's exercises and many solutions to them have been public for years, so any model may have seen them. A
+    score here calibrates Steward against Aider's leaderboard; it is never a gate, and no harness change is tuned on
+    these exercises.
+changes:
+  1: >-
+    20 Python exercises pinned from polyglot-benchmark 7e0611e: affine-cipher, beer-song, book-store, bottle-song, bowling, connect, dominoes, food-chain, forth, grade-school, list-ops, phone-number, pig-latin, poker, proverb, scale-generator, transpose, two-bucket, variable-length-quantity, wordy. Scored by exercise_tests_pass (the
+    pinned unittest file run on the stub he left, every test green, 60 s at most).
+cases:
+  - {id: affine-cipher, checks: [exercise_tests_pass]}
+  - {id: beer-song, checks: [exercise_tests_pass]}
+  - {id: book-store, checks: [exercise_tests_pass]}
+  - {id: bottle-song, checks: [exercise_tests_pass]}
+  - {id: bowling, checks: [exercise_tests_pass]}
+  - {id: connect, checks: [exercise_tests_pass]}
+  - {id: dominoes, checks: [exercise_tests_pass]}
+  - {id: food-chain, checks: [exercise_tests_pass]}
+  - {id: forth, checks: [exercise_tests_pass]}
+  - {id: grade-school, checks: [exercise_tests_pass]}
+  - {id: list-ops, checks: [exercise_tests_pass]}
+  - {id: phone-number, checks: [exercise_tests_pass]}
+  - {id: pig-latin, checks: [exercise_tests_pass]}
+  - {id: poker, checks: [exercise_tests_pass]}
+  - {id: proverb, checks: [exercise_tests_pass]}
+  - {id: scale-generator, checks: [exercise_tests_pass]}
+  - {id: transpose, checks: [exercise_tests_pass]}
+  - {id: two-bucket, checks: [exercise_tests_pass]}
+  - {id: variable-length-quantity, checks: [exercise_tests_pass]}
+  - {id: wordy, checks: [exercise_tests_pass]}

@@ -1,0 +1,114 @@
+# EXT, calibration only: the Berkeley Function Calling Leaderboard's Python AST categories and irrelevance, pinned.
+# Run: python harness/steward/step04_production_ready/evals.py bfcl   (in its own window: run-bar.ps1 -Sets bfcl)
+# Never a gate and never tuned on: these cases are public, and may be in a model's training data (source.contamination).
+# Each case's functions are offered to a bare MAF agent on Steward's model as declaration-only tools (ext_sets.py).
+name: bfcl
+tier: ext
+version: 1
+owner: operator
+runner: bfcl
+split: full
+# Calibration: the bar is the whole set once; nothing gates on it.
+bar: {passed: 80, of: 80, runs_in_a_row: 1}
+source:
+  data: data/bfcl
+  repo: https://github.com/ShishirPatil/gorilla (berkeley-function-call-leaderboard/bfcl_eval/data)
+  commit: 6ea57973c7a6097fd7c5915698c54c17c5b1b6c8
+  license: Apache-2.0 (data/bfcl/LICENSE)
+  attribution: >-
+    Berkeley Function Calling Leaderboard (BFCL v4), by the Gorilla project at UC Berkeley.
+    Copyright the Gorilla authors, licensed under the Apache License 2.0. Changed here: an evenly spaced subset
+    (row i*len/n of each file) of BFCL_v4_simple_python, _multiple, _parallel, _parallel_multiple and _irrelevance,
+    with their possible_answer rows, copied unchanged into cases.jsonl (plus a category field) and
+    possible_answers.jsonl.
+  contamination: >-
+    BFCL has been public since 2024 and its questions and answers are on GitHub and Hugging Face, so any model may
+    have seen them. A score here calibrates Steward's model against the leaderboard; it is never a gate, and no
+    harness change is tuned on these cases.
+changes:
+  1: >-
+    80 cases pinned from gorilla 6ea5797 (2026-03-23): simple_python 20, multiple 15, parallel 15, parallel_multiple 15,
+    irrelevance 15. Scored by bfcl_ast_match (BFCL's AST check: function, required parameters, each value among its
+    acceptable values; one call for simple and multiple, one-to-one in any order for the parallel kinds) and
+    no_tool_called (irrelevance).
+cases:
+  - {id: simple_python_0, checks: [bfcl_ast_match]}
+  - {id: simple_python_20, checks: [bfcl_ast_match]}
+  - {id: simple_python_40, checks: [bfcl_ast_match]}
+  - {id: simple_python_60, checks: [bfcl_ast_match]}
+  - {id: simple_python_80, checks: [bfcl_ast_match]}
+  - {id: simple_python_100, checks: [bfcl_ast_match]}
+  - {id: simple_python_120, checks: [bfcl_ast_match]}
+  - {id: simple_python_140, checks: [bfcl_ast_match]}
+  - {id: simple_python_160, checks: [bfcl_ast_match]}
+  - {id: simple_python_180, checks: [bfcl_ast_match]}
+  - {id: simple_python_200, checks: [bfcl_ast_match]}
+  - {id: simple_python_220, checks: [bfcl_ast_match]}
+  - {id: simple_python_240, checks: [bfcl_ast_match]}
+  - {id: simple_python_260, checks: [bfcl_ast_match]}
+  - {id: simple_python_280, checks: [bfcl_ast_match]}
+  - {id: simple_python_300, checks: [bfcl_ast_match]}
+  - {id: simple_python_320, checks: [bfcl_ast_match]}
+  - {id: simple_python_340, checks: [bfcl_ast_match]}
+  - {id: simple_python_360, checks: [bfcl_ast_match]}
+  - {id: simple_python_380, checks: [bfcl_ast_match]}
+  - {id: multiple_0, checks: [bfcl_ast_match]}
+  - {id: multiple_13, checks: [bfcl_ast_match]}
+  - {id: multiple_26, checks: [bfcl_ast_match]}
+  - {id: multiple_40, checks: [bfcl_ast_match]}
+  - {id: multiple_53, checks: [bfcl_ast_match]}
+  - {id: multiple_66, checks: [bfcl_ast_match]}
+  - {id: multiple_80, checks: [bfcl_ast_match]}
+  - {id: multiple_93, checks: [bfcl_ast_match]}
+  - {id: multiple_106, checks: [bfcl_ast_match]}
+  - {id: multiple_120, checks: [bfcl_ast_match]}
+  - {id: multiple_133, checks: [bfcl_ast_match]}
+  - {id: multiple_146, checks: [bfcl_ast_match]}
+  - {id: multiple_160, checks: [bfcl_ast_match]}
+  - {id: multiple_173, checks: [bfcl_ast_match]}
+  - {id: multiple_186, checks: [bfcl_ast_match]}
+  - {id: parallel_0, checks: [bfcl_ast_match]}
+  - {id: parallel_13, checks: [bfcl_ast_match]}
+  - {id: parallel_26, checks: [bfcl_ast_match]}
+  - {id: parallel_40, checks: [bfcl_ast_match]}
+  - {id: parallel_53, checks: [bfcl_ast_match]}
+  - {id: parallel_66, checks: [bfcl_ast_match]}
+  - {id: parallel_80, checks: [bfcl_ast_match]}
+  - {id: parallel_93, checks: [bfcl_ast_match]}
+  - {id: parallel_106, checks: [bfcl_ast_match]}
+  - {id: parallel_120, checks: [bfcl_ast_match]}
+  - {id: parallel_133, checks: [bfcl_ast_match]}
+  - {id: parallel_146, checks: [bfcl_ast_match]}
+  - {id: parallel_160, checks: [bfcl_ast_match]}
+  - {id: parallel_173, checks: [bfcl_ast_match]}
+  - {id: parallel_186, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_0, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_13, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_26, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_40, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_53, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_66, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_80, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_93, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_106, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_120, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_133, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_146, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_160, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_173, checks: [bfcl_ast_match]}
+  - {id: parallel_multiple_186, checks: [bfcl_ast_match]}
+  - {id: irrelevance_0, checks: [no_tool_called]}
+  - {id: irrelevance_16, checks: [no_tool_called]}
+  - {id: irrelevance_32, checks: [no_tool_called]}
+  - {id: irrelevance_48, checks: [no_tool_called]}
+  - {id: irrelevance_64, checks: [no_tool_called]}
+  - {id: irrelevance_80, checks: [no_tool_called]}
+  - {id: irrelevance_96, checks: [no_tool_called]}
+  - {id: irrelevance_112, checks: [no_tool_called]}
+  - {id: irrelevance_128, checks: [no_tool_called]}
+  - {id: irrelevance_144, checks: [no_tool_called]}
+  - {id: irrelevance_160, checks: [no_tool_called]}
+  - {id: irrelevance_176, checks: [no_tool_called]}
+  - {id: irrelevance_192, checks: [no_tool_called]}
+  - {id: irrelevance_208, checks: [no_tool_called]}
+  - {id: irrelevance_224, checks: [no_tool_called]}
