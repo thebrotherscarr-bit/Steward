@@ -6394,3 +6394,18 @@ def test_a_read_that_finds_nothing_at_a_path_missing_a_part_of_the_named_one_is_
     assert "Nothing is at" not in results[2], "a file that is there is read as it is"
     assert steward.missed_path_meant("harness/working/sample-project", []) is None, "no named path, no hint"
     assert steward.missed_path_meant(readme, [readme]) is None, "the named path itself is there"
+
+
+def test_todos_complete_by_title_is_answered_with_the_open_todos_ids_and_completes_nothing() -> None:
+    """The bar at f7b5120 (2026-11-05 06:26Z, the discount ask): he called todos_complete with {"title": "Edit file",
+    "reason": ...}; MAF's "Invalid arguments for 'todos_complete'" twice, then his last reply was the call as raw text.
+    Such a call is now answered with TODO_IDS_REFUSAL naming the open todos by id (todo_ids_by_name), nothing is
+    completed, and his next call by id completes it."""
+    add = Content.from_function_call(call_id="a1", name="todos_add", arguments={"todos": [{"title": "Edit file"}]})
+    by_title = Content.from_function_call(call_id="c1", name="todos_complete", arguments={"items": [{"title": "Edit file", "reason": "Fixed."}]})
+    by_id = Content.from_function_call(call_id="c2", name="todos_complete", arguments={"items": [{"id": 1, "reason": "Fixed."}]})
+    client, _, _ = run_steward([add, by_title, by_id, "Done."], "Fix it.", mode="execute")
+    results = function_results(client.calls[-1])
+    refusal = next(r for r in results if r.startswith("Not completed"))
+    assert 'id 1: "Edit file"' in refusal and '{"id": 1, "reason": "..."}' in refusal, refusal
+    assert results.index(refusal) < len(results) - 1 and "completed" in results[-1] and "1" in results[-1], results

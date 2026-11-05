@@ -120,6 +120,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A todos_complete whose items have no id (a title instead) is answered with what was wrong and the open todos by id
+  (`todo_ids_by_name`, `TODO_IDS_REFUSAL`); nothing is completed and his call is not rewritten. MAF shows a call that
+  fails validation to function middleware first (_tools.py). The bar at f7b5120 (the discount ask): MAF's bare
+  "Invalid arguments for 'todos_complete'" twice, then his last reply was the call as raw text. Test:
+  `test_todos_complete_by_title_is_answered_with_the_open_todos_ids_and_completes_nothing`.
 - A file read or listing that finds nothing at a path missing a part of a path the request names ends with that path
   (`point_a_missed_path_at_the_named_one`, `MISSED_PATH_HINT`); his call is never rewritten. The bar at 416ba41 (the
   README ask): he looked under harness/working/sample-project (dropping "steward"), found nothing, and replied that
