@@ -373,9 +373,11 @@ def plan_in_its_own_shape(text: str) -> StewardPlan | None:
     "Validate JSON ... in code": a plan-shaped object (no "type"; a summary or question; a steps list of strings, or of
     objects with a title, action or description) is read as the approval, its steps one line each (_step_line), its
     summary the card's question. A step with no line, a blank one, or no summary: no plan, as StewardPlan's own schema
-    has it, so READ_PLAN asks again (PLAN_NOT_A_CALL)."""
+    has it, so READ_PLAN asks again (PLAN_NOT_A_CALL). A "type" of "approval" is read the same (the steps set at
+    416ba41: '{"type":"approval","summary":"Modify order_total ...","steps":[...]}' was asked again); any other type
+    is not an approval in its own shape."""
     found = trailing_json_object(text)
-    if found is None or "type" in found:
+    if found is None or found.get("type", PlanningResponseType.APPROVAL.value) != PlanningResponseType.APPROVAL.value:
         return None
     question = next((found[key] for key in ("summary", "question") if isinstance(found.get(key), str)), "")
     steps = found.get("steps")
