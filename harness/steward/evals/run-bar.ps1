@@ -10,14 +10,22 @@
   (the line the run appended). At the end, `evals.py bar <set>` says for each set whether its bar is met, and the last
   line is "BAR DONE". A run is stopped after -RunMinutes.
 
+  -Transport (in-process, the default; responses; ag-ui) is passed to evals.py as --transport: each case goes to the
+  running Responses host (hosted.py, 127.0.0.1:43120) or AG-UI host (ag_ui_app.py, 127.0.0.1:43122) instead of
+  in-process, and its line in the history carries the transport. Then `evals.py compare-transports` compares them.
+
 .EXAMPLE
   powershell -File harness/steward/evals/run-bar.ps1 -Sets small,heldout -Tag nightly
+
+.EXAMPLE
+  powershell -File harness/steward/evals/run-bar.ps1 -Sets small -Tag agui -Runs 3 -Transport ag-ui
 #>
 param(
     [Parameter(Mandatory = $true)][string[]]$Sets,
     [Parameter(Mandatory = $true)][string]$Tag,
     [int]$Runs = 2,
-    [int]$RunMinutes = 60
+    [int]$RunMinutes = 60,
+    [ValidateSet('in-process', 'responses', 'ag-ui')][string]$Transport = 'in-process'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,7 +59,7 @@ function Last-HistoryLine([string]$set) {
 
 $valid = & $python -W ignore $evals validate 2>&1
 if ($LASTEXITCODE -ne 0) { Say "validate failed: $($valid -join ' | ')"; Say 'BAR DONE'; exit 1 }
-Say "bar $Tag : sets $($Sets -join ', '), $Runs run(s) each"
+Say "bar $Tag : sets $($Sets -join ', '), $Runs run(s) each, transport $Transport"
 
 foreach ($set in $Sets) {
     for ($n = 1; $n -le $Runs; $n++) {
@@ -59,12 +67,12 @@ foreach ($set in $Sets) {
         $before = Last-HistoryLine $set
         Say "start $set run $n -> $log"
         $job = Start-Job -ScriptBlock {
-            param($python, $evals, $set, $repo)
+            param($python, $evals, $set, $repo, $transport)
             Set-Location $repo
             $env:PYTHONIOENCODING = 'utf-8'
-            & $python -W ignore $evals $set 2>&1 | ForEach-Object { "$_" }
+            & $python -W ignore $evals $set --transport $transport 2>&1 | ForEach-Object { "$_" }
             "EXIT $LASTEXITCODE"
-        } -ArgumentList $python, $evals, $set, $repo
+        } -ArgumentList $python, $evals, $set, $repo, $Transport
         $finished = Wait-Job $job -Timeout ($RunMinutes * 60)
         if (-not $finished) { Stop-Job $job; Say "stopped $set run $n after $RunMinutes min" }
         $output = Receive-Job $job
@@ -72,9 +80,9 @@ foreach ($set in $Sets) {
         [System.IO.File]::WriteAllLines($log, [string[]]@($output), $utf8)
         $after = Last-HistoryLine $set
         if ($after -and (-not $before -or $after.ts -ne $before.ts)) {
-            Say ("done  {0} v{1} ({2}) run {3}: {4}/{5} cases, {6}/{7} checks, exit {8}, head {9}" -f `
+            Say ("done  {0} v{1} ({2}) run {3}: {4}/{5} cases, {6}/{7} checks, exit {8}, head {9}, transport {10}" -f `
                 $set, $after.set_version, $after.tier, $n, $after.passed, $after.total, $after.checks_passed, `
-                $after.checks_total, $after.exit_code, $after.git_head)
+                $after.checks_total, $after.exit_code, $after.git_head, $after.transport)
         } else {
             Say "done  $set run $n : no history line written (see $log)"
         }

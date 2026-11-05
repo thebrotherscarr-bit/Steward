@@ -15,13 +15,14 @@ Steward's team on the live build (part 4, every host): Steward himself (the orch
 gpt-oss:20b: talks to the user, plans, uses tools) and two background agents on his model and client:
     * CodeExplorer     — explores one module read-only.
     * WebResearchAgent — searches the web with SecondBrain's web tools (only when SecondBrain is connected).
-The improvement loop's coder (step 6) is its own agent on STEWARD_CODER_MODEL (qwen2.5-coder:14b), in
-improvement_loop_workflow.py.
+The improvement loop's coder (step 6) is its own agent, in improvement_loop_workflow.py, on Steward's own model
+(OLLAMA_MODEL) unless STEWARD_CODER_MODEL names another.
 
 Environment variables:
     OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
     OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
-    STEWARD_CODER_MODEL        — coder model (defaults to qwen2.5-coder:14b, the operator's choice 2026-11-03)
+    STEWARD_CODER_MODEL        — coder model (defaults to OLLAMA_MODEL, Steward's own: one model, the operator's
+                                 ruling 2026-11-05; set it to bring back a separate coder)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
                                  per ADR-0001 item 11: his own code is in reach; reads run without a
                                  card and writes ask, and the file store never reads, searches or
@@ -146,11 +147,15 @@ from subprocess_script_runner import subprocess_script_runner  # noqa: E402
 load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
-# The fixer's model (the operator, 2026-11-03): qwen2.5-coder:14b, the one coder that sits wholly on the 16 GB card
-# at the fixer's 32K window (12.1 GB). Measured that day, one model loaded at a time: it read 227 tok/s on a 2.7K
-# prompt and 49 on a 17K one, and wrote 28-46 tok/s. devstral-small-2:24b, the fixer of round 1, was dropped: at 32K
-# and at 24K 5-7 of its 41 layers stayed on the CPU, and it wrote 3.5 tok/s.
-_CODER_MODEL = os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+# The coder's model: one model (the operator's ruling, 2026-11-05: "one model to rule them all"). The coder runs on
+# Steward's own chat model, OLLAMA_MODEL, the one MAF's OllamaChatClient reads for him: 1,015 traced chat calls were
+# all steward:1 with no model switch, and qwen2.5-coder:14b (~9 GB, the coder of 2026-11-03) cannot sit beside
+# steward:1 (11.9 GB) on the 16 GB card. STEWARD_CODER_MODEL still names a separate coder; read at each build.
+def _coder_model() -> str | None:
+    """The improvement loop's coder model: STEWARD_CODER_MODEL if set, else Steward's own (OLLAMA_MODEL)."""
+    return os.environ.get("STEWARD_CODER_MODEL") or os.environ.get("OLLAMA_MODEL")
+
+
 # The context Ollama loads each model with (num_ctx, a chat option). Ollama's own default here is
 # 131,072, which put 4 GB of gpt-oss:20b in system RAM: 45.6 tok/s, against 84.6 at 65,536.
 # Steward's prompts already reach ~23k tokens, so he keeps 65,536, matching the harness budget below;

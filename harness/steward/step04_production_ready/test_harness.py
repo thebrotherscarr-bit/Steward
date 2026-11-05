@@ -3083,15 +3083,15 @@ def test_a_skill_read_while_planning_is_not_demanded_again_when_the_work_is_done
     assert not any(steward.REQUIRED_TOOLS_NUDGE in str(m.text) for m in client.calls[0]["messages"])
 
 
-def test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model() -> None:
+def test_the_split_fixer_is_steward_diagnosing_and_a_small_coder_on_the_coder_model(monkeypatch: Any) -> None:
     """Step 6 (2026-11-03): Steward diagnoses on his own harness with hand_to_coder beside his tools; the coder is a
     small MAF Agent on the coder model with only MAF's file tools (writes ask), his tool-call limits and a 16K window."""
     from agent_framework import FileAccessProvider
 
     import improvement_loop_workflow as loop
 
-    assert loop.fixer_client().model == steward._CODER_MODEL
-    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+    monkeypatch.setenv("OLLAMA_MODEL", "steward:1")
+    assert loop.fixer_client().model == steward._coder_model()
     client = ScriptedChatClient([])
     coder = loop.build_coder(client)
     assert coder.default_options.get("num_ctx") == loop.FIXER_CONTEXT == 16_384
@@ -3477,6 +3477,8 @@ def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_cod
     assert (entry["set"], entry["passed"], entry["total"], entry["exit_code"]) == ("small", 1, 1, 0), entry
     assert f"{entry['checks_passed']}/{entry['checks_total']}" == checks and entry["checks_total"] > 0, entry
     assert entry["options"] == {"name": "plan_t0", "values": {"STEWARD_PLAN_TEMPERATURE": "0"}}, entry
+    timings = entry["cases"][0].pop("timings")  # each case's transport and timings (evals.py --transport)
+    assert (entry["transport"], timings["transport"]) == ("in-process", "in-process"), (entry, timings)
     assert entry["cases"] == [{"input": evals.SMALL_ASK_README[:80], "passed": True, "failed_checks": []}], entry
     assert (entry["git_head"], entry["model"]) == (head or None, "gpt-oss:20b") and entry["ts"], entry
 
@@ -4702,6 +4704,29 @@ def test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_st
         assert "await warn_model_drift()" in inspect.getsource(host.main), f"{host.__name__} checks at start"
 
 
+def test_the_coder_is_stewards_own_model_unless_named_and_records_its_timings(monkeypatch: Any) -> None:
+    """One model (the operator's ruling, 2026-11-05): the improvement loop's coder is on Steward's own chat model, the
+    one MAF's OllamaChatClient reads from OLLAMA_MODEL; STEWARD_CODER_MODEL still names a separate coder. The coder's
+    client records Ollama's timings, so a coder on another model shows its load times in the traces."""
+    import ollama
+    from agent_framework.ollama import OllamaChatClient
+
+    import improvement_loop_workflow as loop
+
+    monkeypatch.setenv("OLLAMA_MODEL", "steward:1")
+    monkeypatch.delenv("STEWARD_CODER_MODEL", raising=False)
+    assert loop.fixer_client().model == OllamaChatClient().model == "steward:1", "the coder is Steward's own model"
+    monkeypatch.setenv("STEWARD_CODER_MODEL", "qwen2.5-coder:14b")
+    client = loop.fixer_client()
+    assert client.model == "qwen2.5-coder:14b", "STEWARD_CODER_MODEL brings back a separate coder"
+    done = ollama.ChatResponse(
+        model=client.model, message=ollama.Message(role="assistant", content="ok"), done=True,
+        load_duration=5, prompt_eval_duration=7, eval_count=3, eval_duration=11, prompt_eval_count=2,
+    )
+    usage = client._parse_response_from_ollama(done).usage_details
+    assert usage.get("ollama.load_duration") == 5, f"the coder's client records Ollama's timings: {usage}"
+
+
 def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
     """The part > 4 build (Coder, Reasoner, Explainer on their own models, gemma4:26b and deepseek-r1:14b) was called by
     no host and is removed (2026-11-04). The live build keeps CodeExplorer on his client, and the improvement loop's
@@ -4711,7 +4736,7 @@ def test_the_older_team_path_is_gone_and_the_live_team_is_kept() -> None:
     for gone in ("_build_coder_agent", "_build_reasoner_agent", "_build_conversation_agent", "_build_explorer_agent",
                  "_REASONER_MODEL", "_CONVERSATION_MODEL", "_TEAM_CONTEXT", "STEWARD_INSTRUCTIONS", "_connect_secondbrain"):
         assert not hasattr(steward, gone), gone
-    assert steward._CODER_MODEL == os.environ.get("STEWARD_CODER_MODEL", "qwen2.5-coder:14b"), "the fixer's model stays"
+    assert not hasattr(steward, "_CODER_MODEL"), "the coder's model is read at each build (_coder_model)"
 
     async def _go(part: int) -> list[str]:
         async with AsyncExitStack() as stack:
@@ -7229,3 +7254,278 @@ def test_the_validator_holds_the_outside_sets_to_their_source_their_pinned_data_
     before = evals.ext_sets.set_fingerprint(raw)
     pinned.write_text(original.replace("[10]", "[11]", 1), encoding="utf-8")
     assert evals.ext_sets.set_fingerprint(raw) != before, "a change to the pinned data changes the set's fingerprint"
+
+
+class _ScriptedHost:
+    """The host side of a fake transport: one scripted item_count run (the plan card, then the write card, then his
+    words), the write made on disk when its card is approved, as Steward's host would make it."""
+
+    MODULE = "harness/steward/working/sample-project/inventory.py"
+
+    def __init__(self) -> None:
+        path = steward._WORKING_DIR / self.MODULE
+        self.added = path.read_text(encoding="utf-8") + '\n\ndef item_count(items):\n    """The total quantity."""\n    return sum(i.quantity for i in items)\n'
+        self.plan = {"steps": ["Add item_count to inventory.py"]}
+        self.write = {"file_name": self.MODULE, "content": self.added, "overwrite": True}
+        self.said = "Added item_count to inventory.py."
+
+    def do_write(self, approved: bool) -> str:
+        if not approved:
+            return "The user denied the write."
+        (steward._WORKING_DIR / self.MODULE).write_text(self.added, encoding="utf-8")
+        return f"File '{self.MODULE}' written."
+
+
+def _sse_app(handler: Any) -> Any:
+    """A Starlette app on POST / and POST /responses whose handler returns the run's events, sent as SSE."""
+    import json
+
+    from starlette.applications import Starlette
+    from starlette.responses import StreamingResponse
+    from starlette.routing import Route
+
+    async def endpoint(request: Any) -> Any:
+        events = handler(await request.json())
+
+        async def frames() -> Any:
+            for event in events:
+                yield f"data: {json.dumps(event)}\n\n"
+
+        return StreamingResponse(frames(), media_type="text/event-stream")
+
+    return Starlette(routes=[Route("/", endpoint, methods=["POST"]), Route("/responses", endpoint, methods=["POST"])])
+
+
+def _fake_responses_host(host: _ScriptedHost, seen: list[dict[str, Any]]) -> Any:
+    """A fake Responses host (hosted.py's protocol, as steward.cjs reads it): cards are mcp_approval_request items,
+    answered by mcp_approval_response items on a request whose previous_response_id names the round they came in."""
+    import json
+
+    def card(item_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return {"type": "mcp_approval_request", "id": item_id, "server_label": "agent_framework", "name": name,
+                "arguments": json.dumps(arguments)}
+
+    def handler(body: dict[str, Any]) -> list[dict[str, Any]]:
+        seen.append(body)
+        round_ = len(seen)
+        events: list[dict[str, Any]] = []
+        if round_ == 1:
+            assert body["input"] and body.get("previous_response_id") is None, body
+            output = [card("apr_plan", "approve_plan", host.plan)]
+        elif round_ == 2:
+            [reply] = body["input"]
+            assert (reply["type"], reply["approval_request_id"], body["previous_response_id"]) == ("mcp_approval_response", "apr_plan", "resp_1"), body
+            events.append({"type": "response.reasoning_summary_text.delta", "delta": "Writing it."})
+            output = [
+                {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Writing it."}]},
+                card("apr_w1", "file_access_write", host.write),
+            ]
+        else:
+            [reply] = body["input"]
+            assert (reply["approval_request_id"], body["previous_response_id"]) == ("apr_w1", "resp_2"), body
+            result = host.do_write(bool(reply["approve"]))
+            events.append({"type": "response.output_text.delta", "delta": host.said})
+            output = [
+                {"type": "function_call_output", "id": "fco_1", "call_id": "w1", "output": result},
+                {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": host.said}]},
+            ]
+        events += [{"type": "response.output_item.done", "item": item} for item in output]
+        events.append({"type": "response.completed", "response": {"id": f"resp_{round_}", "status": "completed", "output": output}})
+        return events
+
+    return _sse_app(handler)
+
+
+def _fake_ag_ui_host(host: _ScriptedHost, seen: list[dict[str, Any]], checkpoints: set[str]) -> Any:
+    """A fake AG-UI host (ag_ui_app.py's protocol, as PR #138's test drives it): each card is RUN_FINISHED's interrupt,
+    answered by a resume naming its interruptId and the checkpointId it carried; a checkpoint not in ``checkpoints``
+    (a host restarted, its in-memory store gone) is refused with RUN_ERROR as MAF's package refuses it."""
+
+    def interrupt(interrupt_id: str, call_id: str, name: str, arguments: dict[str, Any], checkpoint: str) -> dict[str, Any]:
+        checkpoints.add(checkpoint)
+        return {"id": interrupt_id, "reason": "tool_call", "message": name, "toolCallId": f"ri-{call_id}",
+                "metadata": {"agent_framework": {"function_call": {"type": "function_call", "call_id": call_id, "name": name,
+                                                                   "arguments": arguments}, "checkpoint_id": checkpoint}}}
+
+    def request_info(call_id: str) -> list[dict[str, Any]]:
+        return [{"type": "TOOL_CALL_START", "toolCallId": f"ri-{call_id}", "toolCallName": "request_info"},
+                {"type": "TOOL_CALL_END", "toolCallId": f"ri-{call_id}"},
+                {"type": "CUSTOM", "name": "request_info", "value": {}}]
+
+    def handler(body: dict[str, Any]) -> list[dict[str, Any]]:
+        import json
+
+        seen.append(body)
+        started = {"type": "RUN_STARTED", "threadId": body["threadId"], "runId": body["runId"]}
+        if not body.get("resume"):
+            assert body["messages"][0]["role"] == "user", body
+            plan = interrupt("int-plan", "p1", "approve_plan", host.plan, "cp-1")
+            return [started, {"type": "STEP_STARTED", "stepName": "plan"}, *request_info("p1"),
+                    {"type": "RUN_FINISHED", "threadId": body["threadId"], "runId": body["runId"],
+                     "outcome": {"type": "interrupt", "interrupts": [plan]}}]
+        [resume] = body["resume"]
+        checkpoint = body["forwardedProps"].get("checkpointId")
+        if checkpoint not in checkpoints:
+            return [started, {"type": "RUN_ERROR", "code": "WORKFLOW_CHECKPOINT_LOAD_FAILED",
+                              "message": f"Could not load workflow checkpoint '{checkpoint}': not found"}]
+        checkpoints.discard(checkpoint)
+        approved = bool(resume["payload"]["approved"])
+        if resume["interruptId"] == "int-plan":
+            write = interrupt("int-w1", "w1", "file_access_write", host.write, "cp-2")
+            return [started, {"type": "STEP_STARTED", "stepName": "execute"},
+                    {"type": "REASONING_MESSAGE_START", "messageId": "r1"},
+                    {"type": "REASONING_MESSAGE_CONTENT", "messageId": "r1", "delta": "Writing it."},
+                    {"type": "REASONING_MESSAGE_END", "messageId": "r1"},
+                    {"type": "TOOL_CALL_START", "toolCallId": "w1", "toolCallName": "file_access_write"},
+                    {"type": "TOOL_CALL_ARGS", "toolCallId": "w1", "delta": json.dumps(host.write)},
+                    {"type": "TOOL_CALL_END", "toolCallId": "w1"}, *request_info("w1"),
+                    {"type": "RUN_FINISHED", "threadId": body["threadId"], "runId": body["runId"],
+                     "outcome": {"type": "interrupt", "interrupts": [write]}}]
+        assert resume["interruptId"] == "int-w1", resume
+        result = host.do_write(approved)
+        return [started, {"type": "STEP_STARTED", "stepName": "execute"},
+                {"type": "TOOL_CALL_RESULT", "messageId": "t1", "toolCallId": "w1", "content": result},
+                {"type": "REASONING_MESSAGE_START", "messageId": "r2"},
+                {"type": "REASONING_MESSAGE_CONTENT", "messageId": "r2", "delta": host.said},
+                {"type": "REASONING_MESSAGE_END", "messageId": "r2"},
+                {"type": "RUN_FINISHED", "threadId": body["threadId"], "runId": body["runId"]}]
+
+    return _sse_app(handler)
+
+
+def _over_transport(monkeypatch: Any, transport: str, app: Any) -> dict[str, Any]:
+    """The item_count ask through run_small_asks over ``transport`` against a fake host app (httpx's ASGITransport, no
+    network), scored by score_small_asks; {check: (passed, reason)} and the case's timings."""
+    import eval_transports
+    import evals
+    import httpx
+
+    monkeypatch.setattr(eval_transports, "HTTP_TRANSPORT", httpx.ASGITransport(app=app))
+    monkeypatch.setattr(evals, "TRANSPORT_IN_USE", transport)
+
+    async def _go() -> Any:
+        steward_, responses = await evals.run_small_asks([evals.SMALL_ASK_NEW_CODE])
+        return await evals.score_small_asks(steward_, [evals.SMALL_ASK_NEW_CODE], responses)
+
+    try:
+        [item] = asyncio.run(_go()).items
+    finally:
+        evals.SMALL_ASK_FILES.clear()
+        evals.SMALL_ASK_ORIGINALS.clear()
+        evals.SMALL_ASK_RESULTS.clear()
+    scores = {score.name: (score.passed, (score.sample or {}).get("reason")) for score in item.scores}
+    return {"scores": scores, "timings": evals.CASE_TIMINGS[evals.SMALL_ASK_NEW_CODE], "item": item}
+
+
+def test_the_responses_and_ag_ui_transports_score_a_scripted_case_identically(monkeypatch: Any, tmp_path: Any) -> None:
+    """evals.py --transport responses|ag-ui (eval_transports.py): the same item_count run, scripted on a fake Responses
+    host and a fake AG-UI host, is driven over each wire with the in-process policy (the plan and the write approved),
+    made into the Messages an in-process run gives, and scored with the same checks: every score and reason is the
+    same, the write is on disk for the result check (item_count_works) and put back after, and each case records its
+    transport, its first text event, its total time and both cards resumed. The history line carries the transport and
+    the timings, and compare-transports reads them. Red when a transport, the card answers, the message mapping or
+    the timings come unplugged."""
+    import json
+    from types import SimpleNamespace
+
+    import evals
+
+    module = steward._WORKING_DIR / _ScriptedHost.MODULE
+    committed = module.read_bytes()
+    seen_responses: list[dict[str, Any]] = []
+    seen_ag_ui: list[dict[str, Any]] = []
+    over_responses = _over_transport(monkeypatch, "responses", _fake_responses_host(_ScriptedHost(), seen_responses))
+    assert module.read_bytes() == committed, "the sample project is put back after the run"
+    over_ag_ui = _over_transport(monkeypatch, "ag-ui", _fake_ag_ui_host(_ScriptedHost(), seen_ag_ui, set()))
+    assert module.read_bytes() == committed
+    assert evals.CASE_ERRORS == {}, evals.CASE_ERRORS
+    assert len(seen_responses) == 3 and len(seen_ag_ui) == 3, "the ask and two answers on each wire"
+    assert seen_ag_ui[1]["forwardedProps"] == {"checkpointId": "cp-1"} and seen_ag_ui[1]["resume"][0]["status"] == "resolved"
+    assert over_responses["scores"] == over_ag_ui["scores"], (over_responses["scores"], over_ag_ui["scores"])
+    scores = over_ag_ui["scores"]
+    for name in ("plan_is_approval", "edit_keeps_file_whole", "item_count_works", "run_completed", "answer_on_topic"):
+        assert scores[name][0] is True, (name, scores[name])
+    for transport, over in (("responses", over_responses), ("ag-ui", over_ag_ui)):
+        timings = over["timings"]
+        assert timings["transport"] == transport, timings
+        assert timings["first_event_s"] is not None and timings["total_s"] >= timings["first_event_s"], timings
+        assert (timings["cards"], timings["cards_resumed"], timings["stream_errors"]) == (2, 2, []), timings
+        assert [(c["name"], c["approved"], c["resumed"]) for c in timings["card_log"]] == [
+            ("approve_plan", True, True), ("file_access_write", True, True)
+        ], timings
+    # The history: the run's transport and each case's timings, read back by compare-transports' table.
+    history = tmp_path / "history.jsonl"
+    monkeypatch.setattr(evals, "EVAL_HISTORY", history)
+    for transport, over in (("responses", over_responses), ("ag-ui", over_ag_ui)):
+        monkeypatch.setattr(evals, "TRANSPORT_IN_USE", transport)
+        evals.CASE_TIMINGS[evals.SMALL_ASK_NEW_CODE] = over["timings"]
+        evals.record_history("small", {"": SimpleNamespace(passed=1, total=1, items=[over["item"]])}, 0)
+    lines = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+    assert [line["transport"] for line in lines] == ["responses", "ag-ui"]
+    assert lines[1]["cases"][0]["timings"]["cards_resumed"] == 2, lines[1]
+    table = evals.transport_comparison("small", 3, history)
+    [row] = table["ag-ui"].values()
+    assert (row["runs"], row["cards"], row["resumed"], row["stream_errors"]) == (1, 2, 2, 0), row
+    assert evals.ag_ui_decision(table) == (True, []), "the same results and resumes, no stream error"
+
+
+def test_a_dropped_ag_ui_checkpoint_is_a_failed_resume_not_a_crash(monkeypatch: Any) -> None:
+    """A resume whose checkpoint the AG-UI host no longer has (ag_ui_app.py keeps them in memory: a restart drops them)
+    comes back as RUN_ERROR (WORKFLOW_CHECKPOINT_LOAD_FAILED). The case is not a crash: it is scored on what came back
+    (the plan card), fails run_completed with the resume's reason, and its timings record the plan card as answered
+    and not resumed, and the stream error. The set goes on; compare-transports' rule keeps AG-UI off over it. Red when
+    a refused resume raises out of the set, or is counted as resumed."""
+    import evals
+
+    dropped: list[str] = []
+
+    class Restarted(set):  # type: ignore[type-arg]
+        """The host's checkpoint store across a restart: each checkpoint is handed out with its card, then gone."""
+
+        def add(self, value: str) -> None:
+            dropped.append(value)
+
+    module = steward._WORKING_DIR / _ScriptedHost.MODULE
+    committed = module.read_bytes()
+    over = _over_transport(monkeypatch, "ag-ui", _fake_ag_ui_host(_ScriptedHost(), [], Restarted()))
+    assert module.read_bytes() == committed
+    reason = evals.CASE_ERRORS.get(evals.SMALL_ASK_NEW_CODE, "")
+    assert reason.startswith("the ag-ui transport: the resume of approve_plan: RUN_ERROR:"), reason
+    assert "Could not load workflow checkpoint 'cp-1'" in reason, reason
+    assert over["scores"]["run_completed"] == (False, reason), over["scores"]
+    assert over["scores"]["plan_is_approval"][0] is True, "scored on what came back: the plan card"
+    assert over["scores"]["item_count_works"][0] is False, "nothing was written"
+    timings = over["timings"]
+    assert timings["card_log"] == [{"name": "approve_plan", "approved": True, "resumed": False}], timings
+    assert (timings["cards"], timings["cards_resumed"]) == (1, 0), timings
+    assert any("Could not load workflow checkpoint" in error for error in timings["stream_errors"]), timings
+    assert dropped == ["cp-1"]
+    table = {"ag-ui": {"q": {"runs": 1, "passed": 0, "cards": 1, "resumed": 0, "stream_errors": 1}},
+             "responses": {"q": {"runs": 1, "passed": 1, "cards": 2, "resumed": 2, "stream_errors": 0}}}
+    on, reasons = evals.ag_ui_decision(table)
+    assert not on and len(reasons) == 3, reasons
+
+
+def test_the_transport_flag_takes_the_asks_sets_and_the_comparison_runs_nothing(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    """evals.py --transport: in-process (the default), responses or ag-ui, for an asks set only (exit 2 otherwise, with
+    nothing run); compare-transports prints the per-case table from the history and the decision line. run-bar.ps1
+    passes -Transport on."""
+    import evals
+
+    ran: list[str] = []
+
+    async def small(use_gate: bool = False) -> int:
+        ran.append(evals.TRANSPORT_IN_USE)
+        return 0
+
+    monkeypatch.setattr(evals, "small_main", small)
+    assert evals.cli(["small", "--transport", "ag-ui"]) == 0 and ran == ["ag-ui"]
+    assert evals.cli(["small"]) == 0 and ran[-1] == "in-process", "a run uses only the transport it names"
+    assert evals.cli(["steps", "--transport", "responses"]) == 2 and len(ran) == 2
+    assert evals.cli(["small", "--transport", "carrier-pigeon"]) == 2 and len(ran) == 2
+    monkeypatch.setattr(evals, "EVAL_HISTORY", tmp_path / "history.jsonl")
+    assert evals.cli(["compare-transports", "--last", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "in-process" in out and "responses" in out and "ag-ui" in out and "Decision: keep AG-UI off" in out, out
+    script = (evals.EVAL_SETS_DIR / "run-bar.ps1").read_text(encoding="utf-8")
+    assert "[string]$Transport" in script and "--transport" in script, "run-bar passes the transport on"

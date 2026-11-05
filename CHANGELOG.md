@@ -26,6 +26,14 @@ was never merged and has no entry.
   (`harness/steward/working/ext-aider-py/`, gitignored) and scores `exercise_tests_pass`, the pinned tests on what he
   left, 60 s at most. `evals.py validate` checks their source, their ids against the pinned data, their checks and each
   exercise stub failing its tests; the fingerprint covers the pinned files. Run: `evals.py bfcl`, `evals.py aider-py`.
+- `evals.py --transport in-process|responses|ag-ui` for the asks sets (small, heldout; run-bar's `-Transport`):
+  `responses` drives each case against the running Responses host (hosted.py, 43120), its cards answered with
+  `mcp_approval_response` as SecondBrain's steward.cjs does; `ag-ui` against the AG-UI host (ag_ui_app.py, 43122),
+  its interrupts resumed with `interruptId` and `checkpointId` (`eval_transports.py`). The same approval policy and
+  checks as in-process; the default is unchanged. Each history line carries `transport` and each case `timings`
+  (first text or reasoning event, total time, cards and whether each resumed, stream errors); a dropped stream or
+  refused resume fails the case with its reason, not a crash. `evals.py compare-transports [--set] [--last N]`
+  prints the per-case table and the README's rule for turning AG-UI on by default.
 - Versioned, data-driven eval sets in `harness/steward/evals/` (one `<tier>-<name>.yaml` per set: name, tier, version,
   owner, runner, split, bar, changes, cases with ask, fixture, subject, precondition and checks), read by `evals.py`
   at import; `evals.py small` and `evals.py steps` run the T0 files, `evals.py heldout` the T1 file, and each run's
@@ -136,6 +144,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- One model: the coder is Steward's own model by default (the operator's ruling, 2026-11-05: "one model to rule
+  them all"). `_coder_model()` is `STEWARD_CODER_MODEL` if set, else `OLLAMA_MODEL`, Steward's own (1,015 traced chat
+  calls, all `steward:1`; qwen2.5-coder:14b cannot sit beside it on the 16 GB card). The coder's client records its
+  Ollama timings (`_record_ollama_timings`), so a separate coder's loads show in the traces. Test:
+  `test_the_coder_is_stewards_own_model_unless_named_and_records_its_timings`.
 - EXECUTE's message asks it to end on what it changed, naming each file (`SAY_WHAT_CHANGED` in `execute_message`). The
   confirmation bars at 2b4b509 and e532fea: the work was right, and his last reply was only "All remaining todos are
   completed and the tests now pass." Test: `test_execute_is_asked_to_end_on_what_it_changed_by_file`.

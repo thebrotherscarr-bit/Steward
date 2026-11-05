@@ -26,9 +26,17 @@ STEWARD_<STEP>_THINK / _TEMPERATURE / _SEED that steward_workflow reads at build
 The small and steps sets, and T1's heldout set, are versioned files in harness/steward/evals/ (load_eval_sets; how a set
 is added: that folder's README.md). ``validate`` checks them with no model; ``bar <set>`` reads the history for its bar.
 
+``--transport in-process|responses|ag-ui`` (an asks set: small, heldout) says how each case reaches Steward: in this
+process (the default, run_steward), or against the running Responses host (hosted.py, 127.0.0.1:43120) or AG-UI host
+(ag_ui_app.py, 127.0.0.1:43122), its cards answered over the wire with the same policy (eval_transports.py). Every case
+records its transport and timings in the history; ``compare-transports [--set NAME] [--last N]`` prints the per-case
+table of the three, from the history, running nothing.
+
 Run:
     python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory | heldout] [--options NAME]
     python harness/steward/step04_production_ready/evals.py bfcl | aider-py    (tier ext, calibration: ext_sets.py)
+    python harness/steward/step04_production_ready/evals.py small --transport ag-ui
+    python harness/steward/step04_production_ready/evals.py compare-transports --last 3
     python harness/steward/step04_production_ready/evals.py validate
     python harness/steward/step04_production_ready/evals.py bar <set>
 """
@@ -43,6 +51,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import contextlib
 from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, contextmanager
@@ -67,6 +76,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import eval_transports  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
 import ext_sets  # noqa: E402 - the outside sets' own (tier ext): pinned data, their runners and checks
@@ -738,15 +748,42 @@ def fixture_entered(stack: contextlib.ExitStack, query: str, fixture: Callable[[
     return True
 
 
+# The transport the asks sets' cases go over (cli's --transport; eval_transports.TRANSPORTS): in-process runs
+# run_steward here; responses and ag-ui drive the running host. Each case's timings (eval_transports.CaseClock.timings:
+# transport, time to the first text or reasoning event, total time, each card and whether it resumed, stream errors),
+# by its query, for the history (history_entry).
+TRANSPORT_IN_USE = "in-process"
+CASE_TIMINGS: dict[str, dict[str, Any]] = {}
+# The running case's clock (run_case sets it; the in-process card loop notes its text and cards on it).
+_CLOCK: eval_transports.CaseClock | None = None
+
+
 async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[Any] | None, AgentResponse[Any]]:
-    """One case of a set through run_steward. A run that raises (an Exception: a cancellation or Ctrl+C still stops the
-    set) is recorded in CASE_ERRORS and answered with an empty response, so the case is scored, and fails, with the rest."""
+    """One case of a set through run_steward, or over TRANSPORT_IN_USE's host (eval_transports.run_over) with the same
+    cards approved (card_approved: the plan, ``approve`` and the sample project's pytest). A run that raises (an
+    Exception: a cancellation or Ctrl+C still stops the set), or a transport that could not finish it (a dropped stream,
+    a refused resume), is recorded in CASE_ERRORS, so the case is scored, and fails, with the rest; a transport's case
+    is scored on what came back. Its timings go in CASE_TIMINGS either way."""
+    global _CLOCK
     CASE_ERRORS.pop(query, None)
+    _CLOCK = clock = eval_transports.CaseClock(transport=TRANSPORT_IN_USE)
     try:
-        return await run_steward(query, approve, **build)
+        if TRANSPORT_IN_USE == "in-process":
+            return await run_steward(query, approve, **build)
+        answers = {APPROVE_PLAN, *approve}
+        response, failure = await eval_transports.run_over(
+            TRANSPORT_IN_USE, query, lambda call: card_approved(call, answers), clock, CARD_ROUNDS
+        )
+        if failure:
+            CASE_ERRORS[query] = f"the {TRANSPORT_IN_USE} transport: {failure}"
+        return None, response
     except Exception as error:
         CASE_ERRORS[query] = raised(error)
         return None, AgentResponse(messages=[])
+    finally:
+        clock.ended = clock.ended or time.monotonic()
+        CASE_TIMINGS[query] = clock.timings()
+        _CLOCK = None
 
 
 @evaluator(name="run_completed")
@@ -780,7 +817,8 @@ def _git_head() -> str | None:
 
 
 def history_entry(name: str, results: dict[str, Any], code: int, progress: list[str] | None = None) -> dict[str, Any]:
-    """One run's line: the set, its version and tier (from its file; None for a set with no file), its settings set, its counts (applicable_checks for the checks), the exit code, each
+    """One run's line: the set, its version and tier (from its file; None for a set with no file), its settings set, its
+    transport (TRANSPORT_IN_USE; each case run through run_case also carries its "timings", CASE_TIMINGS), its counts (applicable_checks for the checks), the exit code, each
     case with its failed checks (a step's cases carry the step's name), the repo's HEAD and the model's name; a steps
     run also carries its CHECK and REPAIR progress lines (StewardProgress events, in order) as "progress"."""
     items = [(step, item) for step, result in results.items() for item in result.items]
@@ -792,6 +830,7 @@ def history_entry(name: str, results: dict[str, Any], code: int, progress: list[
         "set_version": eval_set.version if eval_set else None,
         "tier": eval_set.tier if eval_set else None,
         "options": OPTIONS_IN_USE,
+        "transport": TRANSPORT_IN_USE,
         "passed": sum(result.passed for result in results.values()),
         "total": sum(result.total for result in results.values()),
         "checks_passed": checks_passed,
@@ -807,6 +846,7 @@ def history_entry(name: str, results: dict[str, Any], code: int, progress: list[
                     for score in item.scores
                     if score.passed is False
                 ],
+                **({"timings": CASE_TIMINGS[item.input_text]} if item.input_text in CASE_TIMINGS else {}),
             }
             for step, item in items
         ],
@@ -886,6 +926,16 @@ def _called(conversation: list[Any]) -> list[str]:
     return [c.name for m in conversation or [] for c in getattr(m, "contents", None) or [] if c.type == "function_call"]
 
 
+async def _noting_text(updates: Any) -> Any:
+    """The run's updates as they stream, the first text or reasoning one noted on the case's clock (first_event_s)."""
+    async for update in updates:
+        if _CLOCK is not None and _CLOCK.first_event is None and any(
+            c.type in ("text", "text_reasoning") and (getattr(c, "text", None) or "") for c in update.contents or []
+        ):
+            _CLOCK.text()
+        yield update
+
+
 async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, approve: set[str]) -> AgentResponse[Any]:
     """A run whose approval cards are answered: approved for the tools in ``approve``, denied otherwise, as the
     console's Approve and Deny do (harness/console/observers/tool_approval.py).
@@ -898,7 +948,7 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
     edit_keeps_file_whole found no write, because the answers were sent and never kept."""
     from agent_framework import Message  # noqa: PLC0415
 
-    updates = [u async for u in agent.run(query, session=session, stream=True)]
+    updates = [u async for u in _noting_text(agent.run(query, session=session, stream=True))]
     messages = list(AgentResponse.from_updates(updates).messages)
     answered: set[str] = set()
     for rounds in range(CARD_ROUNDS + 1):
@@ -913,7 +963,15 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
         answered.update(request.function_call.call_id for request in requests)
         answers = [request.to_function_approval_response(approved=card_approved(request.function_call, approve)) for request in requests]
         answer = Message(role="user", contents=answers)
-        turn = [u async for u in agent.run(answer, session=session, stream=True)]
+        cards = [_CLOCK.card(request.function_call.name, reply.approved) for request, reply in zip(requests, answers)] if _CLOCK else []
+        try:
+            turn = [u async for u in _noting_text(agent.run(answer, session=session, stream=True))]
+        except BaseException:
+            for card in cards:
+                card["resumed"] = False
+            raise
+        for card in cards:
+            card["resumed"] = True
         updates += turn
         messages += [answer, *AgentResponse.from_updates(turn).messages]
     return AgentResponse(messages=messages)
@@ -1591,6 +1649,7 @@ async def run_small_asks(
     from agent_framework import FileAccessProvider  # noqa: PLC0415
 
     build.setdefault("auto_approve_skill_scripts", True)
+    CASE_TIMINGS.clear()  # this set's cases only
     # Each ask's sample project and plant step are its set file's (CASE_FIXTURES); an ask in no set is sample-project's.
     named = sorted({CASE_FIXTURES.get(query, (SAMPLE_PROJECT, None))[0] for query in asks})
     for name in named:
@@ -1905,16 +1964,132 @@ def apply_options(name: str, path: Path = EVAL_OPTIONS) -> str:
     return f"Settings set {name}: {', '.join(f'{key}={value}' for key, value in values.items()) or 'no step options'}"
 
 
+# <compare-transports>
+def _median(values: list[float]) -> float | None:
+    values = sorted(values)
+    if not values:
+        return None
+    middle = len(values) // 2
+    return values[middle] if len(values) % 2 else round((values[middle - 1] + values[middle]) / 2, 2)
+
+
+def transport_comparison(set_name: str = "small", last: int = 3, history: Path | None = None) -> dict[str, dict[str, dict[str, Any]]]:
+    """From the history, each transport's last ``last`` runs of ``set_name`` (a line with no transport is in-process),
+    per case: {transport: {case input: {runs, passed, first_event_s (median), total_s (median), cards, resumed,
+    stream_errors}}}. Only runs of the set's current version count (like with like)."""
+    path = history or EVAL_HISTORY
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    version = EVAL_SETS[set_name].version if set_name in EVAL_SETS else None
+    runs: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_transports.TRANSPORTS}
+    for line in lines:
+        try:
+            run = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(run, dict) or run.get("set") != set_name:
+            continue
+        if version is not None and run.get("set_version") not in (version, None):
+            continue
+        runs.setdefault(run.get("transport") or "in-process", []).append(run)
+    table: dict[str, dict[str, dict[str, Any]]] = {}
+    for transport, kept in runs.items():
+        cases: dict[str, dict[str, Any]] = {}
+        for run in kept[-last:] if last > 0 else []:
+            for case in run.get("cases") or []:
+                row = cases.setdefault(case.get("input") or "", {
+                    "runs": 0, "passed": 0, "first": [], "total": [], "cards": 0, "resumed": 0, "stream_errors": 0,
+                })
+                timings = case.get("timings") or {}
+                row["runs"] += 1
+                row["passed"] += bool(case.get("passed"))
+                if timings.get("first_event_s") is not None:
+                    row["first"].append(float(timings["first_event_s"]))
+                if timings.get("total_s") is not None:
+                    row["total"].append(float(timings["total_s"]))
+                row["cards"] += int(timings.get("cards") or 0)
+                row["resumed"] += int(timings.get("cards_resumed") or 0)
+                row["stream_errors"] += len(timings.get("stream_errors") or [])
+        for row in cases.values():
+            row["first_event_s"], row["total_s"] = _median(row.pop("first")), _median(row.pop("total"))
+        table[transport] = cases
+    return table
+
+
+def ag_ui_decision(table: dict[str, dict[str, dict[str, Any]]]) -> tuple[bool, list[str]]:
+    """The README's rule: AG-UI on by default only if, on every case, it matches or beats responses on the result (the
+    share of runs passed) and on the resumes (the share of cards resumed), with no stream error. (on, the reasons not)."""
+    ag_ui, responses = table.get("ag-ui") or {}, table.get("responses") or {}
+    if not ag_ui or not responses:
+        return False, ["no ag-ui and responses runs to compare"]
+    reasons: list[str] = []
+
+    def share(part: int, whole: int) -> float:
+        return part / whole if whole else 1.0
+
+    for case, base in responses.items():
+        mine = ag_ui.get(case)
+        if mine is None:
+            reasons.append(f"{case[:40]!r}: no ag-ui run")
+            continue
+        if share(mine["passed"], mine["runs"]) < share(base["passed"], base["runs"]):
+            reasons.append(f"{case[:40]!r}: result {mine['passed']}/{mine['runs']} < responses {base['passed']}/{base['runs']}")
+        if share(mine["resumed"], mine["cards"]) < share(base["resumed"], base["cards"]):
+            reasons.append(f"{case[:40]!r}: resumed {mine['resumed']}/{mine['cards']} < responses {base['resumed']}/{base['cards']}")
+    for case, mine in ag_ui.items():
+        if mine["stream_errors"]:
+            reasons.append(f"{case[:40]!r}: {mine['stream_errors']} ag-ui stream error(s)")
+    return not reasons, reasons
+
+
+def compare_transports_main(args: list[str]) -> int:
+    """``compare-transports [--set NAME] [--last N]``: the per-case table of in-process vs responses vs ag-ui from the
+    history (transport_comparison) and the README's decision line (ag_ui_decision). Runs nothing; 0, or 2 for bad args."""
+    set_name, last = "small", 3
+    try:
+        if "--set" in args:
+            set_name = args[args.index("--set") + 1]
+        if "--last" in args:
+            last = int(args[args.index("--last") + 1])
+    except (IndexError, ValueError):
+        print("evals.py compare-transports [--set NAME] [--last N]", file=sys.stderr)
+        return 2
+    table = transport_comparison(set_name, last)
+    print(
+        f"Transports on {set_name}, the last {last} run(s) of each "
+        "(passed/runs, first event s, total s, cards resumed/answered, stream errors):"
+    )
+    cases = list(dict.fromkeys(case for transport in eval_transports.TRANSPORTS for case in table.get(transport, {})))
+
+    def cell(row: dict[str, Any] | None) -> str:
+        if not row:
+            return "-"
+        first = "-" if row["first_event_s"] is None else f"{row['first_event_s']:g}"
+        total = "-" if row["total_s"] is None else f"{row['total_s']:g}"
+        return f"{row['passed']}/{row['runs']} {first}s {total}s {row['resumed']}/{row['cards']} e{row['stream_errors']}"
+
+    width = 30
+    print(f"  {'case':<40} " + " ".join(f"{transport:<{width}}" for transport in eval_transports.TRANSPORTS))
+    for case in cases:
+        print(f"  {case[:40]:<40} " + " ".join(f"{cell(table.get(t, {}).get(case)):<{width}}" for t in eval_transports.TRANSPORTS))
+    on, reasons = ag_ui_decision(table)
+    print("Decision: AG-UI on by default." if on else f"Decision: keep AG-UI off by default ({'; '.join(reasons)}).")
+    return 0
+# </compare-transports>
+
+
 def cli(argv: list[str]) -> int:
-    """evals.py's command line, ``[small [--gate] | steps | memory | <set name>] [--options NAME]``, ``validate`` or
-    ``bar <set name>``: the set's exit code, or 2 for a settings set that cannot be used (the reason on stderr, and
-    nothing run). validate checks every set file (validate_main); bar prints whether a set's bar is met (0) or not (1),
+    """evals.py's command line, ``[small [--gate] | steps | memory | <set name>] [--options NAME] [--transport T]``,
+    ``validate``, ``bar <set name>`` or ``compare-transports [--set NAME] [--last N]``: the set's exit code, or 2 for a
+    settings set or transport that cannot be used (the reason on stderr, and nothing run). validate checks every set file (validate_main); bar prints whether a set's bar is met (0) or not (1),
     from the history, running nothing."""
-    global OPTIONS_IN_USE
+    global OPTIONS_IN_USE, TRANSPORT_IN_USE
     OPTIONS_IN_USE = None  # a run uses only the settings set it names
+    TRANSPORT_IN_USE = "in-process"  # and only the transport it names
     args = list(argv)
     if args[:1] == ["validate"]:
         return validate_main()
+    if args[:1] == ["compare-transports"]:
+        return compare_transports_main(args[1:])
     if args[:1] == ["bar"]:
         if len(args) != 2 or args[1] not in EVAL_SETS:
             print(f"evals.py bar: name one set: {', '.join(EVAL_SETS)}", file=sys.stderr)
@@ -1932,6 +2107,19 @@ def cli(argv: list[str]) -> int:
             print(f"evals.py --options: {error}", file=sys.stderr)
             return 2
         print(line)
+    if "--transport" in args:
+        at = args.index("--transport")
+        transport = args[at + 1] if at + 1 < len(args) else ""
+        del args[at : at + 2]
+        named = EVAL_SETS.get(args[0]) if args else None
+        if transport not in eval_transports.TRANSPORTS:
+            print(f"evals.py --transport: one of {', '.join(eval_transports.TRANSPORTS)}", file=sys.stderr)
+            return 2
+        if transport != "in-process" and (named is None or named.runner != "asks"):
+            print("evals.py --transport: a host transport runs an asks set (small, heldout) only", file=sys.stderr)
+            return 2
+        TRANSPORT_IN_USE = transport
+        print(f"Transport: {transport}")
     runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
     if args[:1] == ["small"]:
         return asyncio.run(small_main(use_gate="--gate" in args))
