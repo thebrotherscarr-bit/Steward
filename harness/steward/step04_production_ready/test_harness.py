@@ -6575,3 +6575,27 @@ def test_the_todo_reminder_says_his_words_are_shown_only_when_he_said_some(monke
     assert steward.TODOS_ALREADY_SHOWN not in nudge(""), "an empty reply showed nothing"
     assert steward.TODOS_ALREADY_SHOWN not in nudge(), "no reply showed nothing"
     assert nudge("").startswith("You still have 1 open todo item(s)."), "the reminder itself is MAF's, as before"
+
+
+def test_a_run_that_ends_on_a_tool_result_with_no_reply_is_asked_for_its_answer() -> None:
+    """The confirmation bar at 5039e0e (2026-11-05 09:03Z, the item_count ask): after todos_get_remaining the model's
+    reply came back empty, MAF kept no message for it, the run's last assistant message was the call, and the empty
+    reply was not seen (ended_empty), so the run ended with no answer. A run whose last message is a tool's result is
+    ended empty, and in execute mode the harness loop asks it for its answer (EMPTY_REPLY_NUDGE)."""
+    from agent_framework import AgentModeProvider, AgentResponse, AgentSession, set_agent_mode
+
+    call = Content.from_function_call(call_id="g1", name="todos_get_remaining", arguments={})
+    result = Content.from_function_result(call_id="g1", result="[]")
+    on_result = AgentResponse(messages=[Message(role="assistant", contents=[call]), Message(role="tool", contents=[result])])
+    answered = AgentResponse(messages=[*on_result.messages, Message(role="assistant", contents=["Added item_count to inventory.py."])])
+    assert steward.ended_empty(on_result), "a run that ends on a tool's result has no reply"
+    assert not steward.ended_empty(answered)
+    assert not steward.ended_empty(AgentResponse(messages=[Message(role="assistant", contents=[call])])), "a call, waiting"
+
+    modes = AgentModeProvider(default_mode="plan")
+    should_continue, next_message = steward.plan_reply_loop(modes, None, None)
+    session = AgentSession()
+    set_agent_mode(session, "execute", source_id=modes.source_id, available_modes=modes.available_modes)
+    decision = asyncio.run(should_continue(session=session, last_result=on_result, iteration=1, messages=[]))
+    assert decision == (True, "answer"), decision
+    assert steward.EMPTY_REPLY_NUDGE in asyncio.run(next_message(feedback="answer", session=session)).text
