@@ -17,7 +17,7 @@ Telegram. It is not a chat with you: your daytime conversations and their contex
   "name": "Startup",
   "when": "weekdays 06:00",
   "prompt": "the operator's own words for it",
-  "steps": ["pull_ff", "repo_log", "merged_prs", "releases", "eval_bars", "plan_left"],
+  "steps": ["pull_ff", "versions", "repo_log", "merged_prs", "releases", "eval_bars", "plan_left"],
   "summarize": "Write the daily what-happened from this: a short plain summary, under 300 words.",
   "deliver": ["note", "telegram"]
 }
@@ -37,6 +37,7 @@ Telegram. It is not a chat with you: your daytime conversations and their contex
 | `merged_prs` | each repository's pull requests merged since then (`gh pr list --state merged`) |
 | `releases` | Jesster's and Atlas's releases since then (`gh release list`) |
 | `eval_bars` | the newest eval runs' result lines (`storage/evals/runs/<tag>/progress.txt`) |
+| `versions` | each repository's branch, HEAD, origin/main, how far behind and ahead, and clean (as `secondbrain_estate_status` shows them) |
 | `plan_left` | the working path of the plan (`WHATS_LEFT.md`, "Today's working path") |
 | `pull_ff` | brings each repository current: `git pull --ff-only` of main, only on main with a clean work tree, and never the ground while a Manjuel sitting is open (RULE 9); anything else is listed "not pulled: why" and left alone |
 | `eval_start` | `{"step": "eval_start", "sets": [...], "runs": 1}`: starts eval sets, as `secondbrain_eval_start` does |
