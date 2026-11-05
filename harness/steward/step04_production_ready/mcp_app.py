@@ -51,7 +51,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from recipe_workflow import RecipeError, RecipeRuns, RecipeTools, estate_repos  # noqa: E402
+from recipe_workflow import RecipeError, RecipeRuns, RecipeTools, estate_repos, recipe_graph  # noqa: E402
 from agent_framework import Agent  # noqa: E402
 from agent_framework.ollama import OllamaChatClient  # noqa: E402
 
@@ -164,7 +164,7 @@ def steward_mcp_tool(agent: Any) -> AgentMCPTool[Any]:
     )
 
 
-# SecondBrain's scheduler calls these two (Jesster electron/agent/workflows.cjs): a recipe runs as a MAF workflow here,
+# SecondBrain's scheduler calls the first two (Jesster electron/agent/workflows.cjs): a recipe runs as a MAF workflow here,
 # in its own task and session, never his chat thread; its status is read until it is done.
 RECIPE_TOOLS = [
     types.Tool(
@@ -179,14 +179,41 @@ RECIPE_TOOLS = [
             "properties": {
                 "recipe": {"type": "object", "description": "name, prompt, steps, summarize, deliver"},
                 "since": {"type": "number", "description": "the window's start, seconds since the epoch; a day ago when left out"},
+                "flow": {"type": "string", "description": "the flow's id in SecondBrain, kept for its run history"},
+                "trigger": {"type": "string", "enum": ["now", "schedule"], "description": "what started the run"},
             },
             "required": ["recipe"],
         },
     ),
     types.Tool(
         name="recipe_status",
-        description="One recipe run's state: running, done (ok, text for the note, short for Telegram) or failed (error).",
+        description=(
+            "One recipe run's state: running, done (ok, text for the note, short for Telegram) or failed (error), with "
+            "its steps so far (id, step, state, ms, ok)."
+        ),
         input_schema={"type": "object", "properties": {"run_id": {"type": "string"}}, "required": ["run_id"]},
+    ),
+    # The Flows shelf (Jesster's FlowsShelf, ADR-0008): the canvas drawn from the recipe's real MAF workflow, and the
+    # flow's run history. Both read only.
+    types.Tool(
+        name="recipe_graph",
+        description=(
+            "A recipe built as its MAF workflow, not run: {workflow: Workflow.to_dict(), mermaid: WorkflowViz's Mermaid}. "
+            "Read-only."
+        ),
+        input_schema={"type": "object", "properties": {"recipe": {"type": "object"}}, "required": ["recipe"]},
+    ),
+    types.Tool(
+        name="recipe_runs",
+        description=(
+            "One flow's runs, newest first: run_id, trigger, state, ok, short, error, started, ended, and each step's "
+            "state (done, failed, skipped, running, waiting) and ms, from the runs' MAF events. Read-only."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"flow": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+            "required": ["flow"],
+        },
     ),
 ]
 
@@ -198,7 +225,7 @@ def _text_result(payload: Any, error: bool = False) -> types.CallToolResult:
 
 def build_mcp_app(agent: Any, ask_card: AskCard | None = None, recipes: RecipeRuns | None = None) -> Starlette:
     """The sample's session-aware server, with Steward as its agent; ``ask_card`` answers his cards (SecondBrain);
-    ``recipes`` serves run_recipe and recipe_status beside him."""
+    ``recipes`` serves run_recipe, recipe_status, recipe_graph and recipe_runs beside him."""
     agent_tool = steward_mcp_tool(agent)
     session_locks: dict[str, asyncio.Lock] = {}
 
@@ -221,9 +248,20 @@ def build_mcp_app(agent: Any, ask_card: AskCard | None = None, recipes: RecipeRu
             try:
                 if name == "run_recipe":
                     since = arguments.get("since")
-                    return _text_result(recipes.start(arguments.get("recipe") or {}, float(since) if since is not None else None))
+                    return _text_result(
+                        recipes.start(
+                            arguments.get("recipe") or {},
+                            float(since) if since is not None else None,
+                            flow=arguments.get("flow"),
+                            trigger=arguments.get("trigger"),
+                        )
+                    )
+                if name == "recipe_graph":
+                    return _text_result(recipe_graph(arguments.get("recipe") or {}))
+                if name == "recipe_runs":
+                    return _text_result(recipes.runs(str(arguments.get("flow") or ""), int(arguments.get("limit") or 10)))
                 return _text_result(recipes.status(str(arguments.get("run_id") or "")))
-            except RecipeError as exc:
+            except (RecipeError, ValueError, TypeError) as exc:
                 return _text_result(str(exc), error=True)
         session_id = arguments.get("session_id") if arguments else None
         if not isinstance(session_id, str) or not session_id:

@@ -12,7 +12,8 @@ and saved by itself. An **automation** is `{flow, when, on/off}` and nothing els
 the clock: at an automation's time (or on Run now) it hands the flow to your MCP host's
 `run_recipe`, where it runs as a MAF workflow (`step04_production_ready/recipe_workflow.py`: one executor per step,
 then summarize, then deliver, checkpointed, its events in `storage/recipes/<run_id>.jsonl`), and reads `recipe_status`
-until it is done. The result is filed as a note (tag `automation`) with one short line to Telegram. It is not a chat
+until it is done. Every run is kept with its flow and what started it; the Flows shelf reads a flow's runs with
+`recipe_runs` and draws the flow from `recipe_graph` (its MAF `to_dict()`). The result is filed as a note (tag `automation`) with one short line to Telegram. It is not a chat
 with you: the summarize step is a tool-less run in a session of its own, and your daytime conversations and their
 context are never touched.
 

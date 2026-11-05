@@ -19,6 +19,11 @@ on main with a clean work tree, never the ground while a Manjuel sitting is open
 (SecondBrain's eval_start, which runs eval sets only). No step raises a card. Checkpoints go to MAF's
 FileCheckpointStorage (storage/recipes/checkpoints) and each run's events to storage/recipes/<run_id>.jsonl.
 ``recipe_graph`` gives the workflow's to_dict() and WorkflowViz Mermaid for the Flows shelf's wiring view.
+
+Run history (ADR-0008, 2026-11-05): every run's state (<run_id>.json) carries the flow it ran for, what started it
+(``now`` or ``schedule``) and its executors in order; ``RecipeRuns.runs`` lists a flow's runs, newest first, each with
+its per-step states read from MAF's events as they are (executor_invoked and executor_completed give each step's ms; a
+step that failed is told by MAF's non-fatal ``error`` event, which GatherStep adds with its executor id).
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from agent_framework import (
     Workflow,
     WorkflowBuilder,
     WorkflowContext,
+    WorkflowEvent,
     WorkflowViz,
     handler,
     register_checkpoint_type,
@@ -55,6 +61,10 @@ MAX_SECTION = 4000
 PLAN_FILE = "WHATS_LEFT.md"
 PLAN_SECTION = "Today's working path"
 EVAL_POLL_SECONDS = 60
+# the run history (recipe_runs): what may start a run, and how many runs one read lists
+TRIGGERS = ("now", "schedule")
+RUNS_LIMIT = 10
+RUNS_MAX = 50
 _RESULT_LINE = re.compile(r" done |BAR DONE|\bbar\b")
 _START_LINE = re.compile(r" bar \S+ : sets ")
 
@@ -369,6 +379,8 @@ class GatherStep(Executor):
             g.sections.append(f"## {self._step['step']}\nFailed: {exc}")
             if self._step["step"] == "eval_start":
                 g.short = f"Failed: {exc}"
+            # MAF's non-fatal "error from user code" event, with this step's id: the run history marks the step failed
+            await ctx.add_event(WorkflowEvent("error", data=exc, executor_id=self.id))
         await ctx.send_message(g)
 
 
@@ -414,6 +426,12 @@ class Deliver(Executor):
 
 for _t in (RecipeStart, Gathered, RecipeResult):
     register_checkpoint_type(_t)
+
+
+def executor_ids(recipe: Mapping[str, Any]) -> list[str]:
+    """The recipe's executors' ids in the order they run: begin, 1_<step> ..., summarize (with summarize), deliver."""
+    r = validate_recipe(recipe)
+    return ["begin", *(f"{i + 1}_{s['step']}" for i, s in enumerate(r["steps"])), *(["summarize"] if r.get("summarize") else []), "deliver"]
 
 
 def build_recipe_workflow(recipe: Mapping[str, Any], tools: RecipeTools, summarizer: Any | None, checkpoint_storage: Any | None = None) -> Workflow:
@@ -486,14 +504,23 @@ class RecipeRuns:
         with (self.folder / f"{run_id}.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(line) + "\n")
 
-    def start(self, recipe: Mapping[str, Any], since: float | None = None) -> dict[str, Any]:
-        """Validate and start one run; its id at once (the run goes on in its own task)."""
+    def start(self, recipe: Mapping[str, Any], since: float | None = None, flow: str | None = None, trigger: str | None = None) -> dict[str, Any]:
+        """Validate and start one run; its id at once (the run goes on in its own task). ``flow`` is the flow's id in
+        SecondBrain and ``trigger`` what started it (``now`` or ``schedule``), kept for the run history."""
         r = validate_recipe(recipe)
         tools = self._tools()
         run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
         start = RecipeStart(recipe=r, since=since if since is not None else tools.clock() - DAY_SECONDS)
         workflow = build_recipe_workflow(r, tools, self._summarizer, FileCheckpointStorage(self.folder / "checkpoints"))
-        state = {"run_id": run_id, "name": r["name"], "state": "running", "started": datetime.now(timezone.utc).isoformat()}
+        state = {
+            "run_id": run_id,
+            "name": r["name"],
+            "flow": str(flow)[:120] if flow else None,
+            "trigger": trigger if trigger in TRIGGERS else None,
+            "executors": executor_ids(r),
+            "state": "running",
+            "started": datetime.now(timezone.utc).isoformat(),
+        }
         self._write(run_id, state)
         self._tasks[run_id] = asyncio.create_task(self._run(run_id, workflow, start, state))
         return {"run_id": run_id, "state": "running"}
@@ -515,10 +542,85 @@ class RecipeRuns:
         self._write(run_id, state)
 
     def status(self, run_id: str) -> dict[str, Any]:
-        """One run's state: running, done (ok, text, short) or failed (error)."""
+        """One run's state: running, done (ok, text, short) or failed (error), and its steps so far (step_states)."""
         if not re.fullmatch(r"[\w-]+", run_id or ""):
             raise RecipeError("run_id is the id run_recipe returned")
         f = self.folder / f"{run_id}.json"
         if not f.exists():
             raise RecipeError(f"no recipe run {run_id}")
-        return json.loads(f.read_text(encoding="utf-8"))
+        state = json.loads(f.read_text(encoding="utf-8"))
+        return state | {"steps": step_states(state, self._events(run_id))}
+
+    def _events(self, run_id: str) -> list[dict[str, Any]]:
+        f = self.folder / f"{run_id}.jsonl"
+        out: list[dict[str, Any]] = []
+        for line in f.read_text(encoding="utf-8").splitlines() if f.exists() else []:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue  # a line cut by a crash is skipped, the rest still read
+        return out
+
+    def runs(self, flow: str, limit: int = RUNS_LIMIT) -> list[dict[str, Any]]:
+        """One flow's runs, newest first, at most ``limit`` (1 to RUNS_MAX): each run's state without the note's text,
+        and its per-step states. Read-only."""
+        if not flow:
+            raise RecipeError("flow is the flow's id")
+        limit = max(1, min(RUNS_MAX, int(limit)))
+        found: list[dict[str, Any]] = []
+        for f in self.folder.glob("*.json") if self.folder.is_dir() else []:
+            try:
+                state = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(state, dict) and state.get("flow") == flow:
+                found.append(state)
+        found.sort(key=lambda s: str(s.get("started") or ""), reverse=True)
+        keep = ("run_id", "name", "flow", "trigger", "state", "ok", "short", "error", "started", "ended")
+        return [{k: s.get(k) for k in keep} | {"steps": step_states(s, self._events(s["run_id"]))} for s in found[:limit]]
+
+
+def _ts(s: Any) -> float | None:
+    try:
+        return datetime.fromisoformat(str(s)).timestamp()
+    except ValueError:
+        return None
+
+
+def step_states(state: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Each executor's state in one run, from MAF's events as they were written: ``done`` (completed), ``failed`` (an
+    ``error`` or ``executor_failed`` event named it, or it never completed in a run that ended), ``running`` (invoked,
+    not completed, in a run still going), ``waiting`` (not reached yet in a run still going) or ``skipped`` (not reached
+    in a run that ended); ``ms`` from its executor_invoked to its executor_completed."""
+    running = state.get("state") == "running"
+    ids = list(state.get("executors") or [])
+    seen: dict[str, dict[str, Any]] = {}
+    for e in events:
+        ex = e.get("executor")
+        if not ex:
+            continue
+        if ex not in ids:
+            ids.append(ex)
+        s = seen.setdefault(ex, {})
+        kind = e.get("type")
+        if kind == "executor_invoked":
+            s.setdefault("invoked", _ts(e.get("ts")))
+        elif kind == "executor_completed":
+            s["completed"] = _ts(e.get("ts"))
+        elif kind in ("error", "executor_failed"):
+            s["error"] = str(e.get("data") or kind)
+    out: list[dict[str, Any]] = []
+    for ex in ids:
+        s = seen.get(ex, {})
+        if "invoked" not in s:
+            st = "waiting" if running else "skipped"
+        elif "error" in s:
+            st = "failed"
+        elif "completed" in s:
+            st = "done"
+        else:
+            st = "running" if running else "failed"
+        ms = round((s["completed"] - s["invoked"]) * 1000) if s.get("completed") is not None and s.get("invoked") is not None else None
+        step = ex.split("_", 1)[1] if re.match(r"\d+_", ex) else ex
+        out.append({"id": ex, "step": step, "state": st, "ms": ms, "ok": st == "done", **({"error": s["error"]} if "error" in s else {})})
+    return out

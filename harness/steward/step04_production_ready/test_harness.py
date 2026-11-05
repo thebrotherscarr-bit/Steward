@@ -8029,3 +8029,118 @@ def test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him(tmp_path: P
         bad = rpc(http, "tools/call", {"name": "run_recipe", "arguments": {"recipe": {"steps": ["run_shell"]}}})["result"]
         assert bad["isError"] is True and "no workflow step" in bad["content"][0]["text"]
     assert "build_mcp_app(agent, ask_card, recipes)" in Path(mcp_app.__file__).read_text(encoding="utf-8"), "main() serves them"
+
+
+# ---- the Flows shelf's run history and graph (ADR-0008: recipe_runs, recipe_graph) -----------------------------------
+
+
+def test_each_recipe_run_is_kept_for_its_flow_with_per_step_states_from_maf_events(tmp_path: Path) -> None:
+    """Every run keeps its flow, trigger and executors; recipe_runs lists one flow's runs, newest first, each step's state
+    and ms read from MAF's events (a step that failed is told by MAF's non-fatal error event with its id). Red if the
+    history or the step states come unplugged."""
+    import recipe_workflow as rw
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+
+    async def down(name: str, arguments: Mapping[str, Any]) -> str:
+        raise RuntimeError("SecondBrain is down")
+
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=down)
+
+    async def _go() -> rw.RecipeRuns:
+        runs = rw.RecipeRuns(tmp_path / "recipes", tools=lambda: tools, summarizer=None)
+        for flow, trigger in (("f1", "schedule"), ("f2", "now"), ("f1", "now")):
+            started = runs.start({"name": "Plan", "steps": ["plan_left", "versions"]}, flow=flow, trigger=trigger)
+            await runs._tasks[started["run_id"]]
+            await asyncio.sleep(0.01)
+        return runs
+
+    runs = asyncio.run(_go())
+    listed = runs.runs("f1")
+    assert [r["trigger"] for r in listed] == ["now", "schedule"], "one flow's runs only, newest first"
+    run = listed[0]
+    assert run["state"] == "done" and run["ok"] is False and run["started"] and run["ended"], run
+    assert "text" not in run, "the list carries no note text"
+    steps = {s["id"]: s for s in run["steps"]}
+    assert list(steps) == ["begin", "1_plan_left", "2_versions", "deliver"], "every executor, in the order it ran"
+    assert steps["1_plan_left"]["state"] == "done" and steps["1_plan_left"]["ok"] is True
+    assert isinstance(steps["1_plan_left"]["ms"], int) and steps["1_plan_left"]["step"] == "plan_left"
+    assert steps["2_versions"]["state"] == "failed" and "SecondBrain is down" in steps["2_versions"]["error"]
+    assert steps["deliver"]["state"] == "done"
+    assert runs.status(run["run_id"])["steps"] == run["steps"], "recipe_status carries the same steps, for the live canvas"
+    assert len(runs.runs("f1", limit=1)) == 1 and runs.runs("nobody") == []
+    with pytest.raises(rw.RecipeError):
+        runs.runs("")
+
+
+def test_step_states_read_a_run_log_fixture_as_maf_wrote_it(tmp_path: Path) -> None:
+    """step_states over a JSONL fixture: running and waiting while the run goes; skipped and failed once it ended."""
+    import json
+
+    import recipe_workflow as rw
+
+    lines = [
+        {"ts": "2026-11-05T06:00:00.000+00:00", "type": "started", "executor": None, "data": "None"},
+        {"ts": "2026-11-05T06:00:00.000+00:00", "type": "executor_invoked", "executor": "begin", "data": "x"},
+        {"ts": "2026-11-05T06:00:00.010+00:00", "type": "executor_completed", "executor": "begin", "data": "x"},
+        {"ts": "2026-11-05T06:00:00.020+00:00", "type": "executor_invoked", "executor": "1_eval_start", "data": "x"},
+        {"ts": "2026-11-05T06:00:01.270+00:00", "type": "executor_completed", "executor": "1_eval_start", "data": "x"},
+        {"ts": "2026-11-05T06:00:01.300+00:00", "type": "executor_invoked", "executor": "2_eval_wait", "data": "x"},
+    ]
+    folder = tmp_path / "recipes"
+    folder.mkdir()
+    # the last line was cut by a crash: it is skipped, the rest read
+    (folder / "r1.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines) + '{"cut', encoding="utf-8")
+    executors = ["begin", "1_eval_start", "2_eval_wait", "deliver"]
+    state = {"run_id": "r1", "flow": "night", "trigger": "schedule", "executors": executors, "state": "running", "started": "2026-11-05T06:00:00+00:00"}
+    (folder / "r1.json").write_text(json.dumps(state), encoding="utf-8")
+    runs = rw.RecipeRuns(folder, tools=lambda: None, summarizer=None)  # type: ignore[arg-type,return-value]
+    live = {s["id"]: (s["state"], s["ms"]) for s in runs.status("r1")["steps"]}
+    assert live == {"begin": ("done", 10), "1_eval_start": ("done", 1250), "2_eval_wait": ("running", None), "deliver": ("waiting", None)}
+    (folder / "r1.json").write_text(json.dumps(state | {"state": "failed", "error": "cut"}), encoding="utf-8")
+    ended = {s["id"]: s["state"] for s in runs.runs("night")[0]["steps"]}
+    assert ended == {"begin": "done", "1_eval_start": "done", "2_eval_wait": "failed", "deliver": "skipped"}
+
+
+def test_his_mcp_host_serves_recipe_graph_and_recipe_runs_for_the_flows_shelf(tmp_path: Path) -> None:
+    """recipe_graph gives the recipe's MAF Workflow.to_dict() (its executors in the order executor_ids names them);
+    run_recipe keeps flow and trigger, and recipe_runs lists them. Red if the host stops serving either."""
+    import json
+    import time
+
+    import mcp_app
+    import recipe_workflow as rw
+    from agent_framework import Agent
+    from starlette.testclient import TestClient
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir))
+    recipes = rw.RecipeRuns(tmp_path / "recipes", tools=lambda: tools, summarizer=None)
+    agent = Agent(client=ScriptedChatClient(["hi"]), name="Steward", description="Steward")
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", "MCP-Protocol-Version": "2025-06-18"}
+
+    def rpc(http: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        return http.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).json()["result"]
+
+    def call(http: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return rpc(http, "tools/call", {"name": name, "arguments": arguments})
+
+    recipe = {"name": "Startup", "steps": ["versions", "plan_left"], "summarize": "Write it."}
+    with TestClient(mcp_app.build_mcp_app(agent, None, recipes)) as http:
+        names = [t["name"] for t in rpc(http, "tools/list", {})["tools"]]
+        assert {"recipe_graph", "recipe_runs"} <= set(names), names
+        wf = json.loads(call(http, "recipe_graph", {"recipe": recipe})["content"][0]["text"])["workflow"]
+        assert list(wf["executors"]) == rw.executor_ids(recipe) == ["begin", "1_versions", "2_plan_left", "summarize", "deliver"]
+        assert wf["start_executor_id"] == "begin" and wf["output_executors"] == ["deliver"]
+        assert {"source_id": "1_versions", "target_id": "2_plan_left"} in [e for g in wf["edge_groups"] for e in g["edges"]]
+        bad = call(http, "recipe_graph", {"recipe": {"steps": ["run_shell"]}})
+        assert bad["isError"] is True and "no workflow step" in bad["content"][0]["text"]
+        out = call(http, "run_recipe", {"recipe": {"name": "Plan", "steps": ["plan_left"]}, "flow": "f9", "trigger": "now"})
+        run_id = json.loads(out["content"][0]["text"])["run_id"]
+        for _ in range(200):
+            listed = json.loads(call(http, "recipe_runs", {"flow": "f9", "limit": 5})["content"][0]["text"])
+            if listed and listed[0]["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert [(r["run_id"], r["trigger"], r["state"]) for r in listed] == [(run_id, "now", "done")]
+        assert [s["state"] for s in listed[0]["steps"]] == ["done", "done", "done"]

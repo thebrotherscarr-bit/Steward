@@ -59,7 +59,8 @@ flowchart LR
   model-free check (pytest), repair (at most 3 attempts), the `git_commit` card, report. Defined once and served by
   every host.
 - **The hosts:** `hosted.py` (Responses, 43120), `ag_ui_app.py` (AG-UI, 43122), `mcp_app.py` (MCP, 43121, with
-  `run_recipe` and `recipe_status`), `devui_app.py` (DevUI, for development only).
+  `run_recipe` and `recipe_status`, and the Flows shelf's read-only `recipe_graph` and `recipe_runs`), `devui_app.py`
+  (DevUI, for development only).
 - **The improvement loop:** `improvement_loop_workflow.py`: one change, checks, Kyle's review (keep, drop, guidance),
   checkpointed.
 - **Recipes:** `recipe_workflow.py`: a flow built as a MAF workflow ([ADR-0005](decisions/0005-automations-are-recipes-run-as-maf-workflows.md),
@@ -78,7 +79,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | Port | Served by | Protocol | Who calls it |
 |---|---|---|---|
 | 43120 | Steward `hosted.py` | OpenAI Responses (MAF `ResponsesHostServer`) | Jesster, as the fallback transport; evals `--transport responses` |
-| 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status` |
+| 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status`, and the Flows shelf's `recipe_graph` / `recipe_runs` (read-only) |
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
 | 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools, `approval_ask`), and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
@@ -101,7 +102,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 |---|---|---|
 | Steward | Eval history (every run, with set name and version, transport, timings) | `storage/evals/history.jsonl` |
 | Steward | Traces (OpenTelemetry-style JSONL, capped at 100 MB) | `halo_traces/traces.jsonl` |
-| Steward | Recipe runs: checkpoints and events | `storage/recipes/checkpoints`, `storage/recipes/<run_id>.jsonl` |
+| Steward | Recipe runs: checkpoints, MAF's events, and each run's state (its flow's id, trigger `now` or `schedule`, executors in order, result); the Flows shelf's run history reads these (`recipe_runs`) | `storage/recipes/checkpoints`, `storage/recipes/<run_id>.jsonl`, `storage/recipes/<run_id>.json` |
 | Steward | Host state (Responses checkpoints) | `.as/` (gitignored) |
 | Steward | Memory (durable facts by topic), the improvement loop's checkpoints | `agent-file-memory/`, `improvement_loop/checkpoints` |
 | Steward | Eval sets, baselines, pinned outside data | `harness/steward/evals/` (versioned in git) |
@@ -158,6 +159,12 @@ flowchart LR
     W -.->|events, checkpoint| F["Flows shelf"]
 ```
 
+The Flows shelf draws a flow from its recipe built as the real MAF workflow (`recipe_graph`: `Workflow.to_dict()`),
+or locally, marked "offline: drawn locally", when Steward's host is down. Under the open flow it lists the last runs
+(`recipe_runs`: each run's trigger, result and per-step state and ms, read from MAF's events as they are; a step that
+failed is MAF's non-fatal `error` event with its executor id); a click lights the canvas with that run's steps, and
+a run going now is followed by reading `recipe_status` every few seconds until it ends.
+
 The steps come from a fixed list (repo_log, merged_prs, releases, eval_bars, plan_left, versions, pull_ff,
 eval_start, eval_wait). **A flow runs unattended by design:** the saved flow is the operator's approved plan, so no
 step raises a card, and a step that could do harm is made safe in its own code (`pull_ff`: main only, a clean tree,
@@ -206,10 +213,12 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 In order, as the notes stand on 2026-11-05. Each item is one piece and one pull request, with its wire.
 
 1. **Flows shelf** ([ADR-0008](decisions/0008-the-flows-shelf.md)): run history, the graph from Steward's
-   `to_dict()`, Steward's card with `automation_save` on Kyle's card, evals in flow.
+   `to_dict()`, Steward's card with `automation_save` on Kyle's card, evals in flow. _Built 2026-11-05: the run
+   history and the canvas drawn from the MAF graph (`recipe_runs`, `recipe_graph`; Jesster's shelf, live while a run
+   goes). Open: Steward's card with `automation_save`, evals in flow._
 2. **Flows and automations** ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)):
    Set up as automations (a saved flow, when, on/off), the prompt type removed (Jesster); `automation_save`; BFCL
-   and Aider as eval flows.
+   and Aider as eval flows. _Built 2026-11-05, except `automation_save`._
 3. **AG-UI step 3:** the Phone view and the console shelves on AG-UI events; then the A2UI pilot for approval cards.
 4. **Dev-path tiers:** T3 (Estate operations) and T4 (GitHub), then T2 and T5, then the `eval-author` skill; T6 and T7
    grow with his reach. T5 needs restating now that Neiro is retired.

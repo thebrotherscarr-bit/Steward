@@ -74,7 +74,7 @@ harness/
     │   ├── steward_workflow.py# plan, approve, execute, check, repair, commit, report
     │   ├── hosted.py          # Responses host, 43120
     │   ├── ag_ui_app.py       # AG-UI host, 43122
-    │   ├── mcp_app.py         # MCP host, 43121 (run_recipe, recipe_status)
+    │   ├── mcp_app.py         # MCP host, 43121 (run_recipe, recipe_status, recipe_graph, recipe_runs)
     │   ├── recipe_workflow.py # automations as MAF workflows
     │   ├── evals.py           # eval runner, validate, bar
     │   └── test_harness.py    # the gate's model-free checks
