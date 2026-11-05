@@ -76,6 +76,7 @@ from agent_framework import (
     AgentExecutorRequest,
     AgentExecutorResponse,
     AgentModeProvider,
+    ChatContext,
     Case,
     Content,
     Default,
@@ -102,7 +103,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console.observers.planning_models import PlanningQuestion, PlanningResponse, PlanningResponseType  # noqa: E402
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
-from agent import ESTATE_READS, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import _CHANGES_THINGS, ESTATE_READS, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,67 @@ def step_options_turn(step_options: Mapping[str, Mapping[str, Any]]) -> Callable
         await call_next()
 
     return step_options_turn_
+
+
+# Per-step tools (2026-11-05, the bar at 98d54d5): every model call of every step was offered the whole set, 43 tools
+# in an eval's build and 56 live, and the plan step's failures were in its tool use (traces 01:15-02:05Z: of 56 PLAN
+# calls, 4 wrote a call's arguments as text, one called "functions?", one listed '.'). The cookbook's guidance is fewer,
+# clearer tools per step; Ollama has no tool_choice allowed_tools, and MAF's own answer is "Pass only the tools you want
+# to allow" (agent_framework_ollama/_chat_client.py:491-494). So each call's own tool list (ChatContext.options, the
+# list MAF sends: _chat_client.py:495-497) is cut to its step's, by chat middleware that reads the step from the call's
+# session (ChatContext.session, STEP_KEY). This supersedes, for the workflow's steps, agent.py's "Tools stay offered in
+# every mode": the plan-mode gate and the cards still stand behind it. A session with no step (a host that runs him
+# without the graph) is offered everything, as before.
+#   PLAN offers what reads and what plans (PLAN_TOOLS): MAF's read-only file and skill tools, his repo status and code
+#     search, his file memory's reads, his notes' and the Estate's reads, and the todo tools that write the plan.
+#   ANSWER offers everything that changes nothing (all but agent._CHANGES_THINGS, the mode tools, the todos and file
+#     memory's writes): a question may need CodeAct, a background agent or a skill's script (REQUEST_HINTS).
+#   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own) and the mode tools.
+#   ROUTE and COMMIT call the client with no tools; REPORT makes no call.
+PLAN_TOOLS = frozenset({
+    *FileAccessProvider._READ_ONLY_TOOL_NAMES,  # MAF's own set: file_access_read, _read_lines, _ls, _grep
+    "load_skill", "read_skill_resource",  # SkillsProvider's read-only tools (READ_ONLY_RULES)
+    "get_repo_status", "search_code",
+    "file_memory_ls", "file_memory_read", "file_memory_grep",
+    # His automatic memory (MAF's MemoryContextProvider, step 5): its reads, and write_memory for a fact the request
+    # tells him (no card; his own memory, not the workspace). Named here because the provider adds them to the live list
+    # on a run's first call after this cut, so the run's later calls would otherwise lose them.
+    "list_memory_topics", "read_memory_topic", "search_memory_transcripts", "write_memory",
+    "todos_add", "todos_get_all", "todos_get_remaining", "todos_remove",
+    *(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes", *ESTATE_READS)),
+})
+_MODE_TOOLS = frozenset({"mode_set", "mode_get"})
+_FILE_MEMORY_WRITES = frozenset({"file_memory_write", "file_memory_replace", "file_memory_replace_lines", "file_memory_delete"})
+_TODO_TOOLS = frozenset({"todos_add", "todos_complete", "todos_get_all", "todos_get_remaining", "todos_remove"})
+ANSWER_LEAVES_OUT = frozenset({*_CHANGES_THINGS, *_MODE_TOOLS, *_FILE_MEMORY_WRITES, *_TODO_TOOLS})
+EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, *_MODE_TOOLS})
+
+
+def offered_in_step(name: str, step: str | None) -> bool:
+    """Whether a step's model calls are offered the tool named name (a step of None is offered every tool)."""
+    if step == PLAN_STEP:
+        return name in PLAN_TOOLS
+    if step == ANSWER_STEP:
+        return name not in ANSWER_LEAVES_OUT
+    if step == EXECUTE_STEP:
+        return name not in EXECUTE_LEAVES_OUT
+    return True
+
+
+async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Chat middleware: this call's tools are its step's (offered_in_step), the step read from the call's session.
+
+    The run's live tool list is cut in place, as MAF's own progressive tool exposure cuts it
+    (FunctionInvocationContext.remove_tools, agent_framework/_middleware.py:580-625, "self.tools[:] = ..."): MAF's
+    function loop runs calls from that same list, and a provider's chat middleware later in the chain adds its tools to
+    it (MemoryContextProvider's write_memory), so a copy would lose those. A tool the step leaves out cannot run either.
+    """
+    session = context.session
+    step = session.state.get(STEP_KEY) if session is not None else None
+    tools = (context.options or {}).get("tools")
+    if step is not None and isinstance(tools, list):
+        tools[:] = [t for t in tools if offered_in_step(getattr(t, "name", "") or "", step)]
+    await call_next()
 
 
 def step_session(agent: Agent[Any], step: str) -> Any:
@@ -919,6 +981,9 @@ def build_steward_workflow(
         plan_mode_turns(modes, response_format=StewardPlan),
         # Only when a step has overrides: unset, every call's options are what they were before.
         *([step_options_turn(step_options)] if step_options else []),
+        # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
+        # tools (repair_tool_names, recover_text_tool_calls): each step's calls are offered only its tools.
+        step_tools_turn,
         *(agent.middleware or []),
     ]
     # His own window and keep-alive on the router's call, so Ollama answers it with the model as loaded.

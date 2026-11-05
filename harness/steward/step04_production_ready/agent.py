@@ -986,6 +986,8 @@ def pr_checks_tool(door: Any) -> FunctionTool:
 # are the gate (writes, git_commit and the shell each ask), and the tool policy is stated in the plan-mode
 # text (the cookbook: "State a tool policy inside the instructions"). evals.py's plan-before-act cases check
 # that he follows it.
+# Superseded for the workflow's steps 2026-11-05: each step is offered only its own tools (steward_workflow.py,
+# offered_in_step); a host without the graph is still offered every tool, and this gate stands behind both.
 _PLAN_MODE = "plan"
 _EXECUTE_MODE = "execute"
 _CHANGES_THINGS = frozenset({

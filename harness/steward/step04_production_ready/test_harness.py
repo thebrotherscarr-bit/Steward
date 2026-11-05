@@ -1004,7 +1004,7 @@ def _plan_shaped_tool() -> Any:
     return plan_shaped
 
 
-def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a_call() -> None:
+def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """recover_text_tool_calls with a response_format: a reply that does not validate as the format and fits one tool
     runs as that tool, and PLAN goes on to its approve_plan card (streamed, as the workflow runs it, and not); a reply
     that validates as the format is never made a call, even when it fits a tool."""
@@ -1030,6 +1030,8 @@ def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a
     assert any("inventory.py" in r for r in function_results(client.calls[1])), "file_access_ls listed the sample project"
     assert cards == [wf.APPROVE_PLAN], "and the run yields the plan card"
 
+    # The plan step offers only its own tools (steward_workflow.offered_in_step), so the extra tool is made one of them.
+    monkeypatch.setattr(wf, "PLAN_TOOLS", wf.PLAN_TOOLS | {"plan_shaped"})
     client, cards = run_plan_step([plan, "never"], _plan_shaped_tool())
     assert "plan_shaped" in offered_tools(client.calls[0]), "the plan's JSON fits an offered tool"
     assert len(client.calls) == 1 and cards == [wf.APPROVE_PLAN], "a valid plan is the plan, never a call"
@@ -1372,7 +1374,9 @@ def test_a_question_is_answered_in_words_and_a_task_or_an_unclear_route_is_plann
     assert said(events) == [ANSWERED], said(events)
     assert not [e for e in events if e.type == "request_info"], "a question asks no approve_plan card"
     assert [c["options"].get("response_format") for c in client.calls] == [None, None], "ANSWER is asked for no plan"
-    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1])), "and writes nothing"
+    # ANSWER is offered no write (steward_workflow.offered_in_step), so the write is not found; the plan-mode gate stands
+    # behind it for a host that offers everything.
+    assert function_results(client.calls[1]) == ['Error: Requested function "file_access_write" not found.'], "and writes nothing"
     assert not (steward._WORKING_DIR / "test_harness_answer_probe.txt").exists()
 
     for route in ('{"kind": "task"}', "It is a question."):  # a task, and a reply that is no Route (Default)
@@ -5222,11 +5226,9 @@ EDITS_AS_TEXT = (
 
 def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Small run 2 (the README ask) ended its PLAN step on '{"query":"pytest"}', the steps set on the discount fix's
-    file_access_replace_lines arguments. A write written as text in the plan step is the one gated write it fits, which
-    the plan-mode gate answers with PLAN_MODE_REFUSAL as its tool result (nothing written); a reply that is still no
-    plan but a JSON object is asked once more (PLAN_NOT_A_CALL) for the structured plan. Both texts replayed: a card."""
-    import json
-
+    file_access_replace_lines arguments. The plan step is offered no write (steward_workflow.offered_in_step), so a write
+    written as text there fits no tool and nothing is written; a reply that is still no plan but a JSON object is asked
+    once more (PLAN_NOT_A_CALL) for the structured plan. Both texts replayed: a card."""
     import steward_workflow as wf
     from agent_framework import tool
 
@@ -5258,15 +5260,15 @@ def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path:
     before = inventory.read_bytes()
     client, cards, _ = run([EDITS_AS_TEXT, plan])
     assert cards == [wf.APPROVE_PLAN], "the steps set's text: a plan card"
-    refusal = steward.PLAN_MODE_REFUSAL.format(name="file_access_replace_lines")
-    assert refusal in function_results(client.calls[1]), function_results(client.calls[1])
+    # Since the per-step tools (steward_workflow.offered_in_step) the plan step is offered no write, so the write's
+    # arguments fit no tool there: nothing runs, and PLAN is asked once more for its plan (PLAN_NOT_A_CALL).
+    assert not function_results(client.calls[1]), function_results(client.calls[1])
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
     assert inventory.read_bytes() == before, "the write never ran"
     tools = client.calls[0]["options"]["tools"]
-    assert {"file_access_replace_lines", "file_memory_replace_lines"} <= offered_tools(client.calls[0])
-    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools) is None, "outside the plan step, two writes stay text"
-    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools, planning=True) == (
-        "file_access_replace_lines", json.loads(EDITS_AS_TEXT)
-    ), "never file memory's write, which asks no card"
+    assert not {"file_access_replace_lines", "file_memory_replace_lines"} & offered_tools(client.calls[0])
+    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools) is None
+    assert steward.tool_call_in_text(EDITS_AS_TEXT, tools, planning=True) is None, "no write offered for it to fit"
 
     client, cards, _ = run([QUERY_AS_TEXT, plan])
     assert {"search_code", "secondbrain_search_notes"} <= offered_tools(client.calls[0])
@@ -5462,3 +5464,52 @@ def test_the_hyperlight_sandbox_is_off_by_default_and_on_runs_codeact_and_the_un
 
     results = run([shell, "Done."])
     assert any("sandbox-probe-ran" in r for r in results), "with nothing untrusted before it, the shell runs"
+
+
+def test_each_workflow_step_is_offered_only_its_own_tools() -> None:
+    """The bar at 98d54d5 (traces 2026-11-05 01:15-02:05Z): every step's calls were offered the whole set (43 tools in an
+    eval's build, 56 live), and the plan step's failures were in its tool use. step_tools_turn cuts each call's live
+    tool list to its step's (offered_in_step): PLAN reads and plans, ANSWER changes nothing, EXECUTE has the writes but
+    not git_commit (COMMIT's) or the mode tools. A tool the step leaves out cannot run either."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Add a docstring."}], "steps": ["Add it"]}'
+    left_out = Content.from_function_call(call_id="g1", name="mode_get", arguments={})
+    client = ScriptedChatClient([left_out, plan, "Done."])
+
+    async def _task() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent)
+                events = [e async for e in workflow.run("Add a docstring to order_total.", stream=True)]
+                [card] = [e for e in events if e.type == "request_info"]
+                answer = card.data.to_function_approval_response(True)
+                [e async for e in workflow.run(stream=True, responses={card.request_id: answer})]
+
+    asyncio.run(_task())
+    planned, after_left_out, executed = (offered_tools(c) for c in client.calls[:3])
+    assert planned == after_left_out and planned <= wf.PLAN_TOOLS, sorted(planned - wf.PLAN_TOOLS)
+    assert {"file_access_read", "file_access_ls", "search_code", "todos_add", "load_skill"} <= planned
+    assert not {"file_access_write", "file_access_replace_lines", "git_commit", "mode_set", "mode_get", "todos_complete",
+                "execute_code", "file_memory_write"} & planned
+    assert function_results(client.calls[1]) == ['Error: Requested function "mode_get" not found.'], "it never ran"
+    assert {"file_access_write", "file_access_replace_lines", "todos_complete", "execute_code"} <= executed
+    assert not {"git_commit", "mode_set", "mode_get"} & executed
+    assert len(planned) < len(executed) < 36, (len(planned), len(executed))
+
+    client = ScriptedChatClient(["It defines order_total."], routes=['{"kind": "answer"}'])
+
+    async def _question() -> None:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                [e async for e in wf.build_steward_workflow(agent).run("What does inventory.py define?", stream=True)]
+
+    asyncio.run(_question())
+    answered = offered_tools(client.calls[0])
+    assert {"file_access_read", "execute_code", "background_agents_start_task", "run_skill_script"} <= answered
+    assert not {"file_access_write", "git_commit", "todos_add", "mode_set", "file_memory_write"} & answered
+
+    # A host that runs him without the graph (no step in the session) is offered everything, as before.
+    assert wf.offered_in_step("git_commit", None) and wf.offered_in_step("mode_set", None)
