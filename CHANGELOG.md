@@ -186,6 +186,10 @@ was never merged and has no entry.
 
 ### Removed
 
+- Neiro, retired as a gate on 2026-11-05 and archived read-only (each part's own CI is its gate): the start-up
+  model-drift check against `worlds/neiro/estate.lock.json` (`warn_model_drift`, `ESTATE_LOCK`) in `hosted.py`,
+  `mcp_app.py` and `ag_ui_app.py`, and `neiro` from the door's projects (`ESTATE_WORLDS`). The `estate` and `github`
+  skills now say the Estate's versions come from SecondBrain's `estate_status`.
 - The older build path (`part > 4`), called by no host, caller or test in this repo, SecondBrain's Electron app or
   Manjuel: its Coder, Reasoner and Explainer background agents (`STEWARD_REASONER_MODEL` deepseek-r1:14b and
   `STEWARD_CONVERSATION_MODEL` gemma4:26b, `_TEAM_CONTEXT`), its `STEWARD_INSTRUCTIONS`, its `_build_explorer_agent`

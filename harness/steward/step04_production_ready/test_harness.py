@@ -4228,7 +4228,7 @@ def test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell() -> None:
         asyncio.run(steward.estate_door_gate(context, call_next))
         return context.result, bool(reached)
 
-    assert set(steward.ESTATE_WORLDS) == {"research", "atlas", "secondbrain", "steward", "neiro"}
+    assert set(steward.ESTATE_WORLDS) == {"research", "atlas", "secondbrain", "steward"}
     for world in steward.ESTATE_WORLDS:
         assert gate("atlas_git_push", {"project": world}) == (None, True), world
     assert gate("atlas_git_commit", {"project": "secondbrain", "message": "Refuse --force in the gate", "files": "a.py"}) == (
@@ -4731,45 +4731,22 @@ def test_a_non_streaming_answer_after_the_todo_nudge_is_given_once() -> None:
     assert response.text == answer + "Juniper.", response.text
 
 
-def test_model_drift_from_the_estate_lock_is_one_warning_line_and_never_fails_start(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """At a host's start the installed models' digests are compared with the Estate lock (worlds/neiro/estate.lock.json)
-    for the models it gives Steward: one warning per drift; a missing lock or Ollama down is one info line."""
+def test_neiro_is_retired_no_host_reads_the_estate_lock_and_the_skills_send_versions_to_estate_status() -> None:
+    """Neiro was retired as a gate on 2026-11-05 and archived read-only: no host reads worlds/neiro/estate.lock.json at
+    its start, the door's projects leave it out, and the skills send the Estate's versions to estate_status."""
     import inspect
-    import json
-    import logging
 
+    import ag_ui_app
     import hosted
     import mcp_app
 
-    lock = tmp_path / "estate.lock.json"
-    lock.write_text(json.dumps({"models": [
-        {"name": "gpt-oss:20b", "digest": "f38aa0c53da5aaaa", "used_by": ["steward"]},
-        {"name": "steward:1", "digest": "14345b14ac4cbbbb", "used_by": ["steward"]},
-        {"name": "qwen2.5-coder:14b", "digest": "9ec8897f747ecccc", "used_by": ["steward"]},
-        {"name": "nomic-embed-text-v2-moe:latest", "digest": "ff9c2f10ef5edddd", "used_by": ["manjuel:embed"]},
-    ]}), encoding="utf-8")
-
-    async def installed() -> dict[str, str]:  # Ollama's /api/tags, faked: one drifted, one missing, one as locked
-        return {"gpt-oss:20b": "0000000000000000", "steward:1": "14345b14ac4cbbbb", "nomic-embed-text-v2-moe:latest": "x"}
-
-    async def ollama_down() -> dict[str, str]:
-        raise ConnectionError("All connection attempts failed")
-
-    with caplog.at_level(logging.INFO, logger=steward.logger.name):
-        lines = asyncio.run(steward.warn_model_drift(lock, installed))
-        assert len(lines) == 2 and "gpt-oss:20b" in lines[0] and "qwen2.5-coder:14b" in lines[1], lines
-        assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == lines
-        caplog.clear()
-        assert asyncio.run(steward.warn_model_drift(tmp_path / "missing.json", installed)) == []
-        assert asyncio.run(steward.warn_model_drift(lock, ollama_down)) == []
-        infos = [r.getMessage() for r in caplog.records]
-        assert len(infos) == 2 and all(r.levelno == logging.INFO for r in caplog.records), infos
-    assert steward.ESTATE_LOCK.parts[-3:] == ("worlds", "neiro", "estate.lock.json")
-    assert steward.ESTATE_LOCK.parents[2] == steward._STEWARD_DIR.parents[3], "the lock is beside the Steward repo"
-    for host in (hosted, mcp_app):
-        assert "await warn_model_drift()" in inspect.getsource(host.main), f"{host.__name__} checks at start"
+    assert not hasattr(steward, "ESTATE_LOCK") and not hasattr(steward, "warn_model_drift")
+    for host in (hosted, mcp_app, ag_ui_app):
+        assert "estate.lock" not in inspect.getsource(host) and "warn_model_drift" not in inspect.getsource(host), host
+    assert "neiro" not in steward.ESTATE_WORLDS
+    estate = (steward._SKILLS_DIR / "estate" / "SKILL.md").read_text(encoding="utf-8")
+    github = (steward._SKILLS_DIR / "github" / "SKILL.md").read_text(encoding="utf-8")
+    assert "versions" in estate and "versions" in github and "`neiro`" not in github
 
 
 def test_the_coder_is_stewards_own_model_unless_named_and_records_its_timings(monkeypatch: Any) -> None:
