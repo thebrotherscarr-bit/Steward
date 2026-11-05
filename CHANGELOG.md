@@ -120,6 +120,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- An empty reply in EXPLORE after it has begun reading (a tool call in that run) is asked once, tools on, to go on
+  reading (`READS_FIRST_KEY` on EXPLORE's session, `READ_ON_NUDGE` in the harness loop); a second empty reply is not
+  asked again, and an EXPLORE that read nothing goes to the plan call as before. The bar at 1b56963 (the steps set):
+  EXPLORE listed two folders, its next reply came back empty, and the run ended with no plan. Test:
+  `test_an_empty_reply_while_exploring_is_asked_once_to_go_on_reading`.
 - A file-tool write of MEMORY.md at the workspace root (MAF's memory index, which his memory store keeps) is refused
   with the tool to use, write_memory (`writes_memory_index`, `MEMORY_INDEX_REFUSAL`); nothing is written. The bar at
   1b56963 (the README ask): his memory's context says "Use MEMORY.md", and he wrote MEMORY.md at the repository root
