@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A file read or listing that finds nothing at a path missing a part of a path the request names ends with that path
+  (`point_a_missed_path_at_the_named_one`, `MISSED_PATH_HINT`); his call is never rewritten. The bar at 416ba41 (the
+  README ask): he looked under harness/working/sample-project (dropping "steward"), found nothing, and replied that
+  the file did not exist. Test: `test_a_read_that_finds_nothing_at_a_path_missing_a_part_of_the_named_one_is_pointed_at_it`.
 - The steps set scores EXECUTE with the cards the eval approved (`step_conversations(events, approve)`: each approved
   card goes into its step's next completion, since MAF's AgentExecutor completes with only the messages since its last
   card), and reads the run's report as all its outputs, not the last (the denied commit's answer comes after the

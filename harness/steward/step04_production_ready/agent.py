@@ -2553,6 +2553,72 @@ async def refuse_a_bare_name_the_request_put_in_a_folder(
     await call_next()
 
 
+# The bar at 416ba41 (2026-11-05 05:29Z, the README ask's second run): the request named
+# harness/steward/working/sample-project/README.md; he listed harness/working (dropping "steward"), found
+# harness/working/sample-project empty and README.md "not found" there, and replied that the file did not exist. A read
+# or listing of a path where nothing is, whose last part is a part of a path the request names, gets that path after
+# MAF's own result, as the bare-name refusal names it: his call is never rewritten, and the next one can be right.
+MISSED_PATH_HINT = "Nothing is at '{path}'. The request names {meant}: use that path."
+
+
+def missed_path_meant(path: str, named: Sequence[str]) -> str | None:
+    """The existing path a request's named path holds up to ``path``'s last part, when nothing is at ``path``, or None."""
+    wanted = str(path or "").replace("\\", "/").strip().strip("/")
+    if not wanted:
+        return None
+    try:
+        if _inside_workspace(wanted).exists():
+            return None
+    except ValueError:
+        return None
+    last = wanted.rsplit("/", 1)[-1]
+    for named_path in named:
+        parts = named_path.split("/")
+        if last not in parts:
+            continue
+        meant = "/".join(parts[: len(parts) - parts[::-1].index(last)])
+        try:
+            if meant != wanted and _inside_workspace(meant).exists():
+                return meant
+        except ValueError:
+            continue
+    return None
+
+
+def _found_nothing(result: Any) -> bool:
+    """Whether a MAF read tool's result says nothing is there: "not found", "Could not list", or an empty listing."""
+    if isinstance(result, list) and result and all(hasattr(c, "type") for c in result):
+        result = "\n".join(str(getattr(c, "text", "") or "") for c in result)
+    if isinstance(result, list):
+        return not result
+    text = str(result or "").strip()
+    return text in ("", "[]") or text.startswith("Could not list") or (text.startswith("File '") and text.endswith("' not found."))
+
+
+async def point_a_missed_path_at_the_named_one(
+    context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
+) -> None:
+    """Function middleware on MAF's file reads: a read or listing that found nothing, of a path missing a part the
+    request's named path has (missed_path_meant), gets MISSED_PATH_HINT after its result."""
+    await call_next()
+    name = context.function.name
+    if name not in FileAccessProvider._READ_ONLY_TOOL_NAMES or not _found_nothing(context.result):  # MAF's own set
+        return
+    session = context.session or _RUN_SESSION.get()
+    named = (session.state.get(NAMED_PATHS_KEY) if session is not None else None) or []
+    arguments = context.arguments
+    arguments = arguments.model_dump() if hasattr(arguments, "model_dump") else dict(arguments or {})
+    path = str(arguments.get("file_name") or arguments.get("directory") or "")
+    if named and (meant := missed_path_meant(path, named)):
+        hint = MISSED_PATH_HINT.format(path=path, meant=meant)
+        result = context.result
+        if isinstance(result, list) and result and all(hasattr(c, "type") for c in result):
+            context.result = [*result, Content.from_text(hint)]
+        else:
+            shown = "[]" if isinstance(result, list) else str(result or "")
+            context.result = f"{shown}\n{hint}".strip()
+
+
 async def refuse_unicode_punctuation_in_code(
     context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]
 ) -> None:
@@ -3464,6 +3530,7 @@ async def build_steward_agent(
             middleware=[
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files,
                 refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code,
+                point_a_missed_path_at_the_named_one,
                 # Before the three that read tool_choice: an empty reply's answer-now turn is a tools-off call.
                 tools_off_to_answer_now,
                 repair_tool_names, recover_text_tool_calls, answer_when_tools_are_off, record_called_tools,

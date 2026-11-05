@@ -6372,3 +6372,25 @@ def test_the_steps_eval_credits_a_write_approved_before_a_later_card_and_reads_t
     asyncio.run(evals.steps_main())
     assert seen and "Checks passed" in seen[0] and "was not approved" in seen[0], seen
     assert credited == [True], "steps_main scores EXECUTE with the eval's approved cards"
+
+
+def test_a_read_that_finds_nothing_at_a_path_missing_a_part_of_the_named_one_is_pointed_at_it() -> None:
+    """The bar at 416ba41 (2026-11-05 05:29Z, the README ask): the request named
+    harness/steward/working/sample-project/README.md; he read harness/working/sample-project/README.md ("not found")
+    and listed harness/working/sample-project ([]), then replied the file did not exist. Such a result now ends with
+    MISSED_PATH_HINT naming the request's path (point_a_missed_path_at_the_named_one); a found file is untouched."""
+    readme = "harness/steward/working/sample-project/README.md"
+    query = f"Add one line to {readme} that says how to run its tests."
+    missed = Content.from_function_call(call_id="r1", name="file_access_read", arguments={"file_name": "harness/working/sample-project/README.md"})
+    listed = Content.from_function_call(call_id="r2", name="file_access_ls", arguments={"directory": "harness/working/sample-project"})
+    found = Content.from_function_call(call_id="r3", name="file_access_read", arguments={"file_name": readme})
+    client, _, _ = run_steward([missed, listed, found, "Read it."], query, mode="execute")
+    results = function_results(client.calls[-1])
+    assert len(results) == 3, results
+    assert results[0].endswith(steward.MISSED_PATH_HINT.format(path="harness/working/sample-project/README.md", meant=readme)), results[0]
+    assert results[1].endswith(
+        steward.MISSED_PATH_HINT.format(path="harness/working/sample-project", meant="harness/steward/working/sample-project")
+    ), results[1]
+    assert "Nothing is at" not in results[2], "a file that is there is read as it is"
+    assert steward.missed_path_meant("harness/working/sample-project", []) is None, "no named path, no hint"
+    assert steward.missed_path_meant(readme, [readme]) is None, "the named path itself is there"
