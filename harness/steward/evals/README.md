@@ -13,6 +13,43 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 `baselines.json` holds, per set and version, the fingerprint of its cases (`cases`) and any baseline its gate reads
 (`small` v1: `checks`). `run-bar.ps1` runs sets for their bar; `evals.py bar <set>` says whether a bar is met.
 
+## Transports: in-process, Responses, AG-UI
+
+An asks set (small, heldout) can reach Steward three ways, with `--transport` (run-bar's `-Transport`):
+
+| Transport | What runs the workflow | Cards |
+|---|---|---|
+| `in-process` (default) | evals.py itself (`run_steward`), an eval build: no Atlas door, no note writes, throwaway memory | answered in the process |
+| `responses` | the running Responses host, hosted.py on `http://127.0.0.1:43120` | `mcp_approval_request` items, answered with `mcp_approval_response` and `previous_response_id`, as SecondBrain's steward.cjs does |
+| `ag-ui` | the running AG-UI host, ag_ui_app.py on `http://127.0.0.1:43122/` | RUN_FINISHED's interrupts, resumed with `interruptId` and `forwardedProps.checkpointId` |
+
+The approval policy is the same on every transport (`evals.card_approved`): the plan, the writes and the sample
+project's pytest are approved, everything else is denied. The same checks score each run (the conversation is turned
+into the Messages an in-process run gives), and the result checks read the disk, so the host must serve this checkout
+(its `STEWARD_WORKSPACE`). A host runs its own build: its memory, its door and its settings, not the eval build's.
+
+Each run's line in `storage/evals/history.jsonl` carries `transport`, and each case `timings`: `transport`,
+`first_event_s` (seconds to the first text or reasoning event), `total_s`, `cards`, `cards_resumed`, `card_log` (each
+card's tool, the answer, and whether its resume went through) and `stream_errors`. A dropped stream or a refused
+resume (an AG-UI checkpoint the host no longer has: it keeps them in memory, so a restart drops them) ends the case as
+failed with its reason (`run_completed`), never as a crash.
+
+To compare (each host started first; one model at a time, so run the sets one after another):
+
+```powershell
+powershell -File harness/steward/evals/run-bar.ps1 -Sets small -Tag inproc -Runs 3
+powershell -File harness/steward/evals/run-bar.ps1 -Sets small -Tag responses -Runs 3 -Transport responses
+powershell -File harness/steward/evals/run-bar.ps1 -Sets small -Tag agui -Runs 3 -Transport ag-ui
+python harness/steward/step04_production_ready/evals.py compare-transports --set small --last 3
+```
+
+`compare-transports` prints, per case and transport, the runs passed, the median time to the first event and total
+time, the cards resumed of those answered and the stream errors, then the decision line.
+
+**The decision rule.** AG-UI goes on by default only if, on every case, it matches or beats `responses` on the result
+(the share of runs passed) and on the resumes (the share of cards resumed), with no stream error on any case. Anything
+short of that keeps it off, and the decision line names each case that fell short. Time is reported, not ruled on.
+
 ## A set file
 
 ```yaml
