@@ -120,6 +120,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The steps set scores EXECUTE with the cards the eval approved (`step_conversations(events, approve)`: each approved
+  card goes into its step's next completion, since MAF's AgentExecutor completes with only the messages since its last
+  card), and reads the run's report as all its outputs, not the last (the denied commit's answer comes after the
+  checks' result). The steps set at a3a3519 fixed inventory.py and passed its tests, and was scored "No write to
+  inventory.py" and an empty report. Test:
+  `test_the_steps_eval_credits_a_write_approved_before_a_later_card_and_reads_the_whole_report`.
 - CHECK tests the .py files EXECUTE's session says he wrote (`check_written`, from `agent.written_files`) as well as
   the files git lists as changed. The steps set at a3a3519: his fix put inventory.py back to its committed text (the
   evals plant the bug in the working copy only), git listed no change, the check ran nothing and the report was empty.

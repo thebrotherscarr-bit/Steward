@@ -594,17 +594,40 @@ STEPS_MUST_NAME = ("inventory.py", "discount")
 STEPS_FIXED: list[bool] = [False]
 
 
-def step_conversations(events: list[Any]) -> dict[str, list[list[Any]]]:
-    """Each AgentExecutor step's conversations, keyed by its executor id, from a run's events (one per completion)."""
-    from agent_framework import AgentExecutorResponse  # noqa: PLC0415
+def step_conversations(events: list[Any], approve: set[str] | None = None) -> dict[str, list[list[Any]]]:
+    """Each AgentExecutor step's conversations, keyed by its executor id, from a run's events (one per completion).
+
+    With ``approve`` (the eval's own answers, card_approved), each card a step raised and the eval approved goes into
+    the conversation of that step's next completion as its function_approval_response, unless already there. MAF's
+    AgentExecutor completes once, after its last card, with only the messages since that card (_agent_executor.py,
+    _run_agent_and_emit). The steps set at a3a3519 (2026-11-05 06:05Z): EXECUTE's approved file_access_replace fixed
+    inventory.py, two run_shell cards followed, and execute_step read "No write to inventory.py. Calls: ['todos_complete']".
+    """
+    from agent_framework import AgentExecutorResponse, Message  # noqa: PLC0415
 
     steps: dict[str, list[list[Any]]] = {}
+    approved: dict[str, list[Any]] = {}
     for event in events:
+        if event.type == "request_info" and approve is not None:
+            card = event.data
+            if getattr(card, "type", None) == "function_approval_request" and card_approved(card.function_call, approve):
+                approved.setdefault(event.source_executor_id, []).append(card)
+            continue
         if event.type != "executor_completed" or not event.executor_id:
             continue
         for sent in event.data if isinstance(event.data, list) else [event.data]:
             if isinstance(sent, AgentExecutorResponse):
-                steps.setdefault(event.executor_id, []).append(list(sent.full_conversation or sent.agent_response.messages))
+                conversation = list(sent.full_conversation or sent.agent_response.messages)
+                present = {
+                    c.function_call.call_id
+                    for m in conversation
+                    for c in m.contents or []
+                    if c.type == "function_approval_response" and c.function_call is not None
+                }
+                answers = [c.to_function_approval_response(True) for c in approved.pop(event.executor_id, []) if c.function_call.call_id not in present]
+                if answers:
+                    conversation = [Message(role="user", contents=answers), *conversation]
+                steps.setdefault(event.executor_id, []).append(conversation)
     return steps
 
 
@@ -704,14 +727,16 @@ async def steps_main() -> int:
                     STEPS_FIXED[0] = b"discount_percent / 100" in module.read_bytes()
                 else:
                     STEPS_FIXED[0] = False
-    steps = step_conversations(events)
+    steps = step_conversations(events, approve)
     outputs = [str(e.data) for e in events if e.type == "output"]
     user = Message(role="user", contents=[STEPS_QUERY])
 
     def items(conversations: list[list[Any]]) -> list[Any]:
         return [EvalItem([user, *c], split_strategy=ConversationSplit.FULL) for c in conversations]
 
-    report = [EvalItem([user, Message(role="assistant", contents=[outputs[-1] if outputs else ""])], split_strategy=ConversationSplit.FULL)]
+    # The run's report is all its outputs: the checks' result comes before the commit card's answer (AskCommit), and
+    # the eval denies the commit, so the last output alone was "The commit ... was not approved" (a3a3519).
+    report = [EvalItem([user, Message(role="assistant", contents=["\n\n".join(outputs)])], split_strategy=ConversationSplit.FULL)]
     scored = {
         wf.PLAN_STEP: await LocalEvaluator(plan_step).evaluate(items(steps.get(wf.PLAN_STEP, [])), eval_name="plan"),
         wf.EXECUTE_STEP: await LocalEvaluator(execute_step).evaluate(items(steps.get(wf.EXECUTE_STEP, [])), eval_name="execute"),
