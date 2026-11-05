@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Added
 
+- An end-to-end test of a Manjuel face turn that needs a card: tools/call over HTTP on mcp_app's MCP host, the card
+  asked by `secondbrain_cards` on an MCP server standing in for SecondBrain's `approval_ask` (a real MCP `Client`, in
+  process), Allow runs the tool and the answer returns to Manjuel; Deny runs nothing. Test:
+  `test_a_manjuel_face_turn_needing_a_card_goes_through_the_mcp_host_to_secondbrains_approval_ask`.
 - The steps set's eval history line carries its CHECK and REPAIR progress (`progress`: the run's `StewardProgress`
   lines, in order: "checking: pytest -q ...", "check passed"/"check failed", "repair attempt n/3"), so SecondBrain's
   Evals shelf can show what CHECK and REPAIR did in a bar run; sets with no progress write no key. Test:
