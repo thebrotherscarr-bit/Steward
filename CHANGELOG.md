@@ -120,6 +120,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- CHECK tests the .py files EXECUTE's session says he wrote (`check_written`, from `agent.written_files`) as well as
+  the files git lists as changed. The steps set at a3a3519: his fix put inventory.py back to its committed text (the
+  evals plant the bug in the working copy only), git listed no change, the check ran nothing and the report was empty.
+  Test: `test_the_check_runs_on_a_file_he_wrote_back_to_its_committed_text`.
 - A plan object typed "approval" with a summary in place of questions is read as the approval in its own shape
   (`plan_in_its_own_shape`), as one with no type already was; another type is still no plan. The steps set at 416ba41:
   `{"type":"approval","summary":"Modify order_total ...","steps":[...]}` was no plan and was asked again. Test:

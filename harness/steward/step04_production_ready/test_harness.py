@@ -6259,3 +6259,48 @@ def test_the_plan_call_asks_each_step_that_changes_a_file_to_name_it_by_its_path
     [now] = wf.plan_call_input([Message(role="user", contents=["Fix the discount bug."])])[1:]
     assert "naming that file by its path" in now.text, now.text
     assert (now.additional_properties or {}).get(steward.REQUEST_KEY) == "", "the plan call's turn is no new request"
+
+
+def test_the_check_runs_on_a_file_he_wrote_back_to_its_committed_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The steps set at a3a3519 (2026-11-05 06:05Z): his fix put inventory.py back to its committed text (the bug is
+    planted in the working copy only), git listed no change, CHECK ran nothing and the report was empty. CHECK now
+    hands its checks the files EXECUTE's session says he wrote (check_written), and python_tests_for_changes tests
+    those as it tests a changed file; the workflow's CHECK reads them from EXECUTE's session."""
+    import subprocess
+    import tempfile
+
+    from agent_framework import InMemoryHistoryProvider
+
+    import steward_workflow as wf
+
+    monkeypatch.delenv(wf._CHECK_RUNNING, raising=False)  # noqa: SLF001 - this test runs the check, in its own repo
+    with tempfile.TemporaryDirectory(prefix="cw") as folder:
+        workspace = Path(folder)
+
+        def git(*args: str) -> None:
+            subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True, check=True)
+
+        git("init", "-q")
+        (workspace / "p").mkdir()
+        (workspace / "p" / "mod.py").write_text("X = 1\n", encoding="utf-8")
+        (workspace / "p" / "test_mod.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+        assert wf.python_tests_for_changes([], workspace=workspace) is None, "nothing changed and nothing written"
+        token = wf._CHECK_WRITTEN.set(("p/mod.py", "p/notes.md", "p/gone.py"))  # noqa: SLF001
+        try:
+            result = wf.python_tests_for_changes([], workspace=workspace)
+        finally:
+            wf._CHECK_WRITTEN.reset(token)  # noqa: SLF001
+        assert result is not None and result[0] and "pytest -q p" in result[1], result
+
+    async def _go() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=ScriptedChatClient([]), enable_shell=False, history_provider=InMemoryHistoryProvider())
+            workflow = wf.build_steward_workflow(agent)
+            check = workflow.executors[wf.CHECK_STEP]
+            execute = workflow.executors[wf.EXECUTE_STEP]
+            wf.executor_session(execute).state[steward.WRITTEN_FILES_KEY] = ["harness/steward/working/sample-project/inventory.py"]
+            return check._written()  # noqa: SLF001
+
+    assert asyncio.run(_go()) == ["harness/steward/working/sample-project/inventory.py"], "CHECK reads EXECUTE's session"
