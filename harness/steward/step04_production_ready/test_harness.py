@@ -111,14 +111,21 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
     """MAF's MockBaseChatClient composition, replying from a script: text, or one function call.
 
     The workflow's router call (response_format Route) is answered from its own script, ``routes`` ({"kind": "task"}
-    when it runs out), and recorded in ``route_calls``, so a script and its call count stay Steward's own steps."""
+    when it runs out), and recorded in ``route_calls``, so a script and its call count stay Steward's own steps.
 
-    def __init__(self, replies: list[Any] | None = None, routes: list[str] | None = None) -> None:
+    The plan call (tool_choice "none", response_format StewardPlan: PLAN after EXPLORE) is answered from ``plans``
+    and recorded in ``plan_calls``. With ``plans`` spent, the first plan call restates EXPLORE's last text (a model
+    putting what it concluded into the format), and a plan call asked again takes the next of ``replies``, so a
+    script written for one PLAN step reads as it did."""
+
+    def __init__(self, replies: list[Any] | None = None, routes: list[str] | None = None, plans: list[Any] | None = None) -> None:
         super().__init__(middleware=[])
         self.replies = list(replies or [])
         self.calls: list[dict[str, Any]] = []
         self.routes = list(routes or [])
         self.route_calls: list[dict[str, Any]] = []
+        self.plans = list(plans or [])
+        self.plan_calls: list[dict[str, Any]] = []
 
     def _inner_get_response(
         self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any
@@ -128,6 +135,15 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
         if options.get("response_format") is wf.Route:
             self.route_calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
             reply = self.routes.pop(0) if self.routes else '{"kind": "task"}'
+        elif options.get("response_format") is wf.StewardPlan and options.get("tool_choice") == "none":
+            self.plan_calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
+            last_user = next((m for m in reversed(messages) if m.role == "user"), None)
+            if self.plans:
+                reply = self.plans.pop(0)
+            elif last_user is not None and last_user.text == wf.PLAN_NOW:
+                reply = next((m.text for m in reversed(messages) if m.role == "assistant" and (m.text or "").strip()), "")
+            else:
+                reply = self.replies.pop(0) if self.replies else "done"
         else:
             self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
             reply = self.replies.pop(0) if self.replies else "done"
@@ -1012,8 +1028,8 @@ def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a
 
     plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix it"]}'
 
-    def run_plan_step(replies: list[Any], *extra: Any) -> tuple[ScriptedChatClient, list[str]]:
-        client = ScriptedChatClient(replies)
+    def run_plan_step(replies: list[Any], *extra: Any, plans: list[Any] | None = None) -> tuple[ScriptedChatClient, list[str]]:
+        client = ScriptedChatClient(replies, plans=plans)
 
         async def _go() -> list[str]:
             async with AsyncExitStack() as stack:
@@ -1025,15 +1041,20 @@ def test_a_tool_call_written_as_text_in_the_plan_step_runs_and_a_plan_is_never_a
         return client, asyncio.run(_go())
 
     client, cards = run_plan_step([LISTED_IN_PLAN, plan])
-    assert client.calls[0]["options"].get("response_format") is wf.StewardPlan
+    assert client.calls[0]["options"].get("response_format") is None, "EXPLORE reads in its own words"
+    assert client.plan_calls[0]["options"].get("response_format") is wf.StewardPlan, "the plan call asks for the plan"
     assert len(client.calls) == 2, "the recovered call ran and PLAN was called again"
     assert any("inventory.py" in r for r in function_results(client.calls[1])), "file_access_ls listed the sample project"
     assert cards == [wf.APPROVE_PLAN], "and the run yields the plan card"
 
     # The plan step offers only its own tools (steward_workflow.offered_in_step), so the extra tool is made one of them.
+    # Since the plan call (2026-11-05) the plan is asked for with the tools off: a tool its JSON fits is offered to the
+    # reading (EXPLORE) only, never to the call that answers with the plan.
     monkeypatch.setattr(wf, "PLAN_TOOLS", wf.PLAN_TOOLS | {"plan_shaped"})
-    client, cards = run_plan_step([plan, "never"], _plan_shaped_tool())
-    assert "plan_shaped" in offered_tools(client.calls[0]), "the plan's JSON fits an offered tool"
+    client, cards = run_plan_step(["I have read what I need.", "never"], _plan_shaped_tool(), plans=[plan])
+    assert "plan_shaped" in offered_tools(client.calls[0]), "the reading is offered the tool the plan's JSON fits"
+    [plan_call] = client.plan_calls
+    assert not offered_tools(plan_call) and plan_call["options"]["tool_choice"] == "none", "the plan call: no tool"
     assert len(client.calls) == 1 and cards == [wf.APPROVE_PLAN], "a valid plan is the plan, never a call"
 
     def run_unstreamed(replies: list[Any], *extra: Any) -> tuple[ScriptedChatClient, Any]:
@@ -1291,6 +1312,7 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
                     session = execute._session  # noqa: SLF001 - the executor's own session, as MAF checkpoints it
                     seen["todos"] = [(i.title, i.is_complete) for i in await todos.store.load_items(session, source_id=todos.source_id)]
                     seen["calls"] = client.calls
+                    seen["plan_calls"] = client.plan_calls
                     return seen
 
         return asyncio.run(_go())
@@ -1299,7 +1321,7 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
         call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "read"}, {"id": 2, "reason": "fixed"}]}
     )
     approved = run([plan, done, "Done: the discount is fixed."], approve=True)
-    assert approved["calls"][0]["options"].get("response_format") is wf.StewardPlan, "PLAN asks for the structured plan"
+    assert approved["plan_calls"][0]["options"].get("response_format") is wf.StewardPlan, "PLAN asks for the structured plan"
     # Ollama's format enforces only the schema: a plan must carry a step (live 2026-11-01 sent "steps": [ ]).
     assert wf.StewardPlan.model_json_schema()["properties"]["steps"].get("minItems") == 1, "a plan's steps can be empty"
     assert wf.steward_plan_in('{"type": "approval", "questions": [{"message": "m"}], "steps": [ ]}') is None
@@ -1323,21 +1345,22 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
 
     # An empty plan reply (the model's answer left in its reasoning) is asked again once, then the plan goes on.
     again = run(["", plan], approve=None)
-    assert again["cards"] == [wf.APPROVE_PLAN] and again["calls_before_answer"] == 2, "an empty reply was asked again"
-    assert wf.PLAN_AGAIN in " ".join(m.text or "" for m in again["calls"][1]["messages"])
+    # (The plan call is asked again: EXPLORE's one call, then the plan call and its asked-again turn.)
+    assert again["cards"] == [wf.APPROVE_PLAN] and len(again["plan_calls"]) == 2, "an empty reply was asked again"
+    assert wf.PLAN_AGAIN in " ".join(m.text or "" for m in again["plan_calls"][1]["messages"])
     empty = run(["", ""], approve=None)
-    assert len(empty["calls"]) == 2 and empty["cards"] == [], "asked again once, not in a loop"
+    assert len(empty["plan_calls"]) == 2 and empty["cards"] == [], "asked again once, not in a loop"
 
     # A plan labelled a clarification with no choices (live 2026-11-02, three times) gets the guide's definitions once.
     mislabelled = '{"type": "clarification", "questions": [{"message": "Should I proceed?"}], "steps": ["Fix the discount line"]}'
     relabelled = run([mislabelled, plan], approve=None)
-    assert relabelled["cards"] == [wf.APPROVE_PLAN] and relabelled["calls_before_answer"] == 2, "the mislabelled plan was asked again"
-    assert wf.PLAN_IS_APPROVAL in " ".join(m.text or "" for m in relabelled["calls"][1]["messages"])
+    assert relabelled["cards"] == [wf.APPROVE_PLAN] and len(relabelled["plan_calls"]) == 2, "the mislabelled plan was asked again"
+    assert wf.PLAN_IS_APPROVAL in " ".join(m.text or "" for m in relabelled["plan_calls"][1]["messages"])
     still = run([mislabelled, mislabelled], approve=None)
-    assert still["outputs"] == ["Should I proceed?"] and len(still["calls"]) == 2, "asked again once, then shown as it is"
+    assert still["outputs"] == ["Should I proceed?"] and len(still["plan_calls"]) == 2, "asked again once, then shown as it is"
     choices = '{"type": "clarification", "questions": [{"message": "Which file?", "choices": ["a.py", "b.py"]}], "steps": ["s"]}'
     question = run([choices], approve=None)
-    assert question["outputs"] == ["Which file? (a.py / b.py)"] and len(question["calls"]) == 1, "a real clarification ends the run"
+    assert question["outputs"] == ["Which file? (a.py / b.py)"] and len(question["plan_calls"]) == 1, "a real clarification ends the run"
 
 
 QUESTION = "What does order_total do in harness/steward/working/sample-project?"
@@ -1382,7 +1405,7 @@ def test_a_question_is_answered_in_words_and_a_task_or_an_unclear_route_is_plann
     for route in ('{"kind": "task"}', "It is a question."):  # a task, and a reply that is no Route (Default)
         client, events = run(route, [plan])
         assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], route
-        assert client.calls[0]["options"].get("response_format") is wf.StewardPlan, route
+        assert client.plan_calls[0]["options"].get("response_format") is wf.StewardPlan, route
 
 
 STEP_OPTION_NAMES = [f"STEWARD_{s.upper()}_{o}" for s in ("route", "plan", "answer", "execute", "repair") for o in ("THINK", "TEMPERATURE", "SEED")]
@@ -1445,7 +1468,12 @@ def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and
     unset = [{k: v for k, v in c["options"].items() if k not in ("tools", "instructions")} for c in task.calls + question.calls]
     # The commit message's call carries the router's options (his window and keep-alive) and CommitMessage.
     commit = {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.CommitMessage}
-    assert unset == [{**base, "response_format": wf.StewardPlan}, *[base] * 4, commit, base], "with nothing set, today's options"
+    assert unset == [*[base] * 5, commit, base], "with nothing set, today's options"
+    # PLAN's reading (EXPLORE) is the first of those; the plan call itself: tools off and the plan's schema.
+    [plan_call] = task.plan_calls
+    assert {k: v for k, v in plan_call["options"].items() if k not in ("tools", "instructions")} == {
+        **base, "tool_choice": "none", "response_format": wf.StewardPlan
+    }, plan_call["options"]
 
     env = {
         "STEWARD_ROUTE_THINK": "false", "STEWARD_ROUTE_TEMPERATURE": "0",
@@ -1457,7 +1485,7 @@ def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and
     set_task, set_question = _run_every_step(monkeypatch, env)
     added = {"think": None, "temperature": None, "seed": None}
     wanted = [
-        {"think": "high"},  # plan
+        {"think": "high"},  # plan: its reading (EXPLORE)
         {"think": "low", "temperature": 0.3, "seed": 7},  # execute
         {"think": "low", "temperature": 0.3, "seed": 7},
         {"think": True},  # repair, on EXECUTE's executor and session
@@ -1471,6 +1499,7 @@ def test_each_steps_reasoning_effort_temperature_and_seed_reach_its_own_call_and
         assert _sent(after) == {**_sent(before), **extra}, "a step's options change only their own keys"
     [routed] = set_task.route_calls
     assert routed["options"] == {"num_ctx": base["num_ctx"], "keep_alive": "30m", "response_format": wf.Route, "think": False, "temperature": 0.0}
+    assert set_task.plan_calls[0]["options"].get("think") == "high", "and its plan call: STEWARD_PLAN_* are both phases'"
 
 
 def test_a_bad_step_option_stops_the_build_and_each_step_with_overrides_is_logged(
@@ -1885,10 +1914,11 @@ def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(mo
     done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "r"}, {"id": 2, "reason": "f"}]})
     replies: list[Any] = [plan, done, "Done: the discount is fixed."]
     calls: list[Any] = []
+    plan_calls: list[Any] = []
 
     def fresh_client() -> ScriptedChatClient:  # the host refuses a client shared between requests
         client = ScriptedChatClient([])
-        client.replies, client.calls = replies, calls
+        client.replies, client.calls, client.plan_calls = replies, calls, plan_calls
         return client
 
     with TestClient(hosted.steward_server(client_factory=fresh_client, enable_shell=False)) as http:
@@ -1904,7 +1934,8 @@ def test_the_hosted_workflow_sends_the_plan_card_and_runs_the_plan_on_approve(mo
     assert texts == ["Done: the discount is fixed."], second
     assert len(calls) == 3, "EXECUTE ran the plan until its todos were done"
     formats = [c["options"].get("response_format") for c in calls]
-    assert formats[0].__name__ == "StewardPlan" and formats[1:] == [None, None], "each step's own format, not the tab's"
+    assert formats == [None, None, None], "EXPLORE and EXECUTE: no format, not the tab's"
+    assert [c["options"].get("response_format").__name__ for c in plan_calls] == ["StewardPlan"], "the plan call's own format"
     # The host's tool-only identity never reaches the model call: Ollama's chat() refuses an unknown keyword.
     assert not any("additional_function_arguments" in c["kwargs"] for c in calls), "the host's identity reached the model"
     state.cleanup()
@@ -2159,7 +2190,7 @@ def test_the_steps_eval_scores_each_workflow_step_by_its_own_evaluator() -> None
 
     good = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Read inventory.py", "Fix the discount line"]}'
     steps = plan_run(good)
-    assert list(steps) == [wf.PLAN_STEP], "the run's AgentExecutor steps, by executor id"
+    assert list(steps) == [wf.EXPLORE_STEP, wf.PLAN_STEP], "the run's AgentExecutor steps, by executor id"
     assert scored(evals.plan_step, evals.STEPS_QUERY, steps[wf.PLAN_STEP][0]).passed, "a plan naming the work passes"
     asked = '{"type": "clarification", "questions": [{"message": "Which test?"}], "steps": ["Read the tests"]}'
     assert not scored(evals.plan_step, evals.STEPS_QUERY, plan_run(asked)[wf.PLAN_STEP][0]).passed, "a question is no plan"
@@ -2664,7 +2695,8 @@ def test_stewards_workflow_graph_loops_back_to_plan_and_from_repair_to_execute()
 
     lines = {line.strip() for line in asyncio.run(_go()).splitlines()}
     assert f'{wf.ROUTE_STEP}["{wf.ROUTE_STEP} (Start)"];' in lines, "the router is not the start"
-    assert {f"{wf.ROUTE_STEP} --> {wf.ANSWER_STEP};", f"{wf.ROUTE_STEP} --> {wf.PLAN_STEP};"} <= lines, "route: answer | plan"
+    assert {f"{wf.ROUTE_STEP} --> {wf.ANSWER_STEP};", f"{wf.ROUTE_STEP} --> {wf.EXPLORE_STEP};"} <= lines, "route: answer | explore"
+    assert f"{wf.EXPLORE_STEP} --> {wf.PLAN_STEP};" in lines, "explore does not go on to the plan call"
     assert f"{wf.READ_PLAN_STEP} --> {wf.PLAN_STEP};" in lines, "read_plan does not loop back to plan"
     assert f"{wf.CHECK_STEP} -. conditional .-> {wf.REPAIR_STEP};" in lines, "a failed check does not go to repair"
     assert f"{wf.REPAIR_STEP} --> {wf.EXECUTE_STEP};" in lines, "repair does not loop back to execute"
@@ -3329,8 +3361,10 @@ def test_a_named_settings_set_reaches_its_steps_call_and_heads_the_report(monkey
     assert evals.cli(["small", "--options", "plan_t0"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[:2] == ["Settings set plan_t0: STEWARD_PLAN_TEMPERATURE=0", "Small asks: 1/1 passed"], out
-    assert client.calls[0]["options"]["response_format"] is wf.StewardPlan and client.calls[0]["options"]["temperature"] == 0.0
-    assert all("temperature" not in call["options"] for call in client.calls[1:]), "the plan's call only"
+    [plan_call] = client.plan_calls
+    assert plan_call["options"]["response_format"] is wf.StewardPlan and plan_call["options"]["temperature"] == 0.0
+    assert client.calls[0]["options"]["temperature"] == 0.0, "and its reading (EXPLORE)"
+    assert all("temperature" not in call["options"] for call in client.calls[1:]), "the plan's calls only"
 
     assert evals.cli(["small", "--options", "plan_hot"]) == 2
     error = capsys.readouterr().err
@@ -5262,8 +5296,8 @@ def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path:
     assert cards == [wf.APPROVE_PLAN], "the steps set's text: a plan card"
     # Since the per-step tools (steward_workflow.offered_in_step) the plan step is offered no write, so the write's
     # arguments fit no tool there: nothing runs, and PLAN is asked once more for its plan (PLAN_NOT_A_CALL).
-    assert not function_results(client.calls[1]), function_results(client.calls[1])
-    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+    assert not function_results(client.plan_calls[1]), function_results(client.plan_calls[1])
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
     assert inventory.read_bytes() == before, "the write never ran"
     tools = client.calls[0]["options"]["tools"]
     assert not {"file_access_replace_lines", "file_memory_replace_lines"} & offered_tools(client.calls[0])
@@ -5273,12 +5307,12 @@ def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path:
     client, cards, _ = run([QUERY_AS_TEXT, plan])
     assert {"search_code", "secondbrain_search_notes"} <= offered_tools(client.calls[0])
     assert steward.tool_call_in_text(QUERY_AS_TEXT, client.calls[0]["options"]["tools"], planning=True) is None
-    assert cards == [wf.APPROVE_PLAN] and len(client.calls) == 2, "the README ask's text: asked again, then a card"
-    assert not function_results(client.calls[1]), "nothing ran on a guess"
-    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+    assert cards == [wf.APPROVE_PLAN] and len(client.plan_calls) == 2, "the README ask's text: asked again, then a card"
+    assert not function_results(client.plan_calls[1]), "nothing ran on a guess"
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
 
     client, cards, outputs = run([QUERY_AS_TEXT, QUERY_AS_TEXT])
-    assert cards == [] and len(client.calls) == 2 and outputs == [QUERY_AS_TEXT], "asked again once, not in a loop"
+    assert cards == [] and len(client.plan_calls) == 2 and outputs == [QUERY_AS_TEXT], "asked again once, not in a loop"
     assert wf.ends_with_a_json_object('I will search.\n```json\n{"query": "pytest"}\n```')
     assert not wf.ends_with_a_json_object("Just words.") and not wf.ends_with_a_json_object("{}")
 
@@ -5490,8 +5524,9 @@ def test_each_workflow_step_is_offered_only_its_own_tools() -> None:
     asyncio.run(_task())
     planned, after_left_out, executed = (offered_tools(c) for c in client.calls[:3])
     assert planned == after_left_out and planned <= wf.PLAN_TOOLS, sorted(planned - wf.PLAN_TOOLS)
-    assert {"file_access_read", "file_access_ls", "search_code", "todos_add", "load_skill"} <= planned
-    assert not {"file_access_write", "file_access_replace_lines", "git_commit", "mode_set", "mode_get", "todos_complete",
+    assert {"file_access_read", "file_access_ls", "search_code", "load_skill"} <= planned
+    # No todo tool while planning (the bar at aba870f): the approved plan's steps become the todos.
+    assert not {"file_access_write", "file_access_replace_lines", "git_commit", "mode_set", "mode_get", "todos_complete", "todos_add",
                 "execute_code", "file_memory_write"} & planned
     assert function_results(client.calls[1]) == ['Error: Requested function "mode_get" not found.'], "it never ran"
     assert {"file_access_write", "file_access_replace_lines", "todos_complete"} <= executed
@@ -5539,7 +5574,7 @@ def test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run() -> N
         return [e.data.function_call.name for e in events if e.type == "request_info"]
 
     assert asyncio.run(_workflow()) == [wf.APPROVE_PLAN], "asked again, then the card"
-    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
 
     client = ScriptedChatClient(["Done."])
 
@@ -5655,8 +5690,8 @@ def test_a_plan_written_as_json_text_in_its_own_shape_gets_the_plan_card() -> No
     for second in (guide, OWN_SHAPE_PLAN):
         client, cards, outputs = run([README_WRITE_AS_TEXT, second])
         assert [c.name for c in cards] == [wf.APPROVE_PLAN], ("run 1's text, then a plan: a card", outputs)
-        assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
-        assert not function_results(client.calls[1]), "nothing ran on the write's text"
+        assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
+        assert not function_results(client.plan_calls[1]), "nothing ran on the write's text"
     assert readme.read_bytes() == before, "the README was never written while planning"
 
     # Strings, a question, a description: the same reading. A blank step, an object without a line, or no summary: no plan.
@@ -5697,9 +5732,9 @@ def test_execute_is_not_offered_codeact_and_an_empty_plan_is_asked_for_the_struc
         return [c.data.function_call.name for c in cards]
 
     assert asyncio.run(_task()) == [wf.APPROVE_PLAN], "the empty reply was asked again, then the card"
-    asked = " ".join(m.text or "" for m in client.calls[1]["messages"])
+    asked = " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
     assert wf.PLAN_AGAIN in asked and "type approval" in wf.PLAN_AGAIN and "steps" in wf.PLAN_AGAIN
-    planned, executed = offered_tools(client.calls[0]), offered_tools(client.calls[2])
+    planned, executed = offered_tools(client.calls[0]), offered_tools(client.calls[1])
     assert "execute_code" not in planned and "execute_code" not in executed, sorted(executed)
     assert {"file_access_write", "file_access_replace_lines", "run_shell"} & executed
 
@@ -5707,3 +5742,94 @@ def test_execute_is_not_offered_codeact_and_an_empty_plan_is_asked_for_the_struc
     assert not wf.offered_in_step("execute_code", wf.EXECUTE_STEP)
     monkeypatch.setattr(steward, "hyperlight_sandbox_on", lambda: True)
     assert wf.offered_in_step("execute_code", wf.EXECUTE_STEP), "the sandbox's shell stand-in"
+
+
+# The text-shaped calls PLAN ended on in the bars (aba870f: the discount ask, both runs; earlier: the README ask and the
+# steps set), each written by the reading phase as its last reply. ('{"query": "pytest"}' is replayed through the
+# workflow with the code index stubbed: test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card.)
+READING_SHAPES = [
+    '{"todos": [{"title": "Modify inventory.order_total to interpret discount_percent as a percentage"}]}',
+    '{"file_name": "harness/steward/working/sample-project/inventory.py", "start_line": 16, "end_line": 21, '
+    '"new_lines": "    return subtotal * (1 - discount_percent / 100)"}',
+    '{"edits": [{"old": "discount_percent", "new": "discount_percent / 100"}], '
+    '"file_name": "harness/steward/working/sample-project/inventory.py"}',
+    '{"summary": "Fix the discount", "steps": [{"file": "inventory.py"}]}',
+]
+
+
+def test_plan_reads_with_read_only_tools_then_one_call_with_tools_off_answers_with_the_plan() -> None:
+    """The bar at aba870f: the discount ask's PLAN ended on a tool call's arguments written as text both runs, a new
+    shape each bar. PLAN is two phases: EXPLORE reads with the read-only tools (no todo tool, no response_format), then
+    PLAN is one call with tool_choice "none" and StewardPlan as response_format (plan_phases_turn), given EXPLORE's
+    conversation and PLAN_NOW (plan_call_input). Whatever EXPLORE ends on, the run ends with the plan card."""
+    import steward_workflow as wf
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    inventory = steward._WORKING_DIR / "harness/steward/working/sample-project/inventory.py"
+    before = inventory.read_bytes()
+    todo = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": "Fix it"}]})
+
+    for last in [*READING_SHAPES, todo]:
+        client = ScriptedChatClient([last], plans=[plan])
+
+        async def _go(client: ScriptedChatClient = client) -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    events = [e async for e in wf.build_steward_workflow(agent).run("Fix the discount bug.", stream=True)]
+            return [e.data for e in events if e.type == "request_info"]
+
+        cards = asyncio.run(_go())
+        assert [c.function_call.name for c in cards] == [wf.APPROVE_PLAN], (last, len(client.plan_calls))
+        assert cards[0].function_call.parse_arguments()["steps"] == ["Fix the discount line"], last
+        # EXPLORE: read-only tools, no todo tool, no format.
+        reading = offered_tools(client.calls[0])
+        assert reading and reading <= wf.PLAN_TOOLS and not reading & {"todos_add", "todos_get_all", "todos_remove"}, sorted(reading)
+        assert all(c["options"].get("response_format") is None for c in client.calls), last
+        # The plan call: tools off, the plan's schema, PLAN_NOW its last turn, and no "answer in plain text" line.
+        [plan_call] = client.plan_calls
+        assert plan_call["options"]["tool_choice"] == "none" and plan_call["options"]["response_format"] is wf.StewardPlan
+        assert not offered_tools(plan_call), sorted(offered_tools(plan_call))
+        said_to_it = [m.text for m in plan_call["messages"] if m.role == "user"]
+        assert said_to_it[-1] == wf.PLAN_NOW and steward.TOOLS_OFF_ANSWER_NOW not in said_to_it, said_to_it
+        assert "Fix the discount bug." in said_to_it, "the plan call is given the request and the reading"
+    assert inventory.read_bytes() == before, "nothing was written while planning"
+    assert not {"todos_add", "todos_get_all", "todos_get_remaining", "todos_remove"} & wf.PLAN_TOOLS
+    assert not wf.offered_in_step("file_access_read", wf.PLAN_STEP), "the plan call is offered no tool"
+
+
+def test_the_commit_message_is_asked_for_the_users_request_after_plan_was_asked_again() -> None:
+    """The steps set at aba870f: PLAN was asked again, its second run started at PLAN_AGAIN, and the commit message was
+    asked for "Request: Your reply was empty. Reply now with your plan ..."; with no request to name, the model copied
+    COMMIT_PROMPT's example, the item_count ask's own message, on the discount fix. ROUTE keeps the request in the
+    workflow's state; the card and the commit message take it from there. The example names no eval ask's work."""
+    import evals
+    import steward_workflow as wf
+
+    request = "Fix the bug that makes test_percent_discount fail."
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line"]}'
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "fixed"}]})
+    client = ScriptedChatClient(["", done, "Fixed.", '{"message": "Fix the percent discount in inventory.py"}'], plans=["", plan])
+
+    async def _go() -> tuple[Any, Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda _m: (True, "1 passed"), changes=lambda: ["inventory.py"])
+                events = [e async for e in workflow.run(request, stream=True)]
+                [card] = [e for e in events if e.type == "request_info"]
+                answer = {card.request_id: card.data.to_function_approval_response(True)}
+                resumed = [e async for e in workflow.run(stream=True, responses=answer)]
+                [commit] = [e for e in resumed if e.type == "request_info"]
+        return card.data.function_call.parse_arguments(), commit.data.function_call.parse_arguments()
+
+    shown, commit = asyncio.run(_go())
+    assert wf.PLAN_AGAIN in " ".join(m.text or "" for m in client.plan_calls[1]["messages"]), "PLAN was asked again"
+    assert shown["request"] == request, shown
+    [asked] = [c for c in client.calls if c["options"].get("response_format") is wf.CommitMessage]
+    sent = " ".join(m.text or "" for m in asked["messages"])
+    assert f"Request: {request}" in sent and wf.PLAN_AGAIN not in sent, sent
+    assert commit["message"] == "Fix the percent discount in inventory.py"
+    taught = (wf.COMMIT_PROMPT + wf.CommitMessage.model_fields["message"].description).lower()
+    named = [word for words in evals.SMALL_ASK_SUBJECT.values() for word in words if word in taught and word != "test"]
+    assert not named, f"the commit example names an eval ask's work: {named}"

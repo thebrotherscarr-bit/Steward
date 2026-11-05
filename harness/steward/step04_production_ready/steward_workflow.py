@@ -7,8 +7,9 @@ are such stages, so their order is the graph's, not the model's choice.
 Pieces 1 to 4 of the build order:
 
     request -> route (one structured-output call: Route) -> (answer) answer (AgentExecutor, plain words; plan mode,
-            so reads run and writes are refused) | (task, or no Route: Default) plan
-    plan (AgentExecutor, plan mode, structured output StewardPlan) -> read_plan
+            so reads run and writes are refused) | (task, or no Route: Default) explore
+    explore (AgentExecutor, plan mode, read-only tools, no response_format) -> plan (AgentExecutor, one call: tools off,
+            tool_choice "none", structured output StewardPlan) -> read_plan
             -> ask_approval (the workflow pauses: ctx.request_info) -> execute (AgentExecutor, execute mode) -> check
             -> (failed, attempts left) repair -> execute -> check ...
             -> (passed on changed code) ask_commit ("Checks passed") -> commit (one structured-output call writes the
@@ -112,6 +113,15 @@ logger = logging.getLogger(__name__)
 WORKFLOW_NAME = "steward"
 ROUTE_STEP = "route"
 ANSWER_STEP = "answer"
+# PLAN in two phases (the bar at aba870f, 2026-11-04: the discount ask's PLAN ended on a tool call's arguments written
+# as text both runs, '{"todos": [...]}' and '{"file_name": ..., "new_lines": ...}', after '{"query": ...}',
+# '{"edits": ...}' and others on earlier bars; reading each new shape was not converging). EXPLORE reads, with only the
+# read-only tools (PLAN_TOOLS) and no response_format; PLAN is then one call with tool_choice "none" and StewardPlan as
+# response_format, so the model's only possible answer is the plan. MAF's own way to get a final answer with the tools
+# off is that same option (agent_framework/_tools.py:4726, _disable_tools_at_function_call_limit), which
+# OllamaChatClient honours by sending no tools (agent_framework_ollama/_chat_client.py:483-497, "none omits the
+# tools"); response_format is Ollama's `format`, the schema it enforces (_chat_client.py:241 and 457).
+EXPLORE_STEP = "explore"
 PLAN_STEP = "plan"
 READ_PLAN_STEP = "read_plan"
 ASK_APPROVAL_STEP = "ask_approval"
@@ -136,9 +146,11 @@ NOT_APPROVED = "The plan was not approved, so nothing was run. Tell me what to c
 # it as the todo (live 2026-11-02: his finished todos had returned him to plan mode, and each repair came back a plan).
 REPAIR_TODO = "Fix the failing checks"
 # The commit message's structured call: COMMIT_PROMPT as its instruction, COMMIT_NOW as the change it describes.
+# Its example names no eval ask's work (the bar at aba870f: given no request, the model copied the example, which was
+# the item_count ask's own message, so a copy could not be told from an answer; see _REQUEST_STATE_KEY).
 COMMIT_PROMPT = (
     "Write the git commit message for the change below: one line of at most 72 characters, imperative, naming what "
-    "changed (the function, file or behaviour), e.g. 'Add item_count to inventory.py'. Never a bare word such as "
+    "changed (the function, file or behaviour), e.g. 'Add parse_date to dates.py'. Never a bare word such as "
     "'Update' or 'Fix'."
 )
 COMMIT_NOW = "The checks passed on this change. Write its commit message.\n\nRequest: {request}\n\nChanged files:\n{files}\n\nChecks:\n{output}"
@@ -178,6 +190,20 @@ PLAN_NOT_A_CALL = (
     "tool call. In plan mode only reads run; writes come after the user approves the plan. Reply now with your plan "
     "as the JSON object asked for: type approval, a summary of the plan as its one question, and your steps."
 )
+# The plan call's own turn, after EXPLORE's conversation (plan_call_input): its tools are off, so it says so, and says
+# what the steps become (approved_plan_turn writes them as his todos; no todo tool is offered while planning).
+PLAN_NOW = (
+    "Your reading is done, and your tools are off for this reply. Reply now with your plan for the request above as "
+    "the JSON object asked for: type approval, a summary of the plan as its one question, and your steps, one short "
+    "imperative line each; they become your todo list when the user approves. If you need the user's answer first, "
+    "reply with type clarification and a question that lists the choices."
+)
+# The user's request, kept in the workflow's state by ROUTE (so in its checkpoint): the plan card and the commit message
+# name it. The bar at aba870f (steps set, 2026-11-04): PLAN was asked again (PLAN_AGAIN), its second run's conversation
+# started at that message, and the commit message was asked for "Request: Your reply was empty. Reply now with your
+# plan ..."; with no request to name, the model copied COMMIT_PROMPT's example (traces: "Given example provided by
+# developer ... We'll produce that"), "Add item_count to inventory.py", on the discount fix.
+_REQUEST_STATE_KEY = "steward_request"
 _TRAILING_FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```\s*\Z", re.S | re.I)
 # The router's one instruction, and the line the answer step is given with a question: short, since the graph routes.
 ROUTE_PROMPT = (
@@ -242,6 +268,8 @@ class Router(Executor):
 
     async def _route(self, messages: list[Message], ctx: WorkflowContext[RoutedRequest]) -> None:
         request = next((m.text for m in reversed(messages) if m.role == "user" and (m.text or "").strip()), "")
+        # The request, for the plan card and the commit message, whatever later turns of PLAN start from.
+        ctx.set_state(_REQUEST_STATE_KEY, request)
         reply = await self._client.get_response(
             [Message(role="system", contents=[Content.from_text(ROUTE_PROMPT)]), Message(role="user", contents=[Content.from_text(request)])],
             options={**self._options, "response_format": Route},
@@ -507,11 +535,40 @@ def step_options_turn(step_options: Mapping[str, Mapping[str, Any]]) -> Callable
                 session.state[_REPAIRING_KEY] = list(steps) == [REPAIR_TODO]
             if session.state.get(_REPAIRING_KEY):
                 step = REPAIR_STEP
+        if step == EXPLORE_STEP:
+            step = PLAN_STEP  # PLAN's reading phase: STEWARD_PLAN_* are the plan step's, both its phases
         if overrides := step_options.get(str(step)):
             context.options = {**(context.options or {}), **overrides}
         await call_next()
 
     return step_options_turn_
+
+
+@agent_middleware
+async def plan_phases_turn(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Agent middleware, after plan_mode_turns: the run options of PLAN's two phases, read from the session's STEP_KEY.
+
+    EXPLORE reads: no response_format, so its replies are its own words and calls (plan_mode_turns sets StewardPlan
+    on every plan-mode run). PLAN is the plan call: tool_choice "none" and StewardPlan as response_format, so the
+    model can only answer with the plan (OllamaChatClient sends no tools, _chat_client.py:483-497; MAF's function loop
+    runs no call with it set, _tools.py:5428). Its asked-again runs (ReadPlan) are the same call.
+    """
+    session = context.session
+    step = session.state.get(STEP_KEY) if session is not None else None
+    if step == EXPLORE_STEP:
+        options = dict(context.options or {})
+        options.pop("response_format", None)
+        context.options = options
+    elif step == PLAN_STEP:
+        context.options = {**(context.options or {}), "tool_choice": "none", "response_format": StewardPlan}
+    await call_next()
+
+
+def plan_call_input(conversation: list[Message]) -> list[Message]:
+    """PLAN's input from EXPLORE (AgentExecutor's context_filter, context_mode "custom"): EXPLORE's whole conversation,
+    then PLAN_NOW. REQUEST_KEY "": PLAN_NOW is no new request (agent.asked_request)."""
+    now = Message(role="user", contents=[Content.from_text(PLAN_NOW)], additional_properties={REQUEST_KEY: ""})
+    return [*conversation, now]
 
 
 # Per-step tools (2026-11-05, the bar at 98d54d5): every model call of every step was offered the whole set, 43 tools
@@ -523,8 +580,10 @@ def step_options_turn(step_options: Mapping[str, Mapping[str, Any]]) -> Callable
 # session (ChatContext.session, STEP_KEY). This supersedes, for the workflow's steps, agent.py's "Tools stay offered in
 # every mode": the plan-mode gate and the cards still stand behind it. A session with no step (a host that runs him
 # without the graph) is offered everything, as before.
-#   PLAN offers what reads and what plans (PLAN_TOOLS): MAF's read-only file and skill tools, his repo status and code
-#     search, his file memory's reads, his notes' and the Estate's reads, and the todo tools that write the plan.
+#   EXPLORE, PLAN's reading phase, offers what reads (PLAN_TOOLS): MAF's read-only file and skill tools, his repo status
+#     and code search, his file memory's reads, his notes' and the Estate's reads. No todo tool (the bar at aba870f:
+#     '{"todos": [...]}' written as text was PLAN's last reply): approved_plan_turn writes the approved plan's steps as
+#     his todos. PLAN's own call is offered no tool and is sent with tool_choice "none" (plan_phases_turn).
 #   ANSWER offers everything that changes nothing (all but agent._CHANGES_THINGS, the mode tools, the todos and file
 #     memory's writes): a question may need CodeAct, a background agent or a skill's script (REQUEST_HINTS).
 #   EXECUTE (and its repair) offers everything but git_commit (COMMIT's own), the mode tools and CodeAct (CODEACT_TOOL).
@@ -538,7 +597,6 @@ PLAN_TOOLS = frozenset({
     # tells him (no card; his own memory, not the workspace). Named here because the provider adds them to the live list
     # on a run's first call after this cut, so the run's later calls would otherwise lose them.
     "list_memory_topics", "read_memory_topic", "search_memory_transcripts", "write_memory",
-    "todos_add", "todos_get_all", "todos_get_remaining", "todos_remove",
     *(f"secondbrain_{name}" for name in ("search_notes", "read_note", "list_notes", *ESTATE_READS)),
 })
 _MODE_TOOLS = frozenset({"mode_set", "mode_get"})
@@ -556,8 +614,10 @@ EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, *_MODE_TOOLS})
 
 def offered_in_step(name: str, step: str | None) -> bool:
     """Whether a step's model calls are offered the tool named name (a step of None is offered every tool)."""
-    if step == PLAN_STEP:
+    if step == EXPLORE_STEP:
         return name in PLAN_TOOLS
+    if step == PLAN_STEP:
+        return False  # the plan call: tools off (plan_phases_turn), so it can only answer with the plan
     if step == ANSWER_STEP:
         return name not in ANSWER_LEAVES_OUT
     if step == EXECUTE_STEP:
@@ -771,7 +831,8 @@ class ReadPlan(Executor):
         elif plan.type != PlanningResponseType.APPROVAL:
             await ctx.yield_output(clarification_text(plan))
         else:
-            plan_data = {"request": _first_user_text(response), "plan": plan.questions[0].message, "steps": plan.steps}
+            request = ctx.get_state(_REQUEST_STATE_KEY, None) or _first_user_text(response)
+            plan_data = {"request": request, "plan": plan.questions[0].message, "steps": plan.steps}
             await ctx.send_message(plan_data, target_id=ASK_APPROVAL_STEP)
 
 
@@ -873,7 +934,7 @@ class CommitMessage(BaseModel):
     message: str = Field(
         min_length=1,
         max_length=_COMMIT_SUMMARY_MAX,
-        description="One imperative line naming what changed, e.g. 'Add item_count to inventory.py'.",
+        description="One imperative line naming what changed, e.g. 'Add parse_date to dates.py'.",
     )
 
     @field_validator("message")
@@ -1052,6 +1113,7 @@ def build_steward_workflow(
     agent.middleware = [
         approved_plan_turn(modes, todos),
         plan_mode_turns(modes, response_format=StewardPlan),
+        plan_phases_turn,  # after plan_mode_turns: EXPLORE drops its response_format, PLAN turns its tools off
         # Only when a step has overrides: unset, every call's options are what they were before.
         *([step_options_turn(step_options)] if step_options else []),
         # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
@@ -1069,7 +1131,11 @@ def build_steward_workflow(
     answer_session = step_session(agent, ANSWER_STEP)
     answer_session.state[IN_WORDS_KEY] = True
     answer = AgentExecutor(agent, session=answer_session, id=ANSWER_STEP)
-    plan = AgentExecutor(agent, session=step_session(agent, PLAN_STEP), id=PLAN_STEP)
+    explore = AgentExecutor(agent, session=step_session(agent, EXPLORE_STEP), id=EXPLORE_STEP)
+    # PLAN takes EXPLORE's conversation and PLAN_NOW (MAF's chaining, AgentExecutor.from_response, context_mode custom).
+    plan = AgentExecutor(
+        agent, session=step_session(agent, PLAN_STEP), id=PLAN_STEP, context_mode="custom", context_filter=plan_call_input
+    )
     read_plan = ReadPlan()
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
@@ -1091,7 +1157,7 @@ def build_steward_workflow(
     # The run's output is the steps' own (a reply, a clarification, a refusal, the report, the commit's result).
     # EXECUTE's work streams to the caller as intermediate output (MAF's intermediate_output_from; WorkflowAgent and
     # the Responses host both forward it), so every host shows his work as it happens; PLAN's streamed text is the
-    # plan's raw JSON, which the card shows, so it stays hidden. ANSWER's words stream as EXECUTE's do.
+    # plan's raw JSON, which the card shows, so it stays hidden, as EXPLORE's reading does. ANSWER's words stream as EXECUTE's do.
     return (
         WorkflowBuilder(
             name=WORKFLOW_NAME,
@@ -1099,7 +1165,8 @@ def build_steward_workflow(
             output_from=[read_plan, ask_approval, ask_commit, commit, report],
             intermediate_output_from=[answer, execute],
         )
-        .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=plan)])
+        .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=explore)])
+        .add_edge(explore, plan)
         .add_edge(plan, read_plan)
         .add_edge(read_plan, plan)  # an empty plan reply, asked again once
         .add_edge(read_plan, ask_approval)
