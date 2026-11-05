@@ -23,8 +23,13 @@ code never depend on it.
 ``--options NAME`` runs a set with a named settings set from eval_options.json (per-step model options, the
 STEWARD_<STEP>_THINK / _TEMPERATURE / _SEED that steward_workflow reads at build); the report's first line names it.
 
+The small and steps sets, and T1's heldout set, are versioned files in harness/steward/evals/ (load_eval_sets; how a set
+is added: that folder's README.md). ``validate`` checks them with no model; ``bar <set>`` reads the history for its bar.
+
 Run:
-    python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory] [--options NAME]
+    python harness/steward/step04_production_ready/evals.py [small [--gate] | steps | memory | heldout] [--options NAME]
+    python harness/steward/step04_production_ready/evals.py validate
+    python harness/steward/step04_production_ready/evals.py bar <set>
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ import tempfile
 import contextlib
 from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -62,6 +68,246 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for th
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
+
+# Versioned eval sets (the plan "Steward's dev path: evals that grow with his skills", 2026-11-05, step 1): each set is
+# one file in harness/steward/evals/, <tier>-<name>.yaml, holding its name, tier, version, owner, runner, bar, the
+# change each version made, and its cases (an ask, a fixture: the sample project and an optional plant step, the terms
+# an on-topic answer names, a precondition and its checks by name). The sets are read here at import; validate_sets
+# (python evals.py validate, run by test_harness and so by the gate) checks every file. How a set is added and
+# versioned: harness/steward/evals/README.md.
+EVAL_SETS_DIR = Path(__file__).resolve().parents[1] / "evals"
+# Baselines and the fingerprint of each set version's cases: {name: {version: {"cases": sha256, ...}}}.
+EVAL_BASELINES = EVAL_SETS_DIR / "baselines.json"
+EVAL_RUNNERS = ("asks", "steps")
+_SET_KEYS = {"name", "tier", "version", "owner", "runner", "split", "bar", "changes", "cases"}
+# num_repetitions: opt-in, and only for a non-gating set (tier ext, e.g. a flakiness check); a gating tier runs each
+# case once.
+_SET_OPTIONAL = {"num_repetitions"}
+_CASE_KEYS = {"id", "ask", "fixture", "subject", "precondition", "checks"}
+# Handed to MAF's evaluate_agent as they are: expected_output, and expected_tool_calls as ExpectedToolCall(name,
+# arguments) scored by MAF's tool_call_args_match.
+_CASE_OPTIONAL = {"expected_output", "expected_tool_calls"}
+# A set's conversation split (MAF's ConversationSplit): full for multi-step cases (every step after the ask is scored).
+SPLITS = {"full": ConversationSplit.FULL, "last_turn": ConversationSplit.LAST_TURN}
+_BAR_KEYS = {"passed", "of", "runs_in_a_row"}
+_FIXTURE_KEYS = {"project", "plant"}
+# The plant steps a fixture may name: each the name of a context manager in this module, looked up when it is entered
+# (so a test's monkeypatch of it holds). It makes the ask's precondition in the working copy only, and puts it back.
+PLANTS = {
+    "discount_bug": "discount_bug_planted",
+    "readme_run_tests_removed": "readme_run_tests_removed",
+    "fahrenheit_bug": "fahrenheit_bug_planted",
+    "failing_test_added": "without_unit_test_planted",
+}
+# The RESULT checks: each measures the sample project as an ask's run left it (no model, deterministic), by the name of
+# its measurement function in this module, looked up when it runs. Every case needs one, and its precondition is one.
+RESULT_CHECKS = {
+    "item_count_works": "item_count_result",
+    "discount_test_passes": "discount_test_result",
+    "readme_says_how_to_run_tests": "readme_run_tests_result",
+    "steps_overall": "discount_test_result",
+    "fahrenheit_to_celsius_works": "fahrenheit_to_celsius_result",
+    "boiling_point_test_passes": "boiling_point_test_result",
+    "metres_per_unit_renamed": "metres_per_unit_result",
+    "readme_lists_length_units": "readme_length_units_result",
+    "without_unit_test_passes": "without_unit_test_result",
+}
+# The process checks each runner scores by name (besides the result checks), and the steps runner's whole set.
+ASKS_PROCESS_CHECKS = (
+    "plan_is_approval", "check_covers_writes", "edit_keeps_file_whole", "commit_by_tool", "commit_message_specific",
+    "no_nudge_in_reply", "answer_on_topic",
+)
+STEPS_CHECKS = ("plan_step", "execute_step", "steps_overall")
+# The result checks the asks runner scores (steps_overall is the steps runner's).
+ASKS_RESULT_CHECKS = tuple(name for name in RESULT_CHECKS if name not in STEPS_CHECKS)
+
+
+class EvalSetError(ValueError):
+    """An eval set file that cannot be used: its problems, one per line."""
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    """One case of a set: the ask, its fixture (project and plant), its subject terms, precondition and checks."""
+
+    id: str
+    ask: str
+    project: str
+    plant: str | None
+    subject: tuple[str, ...]
+    precondition: str
+    checks: tuple[str, ...]
+    expected_output: str | None = None
+    expected_tool_calls: tuple[ExpectedToolCall, ...] = ()
+
+
+@dataclass(frozen=True)
+class EvalSet:
+    """One versioned eval set, as its file holds it."""
+
+    name: str
+    tier: str
+    version: int
+    owner: str
+    runner: str
+    split: str
+    bar: dict[str, int]
+    changes: dict[int, str]
+    cases: tuple[EvalCase, ...]
+    fingerprint: str
+    path: Path
+    num_repetitions: int = 1
+
+    @property
+    def asks(self) -> list[str]:
+        return [case.ask for case in self.cases]
+
+    @property
+    def eval_name(self) -> str:
+        """The name MAF's results carry: <set>@v<version>."""
+        return f"{self.name}@v{self.version}"
+
+    def case(self, case_id: str) -> EvalCase:
+        return next(case for case in self.cases if case.id == case_id)
+
+
+def cases_fingerprint(cases: Any) -> str:
+    """The sha256 of a set's cases as parsed (keys sorted): any change to a case or a check changes it."""
+    import hashlib  # noqa: PLC0415
+
+    return hashlib.sha256(json.dumps(cases, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _schema_problems(raw: Any, path: Path) -> list[str]:
+    """What is wrong with a set file's shape and names (no fixture is entered here)."""
+    if not isinstance(raw, dict):
+        return ["not a mapping"]
+    problems = [f"unknown key {key!r}" for key in sorted(set(raw) - _SET_KEYS - _SET_OPTIONAL)]
+    problems += [f"missing key {key!r}" for key in sorted(_SET_KEYS - set(raw))]
+    if problems:
+        return problems
+    name, tier, version, runner = raw["name"], raw["tier"], raw["version"], raw["runner"]
+    if not (isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_]*", name)):
+        problems.append(f"name {name!r} is not a lower-case word")
+    if not (isinstance(tier, str) and re.fullmatch(r"T\d|ext", tier)):
+        problems.append(f"tier {tier!r} is not T0 to T9 or ext")
+    if raw["split"] not in SPLITS:
+        problems.append(f"split {raw['split']!r} is not one of {sorted(SPLITS)}")
+    if "num_repetitions" in raw:
+        reps = raw["num_repetitions"]
+        if tier != "ext":
+            problems.append("num_repetitions is for a non-gating set (tier ext) only: a gating tier runs each case once")
+        elif not (isinstance(reps, int) and not isinstance(reps, bool) and reps >= 1):
+            problems.append(f"num_repetitions {reps!r} is not a whole number from 1")
+    if not (isinstance(version, int) and not isinstance(version, bool) and version >= 1):
+        problems.append(f"version {version!r} is not a whole number from 1")
+    if not (isinstance(raw["owner"], str) and raw["owner"].strip()):
+        problems.append("owner is empty")
+    if runner not in EVAL_RUNNERS:
+        problems.append(f"runner {runner!r} is not one of {list(EVAL_RUNNERS)}")
+    if isinstance(name, str) and isinstance(tier, str) and path.name != f"{tier.lower()}-{name}.yaml":
+        problems.append(f"the file is named {path.name}, not {tier.lower()}-{name}.yaml")
+    changes = raw["changes"]
+    if not (isinstance(changes, dict) and all(isinstance(k, int) and isinstance(v, str) and v.strip() for k, v in changes.items())):
+        problems.append("changes is not a mapping of version numbers to what each changed")
+    elif version not in changes:
+        problems.append(f"changes says nothing of version {version}")
+    cases = raw["cases"]
+    if not (isinstance(cases, list) and cases):
+        return [*problems, "cases is not a non-empty list"]
+    bar = raw["bar"]
+    if not (isinstance(bar, dict) and set(bar) == _BAR_KEYS and all(isinstance(v, int) and v >= 1 for v in bar.values())):
+        problems.append(f"bar is not {{passed, of, runs_in_a_row}}, each a whole number from 1: {bar!r}")
+    elif not bar["passed"] <= bar["of"] == len(cases):
+        problems.append(f"bar {bar['passed']}/{bar['of']} does not fit its {len(cases)} cases")
+    known = set(ASKS_PROCESS_CHECKS) | set(ASKS_RESULT_CHECKS) if runner == "asks" else set(STEPS_CHECKS)
+    seen: set[str] = set()
+    for n, case in enumerate(cases, 1):
+        where = f"case {n}"
+        if not isinstance(case, dict):
+            problems.append(f"{where} is not a mapping")
+            continue
+        where = f"case {case.get('id', n)!r}"
+        problems += [f"{where}: unknown key {key!r}" for key in sorted(set(case) - _CASE_KEYS - _CASE_OPTIONAL)]
+        problems += [f"{where}: missing key {key!r}" for key in sorted(_CASE_KEYS - set(case))]
+        if not _CASE_KEYS <= set(case) <= _CASE_KEYS | _CASE_OPTIONAL:
+            continue
+        if "expected_output" in case and not (isinstance(case["expected_output"], str) and case["expected_output"].strip()):
+            problems.append(f"{where}: expected_output is not text")
+        calls = case.get("expected_tool_calls", [])
+        if not (isinstance(calls, list) and all(
+            isinstance(c, dict) and isinstance(c.get("name"), str) and set(c) <= {"name", "arguments"}
+            and isinstance(c.get("arguments", {}), dict) for c in calls
+        )):
+            problems.append(f"{where}: expected_tool_calls is not a list of {{name, arguments}}")
+        if case["id"] in seen:
+            problems.append(f"{where}: the id is used twice")
+        seen.add(case["id"])
+        if not (isinstance(case["ask"], str) and case["ask"].strip()):
+            problems.append(f"{where}: the ask is empty")
+        fixture = case["fixture"]
+        if not (isinstance(fixture, dict) and set(fixture) == _FIXTURE_KEYS):
+            problems.append(f"{where}: fixture is not {{project, plant}}")
+        else:
+            if fixture["project"] not in SAMPLE_PROJECTS or not (_REPO / fixture["project"]).is_dir():
+                problems.append(f"{where}: fixture project {fixture['project']!r} is not one of {list(SAMPLE_PROJECTS)}")
+            if fixture["plant"] is not None and fixture["plant"] not in PLANTS:
+                problems.append(f"{where}: plant {fixture['plant']!r} is not one of {sorted(PLANTS)}")
+        subject = case["subject"]
+        if not (isinstance(subject, list) and subject and all(isinstance(t, str) and t and t == t.lower() for t in subject)):
+            problems.append(f"{where}: subject is not a list of lower-case terms (the checks compare lower-cased text)")
+        checks = case["checks"]
+        if not (isinstance(checks, list) and checks and all(isinstance(c, str) for c in checks)):
+            problems.append(f"{where}: checks is not a list of check names")
+            continue
+        if unknown := [c for c in checks if c not in known]:
+            problems.append(f"{where}: no {runner} check named {unknown}")
+        if len(set(checks)) != len(checks):
+            problems.append(f"{where}: a check is named twice")
+        if not any(c in RESULT_CHECKS for c in checks):
+            problems.append(f"{where}: no RESULT check, only process checks ({sorted(RESULT_CHECKS)})")
+        if runner == "steps" and sorted(checks) != sorted(STEPS_CHECKS):
+            problems.append(f"{where}: the steps runner scores exactly {list(STEPS_CHECKS)}")
+        if case["precondition"] not in RESULT_CHECKS or case["precondition"] not in checks:
+            problems.append(f"{where}: precondition {case['precondition']!r} is not one of its own result checks")
+    return problems
+
+
+def load_eval_set(path: Path) -> EvalSet:
+    """A set file read and its shape checked; EvalSetError names every problem."""
+    import yaml  # noqa: PLC0415
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise EvalSetError(f"{path.name}: {error}") from error
+    if problems := _schema_problems(raw, path):
+        raise EvalSetError("\n".join(f"{path.name}: {problem}" for problem in problems))
+    cases = tuple(
+        EvalCase(
+            id=c["id"], ask=" ".join(c["ask"].split()), project=c["fixture"]["project"], plant=c["fixture"]["plant"],
+            subject=tuple(c["subject"]), precondition=c["precondition"], checks=tuple(c["checks"]),
+            expected_output=c.get("expected_output"),
+            expected_tool_calls=tuple(ExpectedToolCall(t["name"], t.get("arguments")) for t in c.get("expected_tool_calls", [])),
+        )
+        for c in raw["cases"]
+    )
+    return EvalSet(
+        name=raw["name"], tier=raw["tier"], version=raw["version"], owner=raw["owner"], runner=raw["runner"],
+        split=raw["split"], bar=dict(raw["bar"]), changes=dict(raw["changes"]), cases=cases,
+        fingerprint=cases_fingerprint(raw["cases"]), path=path, num_repetitions=raw.get("num_repetitions", 1),
+    )
+
+
+def load_eval_sets(folder: Path = EVAL_SETS_DIR) -> dict[str, EvalSet]:
+    """Every set file in the folder, by set name; EvalSetError on the first that cannot be used, or a name used twice."""
+    sets: dict[str, EvalSet] = {}
+    for path in sorted(folder.glob("*.yaml")):
+        eval_set = load_eval_set(path)
+        if eval_set.name in sets:
+            raise EvalSetError(f"{path.name}: the set name {eval_set.name!r} is also {sets[eval_set.name].path.name}'s")
+        sets[eval_set.name] = eval_set
+    return sets
 
 STEWARD_EVAL_QUERIES = [
     "Use get_repo_status and tell me which git branch the workspace is on.",
@@ -248,19 +494,23 @@ async def run_steward(query: str, approve: set[str], **build: Any) -> tuple[Agen
 
 
 SAMPLE_PROJECT = "harness/steward/working/sample-project"
+# T1's held-out project (t1-heldout.yaml): a different module, never tuned on.
+SAMPLE_PROJECT_2 = "harness/steward/working/sample-project-2"
+# Every sample project an eval set's fixture names (validate_sets: none other).
+SAMPLE_PROJECTS = (SAMPLE_PROJECT, SAMPLE_PROJECT_2)
 # The one shell command an eval approves (the evals run real commands on his PC): pytest, or python -m pytest, with
-# only -q, -rA or -p no:cacheprovider, on the sample project or a test file (and test) in it. Nothing else: no second
+# only -q, -rA or -p no:cacheprovider, on a sample project or a test file (and test) in it. Nothing else: no second
 # command, no pipe, no redirect.
 _SAMPLE_PYTEST = re.compile(
     r"(?:[\w.:/-]*python(?:3)?(?:\.exe)?\s+-m\s+)?pytest"
     r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
-    r"\s+(?:\./)?" + re.escape(SAMPLE_PROJECT) + r"(?:/[\w-]+\.py(?:::[\w:]+)?)?/?"
+    r"\s+(?:\./)?(?:" + "|".join(re.escape(p) for p in SAMPLE_PROJECTS) + r")(?:/[\w-]+\.py(?:::[\w:]+)?)?/?"
     r"(?:\s+(?:-q|-rA|-p\s+no:cacheprovider))*"
 )
 
 
 def is_sample_project_pytest(command: str) -> bool:
-    """Whether a shell command is only the sample project's pytest (_SAMPLE_PYTEST), backslashes read as slashes."""
+    """Whether a shell command is only a sample project's pytest (_SAMPLE_PYTEST), backslashes read as slashes."""
     return bool(_SAMPLE_PYTEST.fullmatch(str(command or "").strip().replace("\\", "/")))
 
 
@@ -275,13 +525,13 @@ def card_approved(call: Any, approve: set[str]) -> bool:
     return call.name in approve
 
 
-def sample_project_as_committed() -> None:
-    """The sample project put back to its committed text before a run snapshots it. The runs' own resets put back
+def sample_project_as_committed(project: str = SAMPLE_PROJECT) -> None:
+    """A sample project put back to its committed text before a run snapshots it. The runs' own resets put back
     what was on disk when they began, so a damaged file outlived every run (2026-11-04: inventory.py, cut to a
     stand-in at 10:14, was the "original" of each eval after it)."""
     from agent import _WORKING_DIR  # noqa: PLC0415
 
-    subprocess.run(["git", "checkout", "HEAD", "--", SAMPLE_PROJECT], cwd=_WORKING_DIR, check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "HEAD", "--", project], cwd=_WORKING_DIR, check=True, capture_output=True)
 
 
 # Small run 1 (2026-11-04, head 0016cf4): the item_count ask left a stray inventory.py at the repository root, outside
@@ -367,6 +617,47 @@ def readme_run_tests_removed() -> Any:
         readme.write_bytes(original)
 
 
+@contextmanager
+def _text_replaced(relative: str, old: str, new: str, plant: str) -> Any:
+    """One line's text replaced in a sample project's file in the working copy for one ask, put back after it, whatever
+    happens; the file's line endings kept (a "\\n" in ``old`` or ``new`` is read as the file's own). A file that no
+    longer holds ``old`` once raises, naming the plant to update."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    path = _WORKING_DIR / relative
+    original = path.read_bytes()
+    newline = b"\r\n" if b"\r\n" in original else b"\n"
+    old_bytes, new_bytes = (text.encode("utf-8").replace(b"\n", newline) for text in (old, new))
+    if original.count(old_bytes) != 1:
+        raise RuntimeError(f"{path} no longer holds {old!r} once; update {plant}.")
+    path.write_bytes(original.replace(old_bytes, new_bytes))
+    try:
+        yield
+    finally:
+        path.write_bytes(original)
+
+
+# T1's plants (t1-heldout.yaml), each in sample-project-2's working copy only: the committed project stays green.
+FAHRENHEIT_LINE = ("return celsius * 9 / 5 + 32", "return celsius * 5 / 9 + 32")
+WITHOUT_UNIT_TEST = (
+    '\n    def test_format_quantity_without_unit(self) -> None:\n'
+    '        self.assertEqual(format_quantity(3, ""), "3.00")\n'
+)
+_NO_PLACES_TEST = '        self.assertEqual(format_quantity(3, "m", places=0), "3 m")\n'
+
+
+def fahrenheit_bug_planted() -> Any:
+    """The fix_bug case's bug: celsius_to_fahrenheit scales by 5/9, so test_boiling_point fails (freezing still passes)."""
+    return _text_replaced(f"{SAMPLE_PROJECT_2}/units.py", *FAHRENHEIT_LINE, "fahrenheit_bug_planted")
+
+
+def without_unit_test_planted() -> Any:
+    """The failing_test case's test: format_quantity(3, "") must be "3.00", with no trailing space; it fails as committed."""
+    return _text_replaced(
+        f"{SAMPLE_PROJECT_2}/test_units.py", _NO_PLACES_TEST, _NO_PLACES_TEST + WITHOUT_UNIT_TEST, "without_unit_test_planted"
+    )
+
+
 def exit_code(results: Iterable[EvalResults]) -> int:
     """A set's exit code: 0 when every result passed, 1 when any case failed or errored, or nothing was scored (MAF's
     EvalResults.all_passed, agent_framework/_evaluation.py:457, the check its raise_for_status makes for CI)."""
@@ -401,6 +692,14 @@ def raised(error: BaseException, what: str = "the run") -> str:
         return str(error)
     first = next(iter(str(error).strip().splitlines()), "")
     return f"{what} raised {type(error).__name__}: {first}" if first else f"{what} raised {type(error).__name__}"
+
+
+def plant_step(plant: str | None) -> Callable[[], Any]:
+    """A fixture's plant step by its name in PLANTS (None: nothing planted), its context manager looked up in this
+    module when it is entered, so a test's monkeypatch of discount_bug_planted holds."""
+    if plant is None:
+        return contextlib.nullcontext
+    return lambda: globals()[PLANTS[plant]]()
 
 
 def fixture_entered(stack: contextlib.ExitStack, query: str, fixture: Callable[[], Any]) -> bool:
@@ -438,6 +737,8 @@ def run_completed(query: str) -> dict[str, object]:
 # storage/evals/history.jsonl in this repo (storage/ is gitignored), the newest EVAL_HISTORY_KEEP lines kept. The
 # printed report and the exit code never depend on it: a write that fails is a warning on the log, nothing more.
 _REPO = Path(__file__).resolve().parents[3]
+# Every eval set, by name, read at import: a set file that cannot be used stops evals.py here, naming its problems.
+EVAL_SETS = load_eval_sets()
 EVAL_HISTORY = _REPO / "storage" / "evals" / "history.jsonl"
 EVAL_HISTORY_KEEP = 500
 # The settings set this run uses (cli's --options), as {"name", "values"}; None when it uses none.
@@ -455,14 +756,17 @@ def _git_head() -> str | None:
 
 
 def history_entry(name: str, results: dict[str, Any], code: int, progress: list[str] | None = None) -> dict[str, Any]:
-    """One run's line: the set, its settings set, its counts (applicable_checks for the checks), the exit code, each
+    """One run's line: the set, its version and tier (from its file; None for a set with no file), its settings set, its counts (applicable_checks for the checks), the exit code, each
     case with its failed checks (a step's cases carry the step's name), the repo's HEAD and the model's name; a steps
     run also carries its CHECK and REPAIR progress lines (StewardProgress events, in order) as "progress"."""
     items = [(step, item) for step, result in results.items() for item in result.items]
     checks_passed, checks_total = applicable_checks(item for _, item in items)
+    eval_set = EVAL_SETS.get(name)  # None for the sets with no file (regression, memory)
     return {
         "ts": datetime.now(timezone.utc).isoformat(),
         "set": name,
+        "set_version": eval_set.version if eval_set else None,
+        "tier": eval_set.tier if eval_set else None,
         "options": OPTIONS_IN_USE,
         "passed": sum(result.passed for result in results.values()),
         "total": sum(result.total for result in results.values()),
@@ -597,10 +901,13 @@ async def _run_answering_cards(agent: Agent[Any], session: Any, query: str, appr
 # and overall the report's check line and the fix on disk. MAF's evaluate_workflow runs every evaluator on every
 # step and takes a resumed step's query from the user's card answer (_evaluation.py), so the steps are grouped by
 # their executor ids here and each group is scored by its own LocalEvaluator. Run alone: python evals.py steps.
-STEPS_QUERY = "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project."
+# The ask is the T0 set "steps" (t0-steps.yaml), its one case.
+STEPS_SET = EVAL_SETS["steps"]
+STEPS_QUERY = STEPS_SET.cases[0].ask
 # What the plan must name, read from its steps (the cookbook: "Validators should check the artefacts themselves"). Run
 # 15: a bug-fix plan passed while planning a new inventory.py instead of the discount line, because nothing checked it.
-STEPS_MUST_NAME = ("inventory.py", "discount")
+# The case's subject terms.
+STEPS_MUST_NAME = STEPS_SET.cases[0].subject
 # Whether the run fixed the bug, and why (discount_test_result: test_percent_discount passes as the run left the
 # project). The steps set at 7a2dd79 (2026-11-05 07:13Z): his fix wrote "discount_percent/100", the tests passed, and
 # the old byte check for "discount_percent / 100" read it as not fixed.
@@ -642,6 +949,25 @@ def step_conversations(events: list[Any], approve: set[str] | None = None) -> di
                     conversation = [Message(role="user", contents=answers), *conversation]
                 steps.setdefault(event.executor_id, []).append(conversation)
     return steps
+
+
+def plan_that_reached_the_card(conversations: list[list[Any]]) -> list[list[Any]]:
+    """The steps set's v2 scoring (t0-steps.yaml): PLAN's completions read as one conversation, so plan_step scores
+    only the last plan, the one ReadPlan sent to the card (a reply it asked again for is followed by another
+    completion), and still sees every call made in any of them. Under v1 each completion was its own plan, and a
+    re-asked plan that then reached the card failed. The earlier completions keep their calls and results but not their
+    words, so the plan scored is the last completion's own reply (an empty last reply reached no card, and fails).
+    No completion: nothing to score."""
+    from agent_framework import Message  # noqa: PLC0415
+
+    if not conversations:
+        return []
+    earlier = [
+        Message(role=message.role, contents=[c for c in message.contents or [] if c.type != "text"])
+        for conversation in conversations[:-1]
+        for message in conversation
+    ]
+    return [[*(message for message in earlier if message.contents), *conversations[-1]]]
 
 
 def _last_said(conversation: list[Any]) -> str:
@@ -731,7 +1057,7 @@ async def steps_main() -> int:
             untracked_before = untracked_files()
             with contextlib.ExitStack() as fixtures:
                 fixtures.callback(remove_new_untracked, untracked_before)  # last out: after the bug is put back
-                if fixture_entered(fixtures, STEPS_QUERY, discount_bug_planted):  # else overall fails with its reason
+                if fixture_entered(fixtures, STEPS_QUERY, plant_step(STEPS_SET.cases[0].plant)):  # else overall fails with its reason
                     try:
                         events = await _run_workflow_answering_cards(workflow, STEPS_QUERY, approve)
                     except Exception as error:  # the run raised: overall fails with it (run_completed); the bug is put back
@@ -744,13 +1070,15 @@ async def steps_main() -> int:
     user = Message(role="user", contents=[STEPS_QUERY])
 
     def items(conversations: list[list[Any]]) -> list[Any]:
-        return [EvalItem([user, *c], split_strategy=ConversationSplit.FULL) for c in conversations]
+        return [EvalItem([user, *c], split_strategy=SPLITS[STEPS_SET.split]) for c in conversations]
 
     # The run's report is all its outputs: the checks' result comes before the commit card's answer (AskCommit), and
     # the eval denies the commit, so the last output alone was "The commit ... was not approved" (a3a3519).
     report = [EvalItem([user, Message(role="assistant", contents=["\n\n".join(outputs)])], split_strategy=ConversationSplit.FULL)]
     scored = {
-        wf.PLAN_STEP: await LocalEvaluator(plan_step).evaluate(items(steps.get(wf.PLAN_STEP, [])), eval_name="plan"),
+        wf.PLAN_STEP: await LocalEvaluator(plan_step).evaluate(
+            items(plan_that_reached_the_card(steps.get(wf.PLAN_STEP, []))), eval_name="plan"
+        ),
         wf.EXECUTE_STEP: await LocalEvaluator(execute_step).evaluate(items(steps.get(wf.EXECUTE_STEP, [])), eval_name="execute"),
         "overall": await LocalEvaluator(steps_overall, run_completed).evaluate(report, eval_name="overall"),
     }
@@ -775,28 +1103,20 @@ async def steps_main() -> int:
 # Live 2026-11-02 (run 1): order_total already had a docstring, so he rightly asked a clarification; and fixing
 # the planted discount bug puts inventory.py back to its committed text, so the check finds nothing changed and no
 # commit follows. The commit and check-coverage cases therefore ride on new code, which the tests still pass.
-SMALL_ASK_NEW_CODE = (
-    "Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total "
-    "quantity of all the items, with a docstring."
-)
-SMALL_ASK_DISCOUNT = "Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project."
-SMALL_ASK_README = "Add one line to harness/steward/working/sample-project/README.md that says how to run its tests."
-SMALL_ASKS = [SMALL_ASK_NEW_CODE, SMALL_ASK_DISCOUNT, SMALL_ASK_README]
+# The asks, their checks and their subjects are the set files' (harness/steward/evals/, read by load_eval_sets): the
+# small asks are the T0 set "small" (t0-small.yaml), and every set the asks runner runs is in the maps below.
+SMALL_SET = EVAL_SETS["small"]
+SMALL_ASK_NEW_CODE = SMALL_SET.case("item_count").ask
+SMALL_ASK_DISCOUNT = SMALL_SET.case("discount").ask
+SMALL_ASK_README = SMALL_SET.case("readme").ask
+SMALL_ASKS = SMALL_SET.asks
+_ASK_CASES = [case for eval_set in EVAL_SETS.values() if eval_set.runner == "asks" for case in eval_set.cases]
 # Which of today's failures each ask checks (the cookbook's axial codes, one check each).
-SMALL_ASK_CHECKS: dict[str, set[str]] = {
-    SMALL_ASK_NEW_CODE: {
-        "plan_is_approval", "edit_keeps_file_whole", "check_covers_writes", "commit_by_tool", "commit_message_specific",
-        "no_nudge_in_reply", "answer_on_topic", "item_count_works",
-    },
-    SMALL_ASK_DISCOUNT: {"plan_is_approval", "edit_keeps_file_whole", "no_nudge_in_reply", "answer_on_topic", "discount_test_passes"},
-    SMALL_ASK_README: {"plan_is_approval", "no_nudge_in_reply", "answer_on_topic"},
-}
+SMALL_ASK_CHECKS: dict[str, set[str]] = {case.ask: set(case.checks) for case in _ASK_CASES}
 # What an on-topic answer and a specific commit message name, per ask.
-SMALL_ASK_SUBJECT: dict[str, tuple[str, ...]] = {
-    SMALL_ASK_NEW_CODE: ("item_count",),
-    SMALL_ASK_DISCOUNT: ("discount",),
-    SMALL_ASK_README: ("readme", "test"),
-}
+SMALL_ASK_SUBJECT: dict[str, tuple[str, ...]] = {case.ask: case.subject for case in _ASK_CASES}
+# Each ask's fixture: (its sample project, its plant step or None).
+CASE_FIXTURES: dict[str, tuple[str, str | None]] = {case.ask: (case.project, case.plant) for case in _ASK_CASES}
 VAGUE_COMMIT_MESSAGES = {"update", "updates", "changes", "change", "fix", "fixes", "wip", "checkpoint", "commit", "work"}
 # The files each run wrote, as they stood on disk when the run ended (read before the planted bug is put back): only
 # writes that happened, the file changed on disk. An approved card can still be refused by his write middleware
@@ -1009,10 +1329,134 @@ def item_count_result() -> tuple[bool, str]:
     return False, f"item_count of quantities 2 and 3 gave {got or 'nothing'}, not {ITEM_COUNT_EXPECTED}: {said[:160]}"
 
 
-# Each result check's measurement, by the ask it belongs to (run_small_asks runs it after the ask's run).
+def readme_run_tests_result() -> tuple[bool, str]:
+    """The README ask's result: sample-project's README says how to run its tests (it names unittest or pytest)."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    text = (_WORKING_DIR / SAMPLE_PROJECT / "README.md").read_text(encoding="utf-8")
+    ok = bool(re.search(r"\b(unittest|pytest)\b", text, re.IGNORECASE))
+    return ok, ("The README says how to run the tests." if ok else "The README names neither unittest nor pytest.")
+
+
+def _fresh_bytecode(cache: str) -> dict[str, str]:
+    """The environment for a measurement's Python: its bytecode cache in ``cache`` (a new folder), so no .pyc from
+    before reads as the module. A plant and its fix can be the same size within the same second (the fix_bug case's
+    5 / 9 and 9 / 5), and Python's cache, checked by size and mtime, then ran the planted code (the gate, 2026-11-05)."""
+    return {**os.environ, "PYTHONPYCACHEPREFIX": cache}
+
+
+def _module_probe(project: str, code: str, expected: str, what: str) -> tuple[bool, str]:
+    """``code`` run in a fresh Python in a sample project: passed when it prints ``expected``."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    try:
+        with tempfile.TemporaryDirectory() as cache:
+            done = subprocess.run(
+                [sys.executable, "-c", code], cwd=_WORKING_DIR / project, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60, env=_fresh_bytecode(cache),
+            )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"{what} was not run: {error}"
+    got = done.stdout.strip()
+    if done.returncode == 0 and got == expected:
+        return True, f"{what}: {got}."
+    said = (done.stderr.strip().splitlines() or [got])[-1]
+    return False, f"{what} gave {got or 'nothing'}, not {expected}: {said[:160]}"
+
+
+def _project_tests(project: str) -> tuple[int, set[str], str]:
+    """A sample project's tests run as the workflow's check runs them: (exit code, the passed tests' names, the last
+    line); exit -1 when pytest did not run."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+    from steward_workflow import _CHECK_RUNNING  # noqa: PLC0415
+
+    command = [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", project]
+    try:
+        with tempfile.TemporaryDirectory() as cache:
+            done = subprocess.run(
+                command, cwd=_WORKING_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=300, env={**_fresh_bytecode(cache), _CHECK_RUNNING: "1"},
+            )
+    except (OSError, subprocess.SubprocessError) as error:
+        return -1, set(), str(error)
+    passed = {line.split()[1].rsplit("::", 1)[-1] for line in done.stdout.splitlines() if line.startswith("PASSED ")}
+    tail = (done.stdout + done.stderr).strip().splitlines()[-1:] or [""]
+    return done.returncode, passed, tail[0][:160]
+
+
+def _test_passes(project: str, test: str) -> tuple[bool, str]:
+    code, passed, tail = _project_tests(project)
+    ok = test in passed
+    return ok, (f"{test} passes." if ok else f"{test} does not pass (exit {code}): {tail}")
+
+
+def fahrenheit_to_celsius_result() -> tuple[bool, str]:
+    """T1 add_function: units.fahrenheit_to_celsius gives 100, 0 and -40 for 212, 32 and -40."""
+    probe = (
+        "from units import fahrenheit_to_celsius as f\n"
+        "print(all(abs(f(a) - b) < 1e-9 for a, b in ((212, 100), (32, 0), (-40, -40))))\n"
+    )
+    return _module_probe(SAMPLE_PROJECT_2, probe, "True", "fahrenheit_to_celsius of 212, 32 and -40")
+
+
+def boiling_point_test_result() -> tuple[bool, str]:
+    """T1 fix_bug: test_boiling_point passes on sample-project-2 as the run left it."""
+    return _test_passes(SAMPLE_PROJECT_2, "test_boiling_point")
+
+
+def metres_per_unit_result() -> tuple[bool, str]:
+    """T1 refactor: LENGTH_IN_METRES is named nowhere in the project's code, units.py binds METRES_PER_UNIT at its top
+    level, and every test passes."""
+    import ast  # noqa: PLC0415
+
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    project = _WORKING_DIR / SAMPLE_PROJECT_2
+    if left := sorted(p.name for p in project.glob("*.py") if "LENGTH_IN_METRES" in p.read_text(encoding="utf-8")):
+        return False, f"LENGTH_IN_METRES is still named in {left}."
+    try:
+        tree = ast.parse((project / "units.py").read_text(encoding="utf-8"))
+    except SyntaxError as error:
+        return False, f"units.py no longer parses: {error}"
+    bound: set[str] = set()
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        bound |= {target.id for target in targets if isinstance(target, ast.Name)}
+    if "METRES_PER_UNIT" not in bound:
+        return False, "units.py binds no METRES_PER_UNIT at its top level."
+    code, passed, tail = _project_tests(SAMPLE_PROJECT_2)
+    return code == 0, ("Renamed, and every test passes." if code == 0 else f"Renamed, but the tests fail (exit {code}): {tail}")
+
+
+def readme_length_units_result() -> tuple[bool, str]:
+    """T1 docs_line: sample-project-2's README names the length units mm, cm, km and ft."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    text = (_WORKING_DIR / SAMPLE_PROJECT_2 / "README.md").read_text(encoding="utf-8")
+    missing = [unit for unit in ("mm", "cm", "km", "ft") if not re.search(rf"\b{unit}\b", text)]
+    return not missing, ("The README lists the length units." if not missing else f"The README does not name {missing}.")
+
+
+def without_unit_test_result() -> tuple[bool, str]:
+    """T1 failing_test: the planted test_format_quantity_without_unit is still there, unchanged, and passes."""
+    from agent import _WORKING_DIR  # noqa: PLC0415
+
+    tests = (_WORKING_DIR / SAMPLE_PROJECT_2 / "test_units.py").read_text(encoding="utf-8").replace("\r\n", "\n")
+    if WITHOUT_UNIT_TEST.strip("\n") not in tests:
+        return False, "test_format_quantity_without_unit was changed or removed."
+    return _test_passes(SAMPLE_PROJECT_2, "test_format_quantity_without_unit")
+
+
+def measure_result(check: str) -> tuple[bool, str]:
+    """A result check's measurement (RESULT_CHECKS), looked up in this module when it runs."""
+    return globals()[RESULT_CHECKS[check]]()
+
+
+# Each result check's measurement, by the ask it belongs to (run_small_asks runs it after the ask's run): every result
+# check a set file names for its case.
 SMALL_ASK_RESULT_CHECKS: dict[str, dict[str, Callable[[], tuple[bool, str]]]] = {
-    SMALL_ASK_NEW_CODE: {"item_count_works": item_count_result},
-    SMALL_ASK_DISCOUNT: {"discount_test_passes": discount_test_result},
+    case.ask: {name: (lambda name=name: measure_result(name)) for name in case.checks if name in RESULT_CHECKS}
+    for case in _ASK_CASES
 }
 
 
@@ -1037,9 +1481,45 @@ def discount_test_passes(query: str) -> dict[str, object]:
     return _result_check("discount_test_passes", query)
 
 
+@evaluator(name="readme_says_how_to_run_tests")
+def readme_says_how_to_run_tests(query: str) -> dict[str, object]:
+    """The README ask's result: the README names unittest or pytest after the run."""
+    return _result_check("readme_says_how_to_run_tests", query)
+
+
+@evaluator(name="fahrenheit_to_celsius_works")
+def fahrenheit_to_celsius_works(query: str) -> dict[str, object]:
+    """T1 add_function's result."""
+    return _result_check("fahrenheit_to_celsius_works", query)
+
+
+@evaluator(name="boiling_point_test_passes")
+def boiling_point_test_passes(query: str) -> dict[str, object]:
+    """T1 fix_bug's result."""
+    return _result_check("boiling_point_test_passes", query)
+
+
+@evaluator(name="metres_per_unit_renamed")
+def metres_per_unit_renamed(query: str) -> dict[str, object]:
+    """T1 refactor's result."""
+    return _result_check("metres_per_unit_renamed", query)
+
+
+@evaluator(name="readme_lists_length_units")
+def readme_lists_length_units(query: str) -> dict[str, object]:
+    """T1 docs_line's result."""
+    return _result_check("readme_lists_length_units", query)
+
+
+@evaluator(name="without_unit_test_passes")
+def without_unit_test_passes(query: str) -> dict[str, object]:
+    """T1 failing_test's result."""
+    return _result_check("without_unit_test_passes", query)
+
+
 # The eval gate (step 6, 6.2): the improvement loop keeps a change only if the small-ask checks do not drop below
-# the recorded baseline. The baseline is raised by the operator after a real improvement (a one-line edit).
-EVAL_BASELINES = Path(__file__).resolve().with_name("eval_baselines.json")
+# the recorded baseline. The baseline is raised by the operator after a real improvement (a one-line edit). Baselines
+# are kept per set version in harness/steward/evals/baselines.json (EVAL_BASELINES, with each version's fingerprint).
 
 
 def applicable_checks(items: Any) -> tuple[int, int]:
@@ -1055,8 +1535,12 @@ def applicable_checks(items: Any) -> tuple[int, int]:
 
 
 def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BASELINES) -> int:
-    """The gate's exit code: 0 when the checks are at or above the set's baseline, 1 when they dropped."""
-    baseline = int(json.loads(baselines.read_text(encoding="utf-8"))[name]["checks"])
+    """The gate's exit code: 0 when the checks are at or above the baseline of the set's current version, 1 when they
+    dropped. (A file whose set entry holds "checks" itself is read as that one baseline.)"""
+    entry = json.loads(baselines.read_text(encoding="utf-8"))[name]
+    if "checks" not in entry:
+        entry = entry[str(EVAL_SETS[name].version)]
+    baseline = int(entry["checks"])
     ok = passed >= baseline
     print(f"Gate: {passed}/{total} checks against the baseline of {baseline}: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
@@ -1064,7 +1548,9 @@ def gate(passed: int, total: int, name: str = "small", baselines: Path = EVAL_BA
 
 SMALL_ASK_EVALUATORS = (
     plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
-    no_nudge_in_reply, answer_on_topic, item_count_works, discount_test_passes, run_completed,
+    no_nudge_in_reply, answer_on_topic, item_count_works, discount_test_passes, readme_says_how_to_run_tests,
+    fahrenheit_to_celsius_works, boiling_point_test_passes, metres_per_unit_renamed, readme_lists_length_units,
+    without_unit_test_passes, run_completed,
 )
 
 
@@ -1081,11 +1567,16 @@ async def run_small_asks(
     from agent_framework import FileAccessProvider  # noqa: PLC0415
 
     build.setdefault("auto_approve_skill_scripts", True)
-    project = _WORKING_DIR / "harness" / "steward" / "working" / "sample-project"
-    sample_project_as_committed()
+    # Each ask's sample project and plant step are its set file's (CASE_FIXTURES); an ask in no set is sample-project's.
+    named = sorted({CASE_FIXTURES.get(query, (SAMPLE_PROJECT, None))[0] for query in asks})
+    for name in named:
+        sample_project_as_committed(name)
+    projects = [_WORKING_DIR / name for name in named]
     SMALL_ASK_ORIGINALS.clear()
-    SMALL_ASK_ORIGINALS.update({p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for p in project.glob("*.py")})
-    originals = {p: p.read_bytes() for p in project.iterdir() if p.is_file()}
+    SMALL_ASK_ORIGINALS.update(
+        {p.relative_to(_WORKING_DIR).as_posix(): p.read_text(encoding="utf-8") for project in projects for p in project.glob("*.py")}
+    )
+    originals = {p: p.read_bytes() for project in projects for p in project.iterdir() if p.is_file()}
     untracked_before = untracked_files()  # anything a run adds elsewhere in the repository goes in reset()
     # Writes approved, and a shell card only for the sample project's pytest (card_approved), as the steps set and the
     # user approve them; every other shell command and git_commit denied.
@@ -1094,9 +1585,9 @@ async def run_small_asks(
     responses: list[AgentResponse[Any]] = []
     steward = None
     def reset() -> None:
-        """The sample project as committed: every file put back, anything a run added removed, in it or anywhere else
-        in the repository (remove_new_untracked)."""
-        for path in project.iterdir():
+        """The sample projects as committed: every file put back, anything a run added removed, in them or anywhere
+        else in the repository (remove_new_untracked)."""
+        for path in (path for project in projects for path in project.iterdir()):
             if path.is_file() and path not in originals:
                 path.unlink()
         for path, data in originals.items():
@@ -1105,11 +1596,12 @@ async def run_small_asks(
 
     try:
         for query in asks:
-            # Only the discount ask has the bug planted: in the others a failing test would send the run to repair. Only
-            # the README ask has its how-to taken out: otherwise it asks for a line the README already has.
-            fixture = {SMALL_ASK_DISCOUNT: discount_bug_planted, SMALL_ASK_README: readme_run_tests_removed}.get(query)
+            # Only an ask whose fixture names a plant has it (the discount ask's bug: in the others a failing test would
+            # send the run to repair; the README ask's how-to taken out: otherwise it asks for a line already there).
+            name, plant = CASE_FIXTURES.get(query, (SAMPLE_PROJECT, None))
+            project = _WORKING_DIR / name
             with (around or contextlib.nullcontext)(query), contextlib.ExitStack() as fixtures:
-                if fixture is not None and not fixture_entered(fixtures, query, fixture):
+                if plant is not None and not fixture_entered(fixtures, query, plant_step(plant)):
                     responses.append(AgentResponse(messages=[]))  # the case fails with the fixture's reason; the set goes on
                     SMALL_ASK_FILES[query] = {}
                     continue
@@ -1130,14 +1622,30 @@ async def run_small_asks(
     return steward, responses
 
 
-async def score_small_asks(steward: Any, asks: list[str], responses: list[AgentResponse[Any]]) -> Any:
-    """The small-ask checks on each ask's run (MAF's evaluate_agent, the full split): one result, an item per ask."""
+async def score_small_asks(
+    steward: Any, asks: list[str], responses: list[AgentResponse[Any]], eval_set: EvalSet | None = None
+) -> Any:
+    """The small-ask checks on each ask's run (MAF's evaluate_agent): one result, an item per ask. The set (default the
+    small set) gives MAF its eval_name (<set>@v<version>), its split, and each case's expected_output and
+    expected_tool_calls; when any case names tool calls, MAF's tool_call_args_match scores them."""
+    eval_set = eval_set or SMALL_SET
+    cases = {case.ask: case for case in eval_set.cases}
+    mine = [cases.get(ask) for ask in asks]
+    evaluators: list[Any] = list(SMALL_ASK_EVALUATORS)
+    extra: dict[str, Any] = {}
+    if any(case and case.expected_output for case in mine):
+        extra["expected_output"] = [(case.expected_output or "") if case else "" for case in mine]
+    if any(case and case.expected_tool_calls for case in mine):
+        extra["expected_tool_calls"] = [list(case.expected_tool_calls) if case else [] for case in mine]
+        evaluators.append(tool_call_args_match)
     results = await evaluate_agent(
         agent=steward,
         queries=asks,
         responses=responses,
-        evaluators=LocalEvaluator(*SMALL_ASK_EVALUATORS),
-        conversation_split=ConversationSplit.FULL,
+        evaluators=LocalEvaluator(*evaluators),
+        eval_name=eval_set.eval_name,
+        conversation_split=SPLITS[eval_set.split],
+        **extra,
     )
     return results[0]
 
@@ -1149,17 +1657,137 @@ async def small_main(use_gate: bool = False) -> int:
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     steward, responses = await run_small_asks(SMALL_ASKS)
     result = await score_small_asks(steward, SMALL_ASKS, responses)
-    print(f"Small asks: {result.passed}/{result.total} passed")
+    passed, total = print_asks_report("Small asks", "Small-ask checks", result)
+    code = gate(passed, total) if use_gate else exit_code([result])
+    record_history("small", {"": result}, code)
+    return code
+
+
+def print_asks_report(cases_label: str, checks_label: str, result: Any) -> tuple[int, int]:
+    """An asks set's report: its cases passed, each case with its applicable checks, and the checks passed; the
+    (passed, total) of those checks."""
+    print(f"{cases_label}: {result.passed}/{result.total} passed")
     for item in result.items:
         print(f"  [{item.status}] {(item.input_text or '')[:70]}")
         for score in item.scores:
             if (score.sample or {}).get("reason") != "Not this case.":
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
     passed, total = applicable_checks(result.items)
-    print(f"Small-ask checks: {passed}/{total}")
-    code = gate(passed, total) if use_gate else exit_code([result])
-    record_history("small", {"": result}, code)
-    return code
+    print(f"{checks_label}: {passed}/{total}")
+    return passed, total
+
+
+async def set_main(name: str) -> int:
+    """Any other asks set from its file (T1's heldout, and the sets that follow), as small_main runs the small asks:
+    each ask once, scored with its checks; the exit code is exit_code's, and the run is recorded under the set's name.
+    A non-gating set (tier ext) with num_repetitions runs the whole set that many times, each pass scored and recorded
+    on its own (a flakiness check); the exit code is the worst pass's."""
+    eval_set = EVAL_SETS[name]
+    load_dotenv()
+    configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    codes = []
+    for _ in range(eval_set.num_repetitions):
+        steward, responses = await run_small_asks(eval_set.asks)
+        result = await score_small_asks(steward, eval_set.asks, responses, eval_set)
+        print_asks_report(f"{eval_set.tier} {eval_set.eval_name}", "Checks", result)
+        codes.append(exit_code([result]))
+        record_history(name, {"": result}, codes[-1])
+    return max(codes)
+
+
+def validate_sets(folder: Path = EVAL_SETS_DIR, baselines: Path | None = None) -> list[str]:
+    """Every set file in ``folder`` checked with no model; the problems, one per line (none: every set is valid).
+
+    Each file's schema (_schema_problems: its keys, names, bar and the runner's checks; every case has a RESULT check
+    and a precondition among them). Each case's precondition must FAIL on its unmodified fixture: the plant step entered
+    and the result check measured, as before a run, so an ask its fixture already satisfies (the old README ask) is
+    refused. Set names and asks are each used once. Each set version's cases match the fingerprint recorded for that
+    version in baselines.json: a changed case or check without a new version is refused, and a version with no
+    fingerprint is named with the one to record. And each check a runner names has its evaluator or measurement here."""
+    baselines = baselines or folder / "baselines.json"
+    problems: list[str] = []
+    missing = [n for n in ASKS_PROCESS_CHECKS + ASKS_RESULT_CHECKS if n not in {e.__name__ for e in SMALL_ASK_EVALUATORS}]
+    missing += [f"{n} (measurement {f})" for n, f in RESULT_CHECKS.items() if not callable(globals().get(f))]
+    missing += [n for n in STEPS_CHECKS if not callable(globals().get(n))]
+    missing += [f"plant {n} ({f})" for n, f in PLANTS.items() if not callable(globals().get(f))]
+    problems += [f"evals.py: no check {n}" for n in missing]
+    try:
+        recorded = json.loads(baselines.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        recorded = {}
+        problems.append(f"{baselines.name}: cannot be read: {error}")
+    sets: dict[str, EvalSet] = {}
+    asks: dict[str, str] = {}
+    for path in sorted(folder.glob("*.yaml")):
+        try:
+            eval_set = load_eval_set(path)
+        except EvalSetError as error:
+            problems += str(error).splitlines()
+            continue
+        if eval_set.name in sets:
+            problems.append(f"{path.name}: the set name {eval_set.name!r} is also {sets[eval_set.name].path.name}'s")
+        sets[eval_set.name] = eval_set
+        fingerprint = recorded.get(eval_set.name, {}).get(str(eval_set.version), {}).get("cases")
+        if fingerprint is None:
+            problems.append(
+                f"{path.name}: version {eval_set.version} has no fingerprint in {baselines.name}; record "
+                f'"{eval_set.name}": {{"{eval_set.version}": {{"cases": "{eval_set.fingerprint}"}}}}'
+            )
+        elif fingerprint != eval_set.fingerprint:
+            problems.append(
+                f"{path.name}: its cases changed but its version did not: give it version {eval_set.version + 1}, say "
+                f"what changed under changes, and record its fingerprint {eval_set.fingerprint}"
+            )
+        for case in eval_set.cases:
+            if eval_set.runner == "asks" and case.ask in asks:  # the asks runner keys its cases by their ask
+                problems.append(f"{path.name}: case {case.id!r}'s ask is also a case of {asks[case.ask]}")
+            if eval_set.runner == "asks":
+                asks[case.ask] = path.name
+            try:
+                with plant_step(case.plant)():
+                    held, reason = measure_result(case.precondition)
+            except Exception as error:  # noqa: BLE001 - a plant or a measurement that raises is the case's problem
+                problems.append(f"{path.name}: case {case.id!r}: its fixture or precondition raised {type(error).__name__}: {error}")
+                continue
+            if held:
+                problems.append(
+                    f"{path.name}: case {case.id!r}: its precondition {case.precondition} already passes on the "
+                    f"unmodified fixture ({reason}), so the ask asks for what is there"
+                )
+    return problems
+
+
+def validate_main() -> int:
+    """python evals.py validate: 0 and one line when every set is valid, else each problem and 1."""
+    problems = validate_sets()
+    if problems:
+        print("\n".join(problems))
+        return 1
+    print(f"Eval sets valid: {', '.join(f'{s.tier} {s.name} v{s.version}' for s in EVAL_SETS.values())}")
+    return 0
+
+
+def bar_status(name: str, history: Path | None = None) -> tuple[bool, str]:
+    """Whether a set's bar is met: its last bar["runs_in_a_row"] runs in the history are runs of its current version,
+    each with at least bar["passed"] of its cases passed."""
+    eval_set = EVAL_SETS[name]
+    bar = eval_set.bar
+    path = history or EVAL_HISTORY
+    runs = []
+    for line in (path.read_text(encoding="utf-8").splitlines() if path.is_file() else []):
+        try:
+            run = json.loads(line)
+        except ValueError:
+            continue
+        if run.get("set") == name:
+            runs.append(run)
+    last = runs[-bar["runs_in_a_row"]:]
+    scores = [f"{run.get('passed')}/{run.get('total')}" + ("" if run.get("set_version") == eval_set.version else f" (v{run.get('set_version')})") for run in last]
+    met = len(last) == bar["runs_in_a_row"] and all(
+        run.get("set_version") == eval_set.version and int(run.get("passed") or 0) >= bar["passed"] for run in last
+    )
+    want = f"{bar['passed']}/{bar['of']} {bar['runs_in_a_row']}x in a row"
+    return met, f"{eval_set.tier} {name} v{eval_set.version} bar {want}: {'MET' if met else 'NOT MET'} (last: {', '.join(scores) or 'none'})"
 
 
 # Step 5, piece 5.3: a note saved in one request is recalled in the next. Two requests through his workflow
@@ -1247,11 +1875,22 @@ def apply_options(name: str, path: Path = EVAL_OPTIONS) -> str:
 
 
 def cli(argv: list[str]) -> int:
-    """evals.py's command line, ``[small [--gate] | steps | memory] [--options NAME]``: the set's exit code, or 2 for a
-    settings set that cannot be used (the reason on stderr, and nothing run)."""
+    """evals.py's command line, ``[small [--gate] | steps | memory | <set name>] [--options NAME]``, ``validate`` or
+    ``bar <set name>``: the set's exit code, or 2 for a settings set that cannot be used (the reason on stderr, and
+    nothing run). validate checks every set file (validate_main); bar prints whether a set's bar is met (0) or not (1),
+    from the history, running nothing."""
     global OPTIONS_IN_USE
     OPTIONS_IN_USE = None  # a run uses only the settings set it names
     args = list(argv)
+    if args[:1] == ["validate"]:
+        return validate_main()
+    if args[:1] == ["bar"]:
+        if len(args) != 2 or args[1] not in EVAL_SETS:
+            print(f"evals.py bar: name one set: {', '.join(EVAL_SETS)}", file=sys.stderr)
+            return 2
+        met, line = bar_status(args[1])
+        print(line)
+        return 0 if met else 1
     if "--options" in args:
         at = args.index("--options")
         name = args[at + 1] if at + 1 < len(args) else ""
@@ -1265,6 +1904,8 @@ def cli(argv: list[str]) -> int:
     runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
     if args[:1] == ["small"]:
         return asyncio.run(small_main(use_gate="--gate" in args))
+    if args and args[0] not in runs and args[0] in EVAL_SETS:
+        return asyncio.run(set_main(args[0]))  # an asks set with no main of its own (T1's heldout)
     return asyncio.run(runs[args[0]]() if args and args[0] in runs else main())
 
 

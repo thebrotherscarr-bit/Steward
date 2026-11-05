@@ -1,0 +1,21 @@
+{
+  "small": {
+    "1": {
+      "cases": "773f20d99f1de8e598dba8568d0b0d5c156d050582d52745adfffe82705d6175",
+      "checks": 10,
+      "of": 17,
+      "from": "2026-11-02, the first clean small-ask run: each run with its own throwaway memory, his shell on his own Python",
+      "note": "2026-11-04: of 14 became 16 with the two result checks (item_count_works, discount_test_passes); 2026-11-05 (v1, moved here from step04_production_ready/eval_baselines.json): of 17 with the README ask's result check. The bar of 10 is kept until a live run re-measures it."
+    }
+  },
+  "steps": {
+    "2": {
+      "cases": "b05b3c5fbb8ca345a62b71029230695fe6ce7796eee45b5188fd576ec65b973d"
+    }
+  },
+  "heldout": {
+    "1": {
+      "cases": "ee0cc8dce8d297be9b23127864303262054ec442783fba673a8aee44407389a5"
+    }
+  }
+}

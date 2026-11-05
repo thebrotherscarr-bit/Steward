@@ -2870,7 +2870,7 @@ def test_a_round_never_changes_what_grades_it(monkeypatch: pytest.MonkeyPatch) -
     committed = tests.read_text(encoding="utf-8")
     monkeypatch.setattr(loop, "gate_tests_at_head", lambda: committed)  # this file as it stands is the committed one
     count = len(committed.splitlines())
-    evals_py, baselines = "harness/steward/step04_production_ready/evals.py", "harness/steward/step04_production_ready/eval_baselines.json"
+    evals_py, baselines = "harness/steward/step04_production_ready/evals.py", "harness/steward/evals/baselines.json"
     # The hand-off.
     assert "grades the improvement round" in loop.edit_problem(loop.Edit(evals_py, 1, 2, "Pass every check."))
     assert "grades the improvement round" in loop.edit_problem(loop.Edit(".github/workflows/gate.yml", 1, 1, "x"))
@@ -3224,6 +3224,15 @@ EVAL_DONE = Content.from_function_call(call_id="d1", name="todos_complete", argu
 README_ANSWER = "Added a README line on how to run the tests."
 
 
+def _readme_result_canned(monkeypatch: Any) -> None:
+    """The README ask's result check (t0-small v1: readme_says_how_to_run_tests) answered as passed: these scripted runs
+    write no README, and what they test is the set's report, history and options, not the README's line."""
+    import evals
+
+    canned = {"readme_says_how_to_run_tests": lambda: (True, "The README says how to run the tests.")}
+    monkeypatch.setitem(evals.SMALL_ASK_RESULT_CHECKS, evals.SMALL_ASK_README, canned)
+
+
 def test_a_case_whose_run_raises_fails_with_its_reason_and_the_set_goes_on(monkeypatch: Any, capsys: Any) -> None:
     """Live 2026-11-04, evals.py small: Ollama raised "error parsing tool call" in the first ask, the exception left the
     set as an ExceptionGroup, and nothing was reported. A case whose run raises is that case's [fail], its reason the
@@ -3243,6 +3252,7 @@ def test_a_case_whose_run_raises_fails_with_its_reason_and_the_set_goes_on(monke
     raising = RaisingChatClient([EVAL_PLAN, write, malformed])
     _scripted_eval_runs(monkeypatch, [raising, ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER])])
     monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_NEW_CODE, evals.SMALL_ASK_README])
+    _readme_result_canned(monkeypatch)
     before = {p.name: p.read_bytes() for p in project.iterdir() if p.is_file()}
     try:
         code = evals.cli(["small"])
@@ -3409,6 +3419,7 @@ def test_a_named_settings_set_reaches_its_steps_call_and_heads_the_report(monkey
     client = ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER])
     _scripted_eval_runs(monkeypatch, [client])
     monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_README])
+    _readme_result_canned(monkeypatch)
     assert evals.cli(["small", "--options", "plan_t0"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[:2] == ["Settings set plan_t0: STEWARD_PLAN_TEMPERATURE=0", "Small asks: 1/1 passed"], out
@@ -3446,6 +3457,7 @@ def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_cod
         monkeypatch.setenv(name, "")
     monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
     monkeypatch.setattr(evals, "SMALL_ASKS", [evals.SMALL_ASK_README])
+    _readme_result_canned(monkeypatch)
     history = evals.EVAL_HISTORY
     clients: list[ScriptedChatClient] = []
     _scripted_eval_runs(monkeypatch, clients)
@@ -6696,6 +6708,213 @@ def test_execute_is_asked_to_end_on_what_it_changed_by_file() -> None:
     message = wf.execute_message("Fix the discount bug.", "Fix it.", ["Fix order_total in inventory.py"])
     assert wf.SAY_WHAT_CHANGED in message.text and "naming each file" in message.text
     assert message.text.index(wf.CHECKS_RUN_THE_TESTS) < message.text.index(wf.SAY_WHAT_CHANGED) < message.text.index("Do not commit")
+
+
+
+def test_the_eval_sets_are_versioned_files_and_the_validator_refuses_what_it_must(tmp_path: Any) -> None:
+    """The plan "Steward's dev path: evals that grow with his skills" (2026-11-05), step 1: each eval set is a versioned
+    file in harness/steward/evals/, and `evals.py validate` (here, and so in the gate) checks every one with no model:
+    its schema, that each check it names exists, that each case has a RESULT check, that each case's precondition FAILS
+    on its unmodified fixture (the old README ask asked for a line already there), and that a set's cases match the
+    fingerprint recorded for its version (a changed case is a new version)."""
+    import shutil
+
+    import evals
+    import yaml
+
+    assert evals.validate_sets() == [], evals.validate_sets()
+    assert evals.cli(["validate"]) == 0
+    assert {(s.tier, s.name, s.version) for s in evals.EVAL_SETS.values()} >= {("T0", "small", 1), ("T0", "steps", 2), ("T1", "heldout", 1)}
+    assert evals.SMALL_ASKS == evals.SMALL_SET.asks and len(evals.SMALL_ASKS) == 3, "evals.py small runs t0-small.yaml"
+    assert evals.STEPS_QUERY == evals.EVAL_SETS["steps"].cases[0].ask, "evals.py steps runs t0-steps.yaml"
+    assert all(evals.SMALL_ASK_RESULT_CHECKS[ask] for ask in evals.SMALL_ASKS), "every small ask is measured"
+
+    folder = tmp_path / "evals"
+    shutil.copytree(evals.EVAL_SETS_DIR, folder)
+
+    def problems_with(edit: Any) -> list[str]:
+        small = folder / "t0-small.yaml"
+        original = small.read_text(encoding="utf-8")
+        raw = yaml.safe_load(original)
+        edit(raw)
+        small.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        try:
+            return evals.validate_sets(folder)
+        finally:
+            small.write_text(original, encoding="utf-8")
+
+    def process_only(raw: Any) -> None:
+        raw["cases"][2]["checks"] = ["plan_is_approval", "answer_on_topic"]
+
+    def unknown(raw: Any) -> None:
+        raw["cases"][0]["checks"].append("no_such_check")
+
+    def satisfied(raw: Any) -> None:
+        raw["cases"][2]["fixture"]["plant"] = None  # the README as committed already says how to run its tests
+
+    def reworded(raw: Any) -> None:
+        raw["cases"][1]["ask"] += " Now."
+
+    def repeated(raw: Any) -> None:
+        raw["num_repetitions"] = 3
+
+    def bad_split(raw: Any) -> None:
+        raw["split"] = "middle"
+
+    assert any("'readme': no RESULT check" in p for p in problems_with(process_only))
+    assert any("no asks check named ['no_such_check']" in p for p in problems_with(unknown))
+    assert any("'readme': its precondition readme_says_how_to_run_tests already passes" in p for p in problems_with(satisfied))
+    assert any("its cases changed but its version did not" in p for p in problems_with(reworded))
+    assert any("num_repetitions is for a non-gating set" in p for p in problems_with(repeated))
+    assert any("split 'middle'" in p for p in problems_with(bad_split))
+    assert problems_with(lambda raw: None) == [], "the copy as it is passes"
+
+
+def test_each_t1_result_check_passes_on_a_solved_project_and_fails_on_its_fixture() -> None:
+    """T1 (t1-heldout.yaml) on sample-project-2: each case's result check fails on its fixture (the validator's
+    precondition) and passes once the ask is done by hand here, so a pass is reachable and a fail means the work is
+    not done. The project is put back as committed after."""
+    import evals
+    from agent import _WORKING_DIR
+
+    project = _WORKING_DIR / evals.SAMPLE_PROJECT_2
+    units, tests, readme = project / "units.py", project / "test_units.py", project / "README.md"
+
+    def replace(path: Any, old: str, new: str) -> None:
+        text = path.read_bytes().decode("utf-8")
+        assert old in text.replace("\r\n", "\n"), (path.name, old)
+        path.write_bytes(text.replace("\r\n", "\n").replace(old, new).encode("utf-8"))
+
+    solutions = {
+        "add_function": lambda: replace(units, "def format_quantity", (
+            "def fahrenheit_to_celsius(fahrenheit: float) -> float:\n    \"\"\"Degrees Fahrenheit in degrees Celsius.\"\"\"\n"
+            "    return (fahrenheit - 32) * 5 / 9\n\n\ndef format_quantity"
+        )),
+        "fix_bug": lambda: replace(units, *reversed(evals.FAHRENHEIT_LINE)),
+        "refactor": lambda: units.write_text(
+            units.read_text(encoding="utf-8").replace("LENGTH_IN_METRES", "METRES_PER_UNIT"), encoding="utf-8"
+        ),
+        "docs_line": lambda: readme.write_text(readme.read_text(encoding="utf-8") + "\nLength units: mm, cm, m, km, in, ft.\n", encoding="utf-8"),
+        "failing_test": lambda: replace(units, 'return f"{value:.{places}f} {unit}"', 'return f"{value:.{places}f} {unit}".rstrip()'),
+    }
+    heldout = evals.EVAL_SETS["heldout"]
+    assert [case.id for case in heldout.cases] == list(solutions) and heldout.bar == {"passed": 4, "of": 5, "runs_in_a_row": 2}
+    try:
+        for case in heldout.cases:
+            evals.sample_project_as_committed(evals.SAMPLE_PROJECT_2)
+            with evals.plant_step(case.plant)():
+                failed, why = evals.measure_result(case.precondition)
+                assert not failed, (case.id, why)
+                solutions[case.id]()
+                passed, why = evals.measure_result(case.precondition)
+                assert passed, (case.id, why)
+    finally:
+        evals.sample_project_as_committed(evals.SAMPLE_PROJECT_2)
+    assert evals.is_sample_project_pytest("pytest -q harness/steward/working/sample-project-2"), "its pytest card is approved"
+    assert not evals.is_sample_project_pytest("pytest -q harness/steward/working/sample-project-3")
+
+
+def test_the_eval_history_records_each_runs_set_version_and_tier_and_the_bar_reads_them(tmp_path: Any, monkeypatch: Any) -> None:
+    """history.jsonl carries set_version and tier per run (None for a set with no file), so results compare like with
+    like; `evals.py bar <set>` reads them: the bar is met only by its last runs in a row of the current version."""
+    import json
+    from types import SimpleNamespace
+
+    import evals
+
+    history = tmp_path / "history.jsonl"
+    monkeypatch.setattr(evals, "EVAL_HISTORY", history)
+
+    def run(name: str, passed: int, total: int) -> None:
+        evals.record_history(name, {"": SimpleNamespace(passed=passed, total=total, items=[])}, 0)
+
+    run("memory", 2, 2)
+    entry = json.loads(history.read_text(encoding="utf-8").splitlines()[-1])
+    assert (entry["set_version"], entry["tier"]) == (None, None), entry
+    run("heldout", 5, 5)
+    entry = json.loads(history.read_text(encoding="utf-8").splitlines()[-1])
+    assert (entry["set"], entry["set_version"], entry["tier"]) == ("heldout", 1, "T1"), entry
+    assert evals.bar_status("heldout")[0] is False, "one run is not twice in a row"
+    run("heldout", 3, 5)
+    assert evals.bar_status("heldout")[0] is False, "3/5 is under the bar of 4"
+    run("heldout", 4, 5)
+    run("heldout", 4, 5)
+    met, line = evals.bar_status("heldout")
+    assert met and "T1 heldout v1 bar 4/5 2x in a row: MET" in line, line
+    lines = history.read_text(encoding="utf-8").splitlines()
+    old = json.loads(lines[-1])
+    old["set_version"] = 0
+    history.write_text("\n".join([*lines[:-1], json.dumps(old)]) + "\n", encoding="utf-8")
+    assert evals.bar_status("heldout")[0] is False, "a run of another version does not count"
+    assert evals.cli(["bar", "heldout"]) == 1 and evals.cli(["bar", "nothing"]) == 2
+
+
+def test_the_steps_set_v2_scores_only_the_plan_that_reached_the_card(monkeypatch: Any) -> None:
+    """t0-steps.yaml v2: PLAN's first reply was empty, ReadPlan asked again, and the second reply's plan reached the
+    card. Under v1 the first completion failed plan_step; now PLAN's completions are read as one conversation and the
+    plan that reached the card is scored, while a change made in any completion still fails it."""
+    import contextlib
+    import json
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+    from agent_framework import AgentExecutorResponse, AgentResponse
+
+    plan = '{"type": "approval", "questions": [{"message": "Fix the discount."}], "steps": ["Fix the discount line in inventory.py"]}'
+
+    def completion(*messages: Any) -> Any:
+        said = list(messages)
+        return SimpleNamespace(type="executor_completed", executor_id=wf.PLAN_STEP, data=[
+            AgentExecutorResponse(wf.PLAN_STEP, AgentResponse(messages=said), full_conversation=said)
+        ])
+
+    empty = completion(Message(role="assistant", contents=[""]))
+    planned = completion(Message(role="assistant", contents=[plan]))
+    events: list[Any] = []
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def run_events(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        return events
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "sample_project_as_committed", lambda: None)
+    monkeypatch.setattr(evals, "discount_test_result", lambda: (False, "not fixed"))
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", run_events)
+    monkeypatch.setattr(wf, "build_steward", built)
+
+    def plan_cases(*run: Any) -> list[dict[str, Any]]:
+        events[:] = run
+        asyncio.run(evals.steps_main())
+        entry = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+        assert (entry["set"], entry["set_version"], entry["tier"]) == ("steps", 2, "T0"), entry
+        return [c for c in entry["cases"] if c.get("step") == wf.PLAN_STEP]
+
+    assert [c["passed"] for c in plan_cases(empty, planned)] == [True], "the re-asked plan reached the card"
+    assert [c["passed"] for c in plan_cases(planned, empty)] == [False], "the last reply is no plan"
+    shell = Content.from_function_call(call_id="s1", name="run_shell", arguments={"command": "pytest -q"})
+    ran = completion(Message(role="assistant", contents=[shell]), Message(role="tool", contents=[Content.from_function_result(call_id="s1", result="4 passed")]))
+    assert [c["passed"] for c in plan_cases(ran, planned)] == [False], "a change in an earlier completion still fails"
+    assert evals.plan_that_reached_the_card([]) == []
+
+
+def test_the_tracked_bar_runner_runs_each_set_as_its_own_process_and_reads_the_history() -> None:
+    """harness/steward/evals/run-bar.ps1: validate first, each set run as its own process (Start-Job) with a UTF-8 log
+    and a progress file under storage/evals/runs/<Tag>/ (gitignored), one summary line per run from history.jsonl,
+    each set's bar from `evals.py bar`, and "BAR DONE" at the end."""
+    import evals
+
+    script = (evals.EVAL_SETS_DIR / "run-bar.ps1").read_text(encoding="utf-8")
+    for part in ("[string[]]$Sets", "[string]$Tag", "Start-Job", "Wait-Job", r"storage\evals\runs\$Tag",
+                 "progress.txt", "UTF8Encoding", "history.jsonl", "$evals validate", "$evals bar $set", "'BAR DONE'",
+                 "set_version"):
+        assert part in script, part
+    ignored = (evals._REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "storage/" in ignored, "the runs' logs stay out of the repository"
 
 
 def _ag_ui_events(http: Any, body: dict[str, Any]) -> list[dict[str, Any]]:

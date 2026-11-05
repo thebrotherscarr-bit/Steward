@@ -1,0 +1,54 @@
+# T1, held out: new asks on a second sample project Steward was never tuned on, to check that T0's fixes generalize.
+# Run: python harness/steward/step04_production_ready/evals.py heldout
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+# Never tune the harness on these asks; a fix for a T1 failure is proved on a new case first.
+name: heldout
+tier: T1
+version: 1
+owner: operator
+runner: asks
+split: full
+bar: {passed: 4, of: 5, runs_in_a_row: 2}
+changes:
+  1: >-
+    Five asks on harness/steward/working/sample-project-2 (units.py): add a function, fix a planted bug, a rename
+    that keeps the tests green, a README line that is genuinely missing, and a planted failing test to make pass.
+cases:
+  - id: add_function
+    ask: >-
+      Add a function fahrenheit_to_celsius(fahrenheit) to harness/steward/working/sample-project-2/units.py that
+      converts degrees Fahrenheit to degrees Celsius, with a docstring.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    subject: [fahrenheit_to_celsius]
+    precondition: fahrenheit_to_celsius_works
+    checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, fahrenheit_to_celsius_works]
+  - id: fix_bug
+    ask: Fix the bug that makes test_boiling_point fail in harness/steward/working/sample-project-2.
+    fixture: {project: harness/steward/working/sample-project-2, plant: fahrenheit_bug}
+    subject: [boiling, celsius_to_fahrenheit, fahrenheit]
+    precondition: boiling_point_test_passes
+    checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, boiling_point_test_passes]
+  - id: refactor
+    ask: >-
+      Rename LENGTH_IN_METRES to METRES_PER_UNIT everywhere in harness/steward/working/sample-project-2, keeping its
+      tests passing.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    subject: [metres_per_unit]
+    precondition: metres_per_unit_renamed
+    checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, metres_per_unit_renamed]
+  - id: docs_line
+    ask: >-
+      Add one line to harness/steward/working/sample-project-2/README.md that lists the length units convert_length
+      accepts.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    subject: [readme, unit]
+    precondition: readme_lists_length_units
+    checks: [plan_is_approval, no_nudge_in_reply, answer_on_topic, readme_lists_length_units]
+  - id: failing_test
+    ask: >-
+      Make the failing test test_format_quantity_without_unit pass in harness/steward/working/sample-project-2,
+      without changing the test.
+    fixture: {project: harness/steward/working/sample-project-2, plant: failing_test_added}
+    subject: [format_quantity, without_unit]
+    precondition: without_unit_test_passes
+    checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, without_unit_test_passes]

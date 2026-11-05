@@ -27,8 +27,8 @@ the command line) takes the handoff's first top priority (round_task, step 6, 6.
   the coder model, opened at 13,466 tokens before reading any code and read about 50 tokens a second.
   The coder is a workflow step, not an agent-as-tool, because MAF does not carry a child agent's approvals to
   its caller (Agent.as_tool: "Use a workflow when approval is interactive").
-* A round never changes what grades it (GRADERS: evals.py, eval_baselines.json, diagnosis_feedback.json,
-  .github/workflows/; test_harness.py takes only new tests at its end). edit_problem refuses such a hand-off, and
+* A round never changes what grades it (GRADERS: evals.py, harness/steward/evals/ (the eval sets and their
+  baselines), diagnosis_feedback.json, .github/workflows/; test_harness.py takes only new tests at its end). edit_problem refuses such a hand-off, and
   refuse_grader_writes, MAF function middleware on the coder and the diagnoser, refuses such a write.
 
 Run from worlds/steward:
@@ -86,7 +86,7 @@ GATE_CHECKS: tuple[tuple[str, ...], ...] = (
     (sys.executable, "-m", "pytest", "-q", "harness/steward/working/sample-project"),
     (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "harness/steward/step04_production_ready/test_harness.py"),
     # Step 6, 6.2: the eval gate, run once on Steward's model; it fails when the small-ask checks drop below the
-    # recorded baseline (eval_baselines.json).
+    # recorded baseline (harness/steward/evals/baselines.json).
     (sys.executable, "-W", "ignore", "harness/steward/step04_production_ready/evals.py", "small", "--gate"),
 )
 MAX_ATTEMPTS = 3
@@ -109,7 +109,7 @@ CODER_INSTRUCTIONS = (
 # the workspace; one ending in "/" is a folder.
 GRADERS = (
     "harness/steward/step04_production_ready/evals.py",
-    "harness/steward/step04_production_ready/eval_baselines.json",
+    "harness/steward/evals/",
     "harness/steward/step04_production_ready/diagnosis_feedback.json",
     ".github/workflows/",
 )

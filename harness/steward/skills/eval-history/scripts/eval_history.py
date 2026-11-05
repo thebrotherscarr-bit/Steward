@@ -37,7 +37,7 @@ def flips(before: dict, after: dict) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare the last runs of an eval set.")
-    parser.add_argument("set", nargs="?", help="The set's name (small, steps, memory, regression); default the newest run's.")
+    parser.add_argument("set", nargs="?", help="The set's name (small, steps, heldout, memory, regression); default the newest run's.")
     parser.add_argument("--runs", type=int, default=2, help="How many of its last runs to list (2 to 20).")
     parser.add_argument("--file", default=str(HISTORY), help="The history file.")
     args = parser.parse_args()
@@ -64,7 +64,8 @@ def main() -> None:
         "set": name,
         "runs": [
             {
-                "ts": run.get("ts"), "passed": run.get("passed"), "total": run.get("total"),
+                "ts": run.get("ts"), "set_version": run.get("set_version"), "tier": run.get("tier"),
+                "passed": run.get("passed"), "total": run.get("total"),
                 "checks_passed": run.get("checks_passed"), "checks_total": run.get("checks_total"),
                 "git_head": run.get("git_head"), "model": run.get("model"),
                 "options": (run.get("options") or {}).get("name"),

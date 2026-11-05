@@ -32,6 +32,6 @@ is kept only if the tests pass and the eval checks do not drop below the baselin
    again.
 
 Never:
-- change an eval's check, or `eval_baselines.json`, to make the gate pass;
+- change an eval's check, or anything in `harness/steward/evals/` (the eval sets and their baselines), to make the gate pass;
 - change more than the one failure asks for;
 - touch `.env`, or anything outside your workspace.

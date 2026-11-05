@@ -1,0 +1,26 @@
+# T0, regression: the workflow's steps scored one by one on a single run of the discount fix, frozen.
+# Run: python harness/steward/step04_production_ready/evals.py steps
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: steps
+tier: T0
+version: 2
+owner: operator
+runner: steps
+split: full
+bar: {passed: 1, of: 1, runs_in_a_row: 1}
+changes:
+  1: >-
+    The steps set as evals.py ran it until 2026-11-05: every completion of PLAN scored as its own plan, so a run whose
+    first plan reply was empty (or a choiceless clarification) and was asked again failed plan_step, even when the plan
+    asked for next reached the card.
+  2: >-
+    One scoring change: plan_step scores only the plan that reached the card. PLAN's completions are read as one
+    conversation (plan_that_reached_the_card), so its last plan is the one scored, and a call that changed something
+    in any of them still fails the step. A re-asked plan that then reaches the card passes. The case is unchanged.
+cases:
+  - id: discount_fix
+    ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
+    fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
+    subject: [inventory.py, discount]
+    precondition: steps_overall
+    checks: [plan_step, execute_step, steps_overall]
