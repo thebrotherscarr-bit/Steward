@@ -88,6 +88,16 @@ was never merged and has no entry.
   (rebase, amend, filter-branch), deleting main, or Archive path. The door does not carry `neiro` yet and refuses it
   by name.
 
+### Changed
+
+- Each workflow step's model calls are offered only that step's tools, not the whole set (the bar at 98d54d5: 43 tools
+  in an eval's build, 56 live, on every call; of 56 PLAN calls in the traces, 4 wrote a call's arguments as text and
+  one called `functions?`). PLAN gets the reads, the todo tools and his memory's reads (22 in an eval's build, of 43);
+  ANSWER everything that changes nothing; EXECUTE and its repair everything but `git_commit` (COMMIT's) and the mode
+  tools. Ollama has no `allowed_tools`, so `step_tools_turn` (chat middleware) cuts the call's live tool list in
+  place, as MAF's own `remove_tools` does; a left-out tool is not found if called. A host that runs Steward without
+  the graph is offered everything, as before. Test: `test_each_workflow_step_is_offered_only_its_own_tools`.
+
 ### Removed
 
 - The older build path (`part > 4`), called by no host, caller or test in this repo, SecondBrain's Electron app or
