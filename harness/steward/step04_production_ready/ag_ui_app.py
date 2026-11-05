@@ -108,7 +108,9 @@ class StewardAGUIWorkflow(AgentFrameworkWorkflow):
 
 
 def build_ag_ui_app(client_factory: Callable[[], Any] | None = None, **build: Any) -> FastAPI:
-    """The AG-UI endpoint at PATH, on a FastAPI app (Learn's "Registering the Endpoint", single_user=True)."""
+    """The AG-UI endpoint at PATH, on a FastAPI app (Learn's "Registering the Endpoint", single_user=True). The code
+    each request builds is imported now (hosted.load_host_code), so a pull while the host runs is not mixed into it."""
+    hosted.load_host_code()
     app = FastAPI(title="Steward (AG-UI)")
     add_agent_framework_fastapi_endpoint(
         app=app, agent=StewardAGUIWorkflow(client_factory, **build), path=PATH, single_user=True

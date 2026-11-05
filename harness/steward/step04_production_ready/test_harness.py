@@ -7372,3 +7372,150 @@ def test_answer_on_topic_takes_the_file_changed_or_the_changed_formula() -> None
     assert scored(evals.answer_on_topic, asks["discount"], [said("order_total divides by 100 now.")]).passed
     for case in ("fix_bug", "add_function", "item_count", "discount", "refactor", "failing_test"):
         assert not scored(evals.answer_on_topic, asks[case], [said("Paris is the capital of France.")]).passed, case
+
+
+def test_a_host_imports_the_code_its_requests_build_as_it_starts(monkeypatch: Any) -> None:
+    """Live 2026-11-05 08:26 (the AG-UI transport, every case "RUN_ERROR: Workflow execution failed." in 4-7 s): the
+    AG-UI host started at 08:12 on e94cb90's agent.py, main was pulled to 2681f88 at 08:23, and the first request
+    imported 2681f88's steward_workflow.py inside steward_graph; its step_tools_turn called
+    agent.sandbox_shell_closed, which the running agent module did not have (AttributeError). Both hosts now import
+    the modules a request builds as they are built (hosted.HOST_CODE, load_host_code), and every sibling module
+    imported inside a function of the hosts' code is one of them or imported by the hosts at the top. Red when a host
+    stops loading them at start, or a new import inside a request's code is not pinned with them."""
+    import ast
+
+    import ag_ui_app
+    import hosted
+
+    here = Path(hosted.__file__).resolve().parent
+    assert hosted.load_host_code() == list(hosted.HOST_CODE)
+    assert all(name in sys.modules for name in hosted.HOST_CODE)
+
+    loaded: list[str] = []
+    monkeypatch.setattr(hosted, "load_host_code", lambda: loaded.append("loaded") or list(hosted.HOST_CODE))
+    ag_ui_app.build_ag_ui_app()
+    assert loaded == ["loaded"], "the AG-UI host loads its request code as it is built"
+    hosted.steward_server()
+    assert loaded == ["loaded", "loaded"], "so does the Responses host"
+
+    siblings = {path.stem for path in here.glob("*.py")}
+
+    def imports(tree: ast.AST) -> set[str]:
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names |= {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                names.add(node.module.split(".")[0])
+        return names & siblings
+
+    top: set[str] = set()
+    for module in ("hosted", "ag_ui_app"):
+        tree = ast.parse((here / f"{module}.py").read_text(encoding="utf-8"))
+        top |= imports(ast.Module(body=[n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))], type_ignores=[]))
+    for module in ("hosted", "ag_ui_app", *hosted.HOST_CODE):
+        tree = ast.parse((here / f"{module}.py").read_text(encoding="utf-8"))
+        late = set().union(*(imports(f) for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))))
+        # improvement_loop's own command line (traced_asks, generate_traces) imports evals; no request reaches it.
+        cli_only = {"evals"} if module == "improvement_loop" else set()
+        unpinned = late - set(hosted.HOST_CODE) - top - {module} - cli_only
+        assert not unpinned, f"{module}.py imports {sorted(unpinned)} on a request: add them to hosted.HOST_CODE"
+
+
+def test_the_responses_transport_scores_his_own_last_reply_not_the_checks_or_his_todo_line() -> None:
+    """Live 2026-11-05 (the Responses transport, head e94cb90, 0/3 on answer_on_topic only): the Responses wire names
+    no step, so ask_commit's "Checks passed" was taken for his last reply on the item_count and discount asks; and on
+    the README ask his round ended on "All pending todo items have been completed." after the README line, which the
+    host streams as a message of its own. Replayed through eval_transports.responses_messages: his reply is his words
+    in the last round that has any, the harness's own texts (checks_text, repair_text, the commit's result,
+    COMMIT_NOT_APPROVED) skipped by their words; the in-process shape (author_name per step) scores as before."""
+    import eval_transports
+    import evals
+    import steward_workflow as wf
+
+    def said(text: str, item_id: str) -> dict[str, Any]:
+        return {"type": "message", "id": item_id, "role": "assistant", "content": [{"type": "output_text", "text": text}]}
+
+    def card(name: str, item_id: str) -> dict[str, Any]:
+        return {"type": "mcp_approval_request", "id": item_id, "name": name, "arguments": "{}"}
+
+    def over_the_wire(*rounds: list[dict[str, Any]]) -> list[Message]:
+        conversation: list[Message] = []
+        for items in rounds:
+            messages, cards, _ = eval_transports.responses_messages(items)
+            conversation += messages
+            if cards:
+                conversation.append(Message(role="user", contents=[c.to_function_approval_response(approved=True) for c in cards]))
+        return conversation
+
+    checks = wf.checks_text(wf.CheckReport(1, True, "$ pytest -q harness\\steward\\working\\sample-project\n(exit 0)\n4 passed", ""))
+    item_count = over_the_wire(
+        [said("Plan ready.", "m0"), card("approve_plan", "c0")],
+        [said("Added item_count(items) to inventory.py; it sums the quantities.", "m1"), said(checks, "m2"), card("git_commit", "c1")],
+        [said(wf.COMMIT_NOT_APPROVED.format(message="Add item_count function to inventory.py"), "m3")],
+    )
+    result = scored(evals.answer_on_topic, evals.SMALL_ASK_NEW_CODE, item_count)
+    assert result.passed, result
+    readme = over_the_wire(
+        [card("approve_plan", "c0")],
+        [said("I will add the line to README.md.", "m1"), card("file_access_replace_lines", "c1")],
+        [
+            said("Added a line to README.md: run the tests with `python -m pytest`.", "m2"),
+            {"type": "function_call", "id": "f1", "call_id": "f1", "name": "todos_complete", "arguments": "{}"},
+            {"type": "function_call_output", "id": "o1", "call_id": "f1", "output": "done"},
+            said("All pending todo items have been completed.", "m3"),
+        ],
+    )
+    assert scored(evals.answer_on_topic, evals.SMALL_ASK_README, readme).passed
+    # Only the harness spoke, or he spoke off topic: still a fail.
+    harness_only = over_the_wire([said(checks, "m1"), card("git_commit", "c1")], [said(wf.COMMIT_NOT_APPROVED.format(message="item_count"), "m2")])
+    assert not scored(evals.answer_on_topic, evals.SMALL_ASK_NEW_CODE, harness_only).passed
+    off_topic = over_the_wire([said("Paris is the capital of France.", "m1"), said(checks, "m2")])
+    assert not scored(evals.answer_on_topic, evals.SMALL_ASK_NEW_CODE, off_topic).passed
+    for text in (
+        checks, wf.checks_text(wf.CheckReport(3, False, "1 failed", "")), wf.repair_text(wf.CheckReport(2, False, "1 failed", "")),
+        steward.NOTHING_TO_COMMIT, "Committed 2681f88: Add item_count", wf.COMMIT_NOT_APPROVED.format(message="x"),
+    ):
+        assert evals._harness_says(text), text
+    assert not evals._harness_says("Added item_count to inventory.py. Checks passed: 4 tests.")
+    # In-process, each step's output carries its executor's name: the same reply, as before.
+    in_process = [
+        Message(role="assistant", contents=[Content.from_text("Added item_count to inventory.py.")], author_name="execute"),
+        Message(role="assistant", contents=[Content.from_text("Checks passed:\n4 passed")], author_name="ask_commit"),
+    ]
+    assert evals._stewards_last_reply(in_process) == "Added item_count to inventory.py."
+
+
+def test_compare_transports_names_the_runs_of_another_set_version_it_leaves_out(monkeypatch: Any, tmp_path: Path, capsys: Any) -> None:
+    """Live 2026-11-05 08:26: main was pulled to small v2 while the responses run (v1) was going, so compare-transports
+    under v2 printed "-" for responses with no word of the run, and the run was recorded at 2681f88 though it ran
+    e94cb90's code. Now the comparison names the runs it leaves out and --set-version compares them, and a run's
+    git_head is the HEAD as it began (cli: GIT_HEAD_AT_START)."""
+    import json
+
+    import evals
+
+    now = evals.EVAL_SETS["small"].version
+    case = {"input": "q", "passed": True, "failed_checks": [], "timings": {"first_event_s": 1.0, "total_s": 2.0, "cards": 1, "cards_resumed": 1, "stream_errors": []}}
+    history = tmp_path / "history.jsonl"
+    history.write_text("".join(json.dumps(line) + "\n" for line in (
+        {"set": "small", "set_version": now - 1, "transport": "in-process", "cases": [case]},
+        {"set": "small", "set_version": now - 1, "transport": "responses", "cases": [case]},
+        {"set": "small", "set_version": now, "transport": "ag-ui", "cases": [dict(case, passed=False)]},
+    )), encoding="utf-8")
+    monkeypatch.setattr(evals, "EVAL_HISTORY", history)
+    assert evals.transport_comparison("small", 3)["responses"] == {}
+    assert evals.runs_left_out("small") == {"in-process": {now - 1: 1}, "responses": {now - 1: 1}}
+    assert evals.transport_comparison("small", 3, version=now - 1)["responses"]["q"]["runs"] == 1
+    assert evals.runs_left_out("small", now - 1) == {"ag-ui": {now: 1}}
+    assert evals.cli(["compare-transports"]) == 0
+    out = capsys.readouterr().out
+    assert f"responses: left out 1 of v{now - 1} (--set-version to compare them)" in out, out
+    assert evals.cli(["compare-transports", "--set-version", str(now - 1)]) == 0
+    out = capsys.readouterr().out
+    assert f"small v{now - 1}" in out and "ag-ui: left out 1 of v" in out and "1/1 1s 2s 1/1 e0" in out, out
+    assert evals.cli(["compare-transports", "--set-version", "x"]) == 2
+
+    monkeypatch.setattr(evals, "GIT_HEAD_AT_START", "e94cb90")
+    monkeypatch.setattr(evals, "_git_head", lambda: "2681f88")
+    assert evals.history_entry("small", {}, 0)["git_head"] == "e94cb90", "the head the run began on"

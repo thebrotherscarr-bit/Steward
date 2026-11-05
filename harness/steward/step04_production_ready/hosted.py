@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import importlib
 import json
 import logging
 import os
@@ -236,6 +237,19 @@ def plan_mode_turns(
         await call_next()
 
     return plan_mode_turn
+
+
+# The modules a request imports inside steward_graph and _improvement_loop (inside, since steward_workflow imports this
+# module). A host imports them as it is built (steward_server, ag_ui_app.build_ag_ui_app), so every request runs the
+# code the host started on. Live 2026-11-05 08:26 (the AG-UI transport): the host had started at 08:12 on e94cb90's
+# agent.py, main was pulled to 2681f88 at 08:23, and the first request imported 2681f88's steward_workflow.py, whose
+# step_tools_turn called agent.sandbox_shell_closed: AttributeError, "Workflow execution failed" on every case.
+HOST_CODE = ("steward_workflow", "improvement_loop_workflow", "improvement_loop")
+
+
+def load_host_code() -> list[str]:
+    """Imports HOST_CODE now, so a later change on disk is not mixed into a running host's code (a restart picks it up)."""
+    return [importlib.import_module(name).__name__ for name in HOST_CODE]
 
 
 async def steward_graph(request: HostedResponseRequest, client_factory: Callable[[], Any] | None = None, **build: Any) -> Any:
@@ -657,6 +671,7 @@ def steward_server(
     ``observability`` is the host's configure_observability: main passes steward_observability; None (tests) sets
     nothing up, where the host's default would print every metric to stdout.
     """
+    load_host_code()  # every request runs the code the host started on (HOST_CODE)
     os.environ.setdefault("AGENTSERVER_STATE_ROOT", str(_AGENTSERVER_STATE_DIR))
     # One user on one PC: one platform session, so a reply (previous_response_id) finds the run it answers. Without
     # it the first request gets a random session and its reply a derived one, two scopes, and the reply is refused
