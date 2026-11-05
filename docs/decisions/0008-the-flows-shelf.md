@@ -1,11 +1,11 @@
 ---
-status: accepted; superseded in part by ADR-0009
+status: accepted; superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0008: The Flows shelf
+# The Flows shelf
 
 > 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
 > Set up holds the automations (a saved flow, when, on/off) and builds no flows; "+ New flow" is the only way to
@@ -65,7 +65,9 @@ Flows), the schedule edit and run tests in Jesster #83.
 
 ## More Information
 
-- Built: piece 1, the read-only shelf (Jesster #79); Run now, Set up and the layered canvas (Jesster #83).
+- Built: piece 1, the read-only shelf (Jesster #79); Run now, Set up and the layered canvas (Jesster #83); "+ New
+  flow", a canvas whose palette is the legend, blocks wired in a line and saved as a recipe, with eval-set and recipe
+  examples built in (Jesster #86).
 - Open: the run history, the graph from Steward's `to_dict()` (`recipe_graph`, Steward #150, is ready to serve it),
   `automation_save` behind Steward's card, evals in flow.
 - The plan: the SecondBrain note `plan-the-flows-shelf-ide-for-steward-s-f-04a93a`. It asks that the guidance

@@ -1,11 +1,11 @@
 ---
-status: accepted; superseded in part by ADR-0009
+status: accepted; superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0005: Automations are recipes run as MAF workflows
+# Automations are recipes run as MAF workflows
 
 > 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
 > a flow (the steps) is saved by itself and an automation is `{flow, when, on/off}`; there is no open-ended prompt
@@ -40,7 +40,8 @@ was there to answer. How should scheduled work run when nobody is watching?
 
 Chosen option: "Recipes as data, run as MAF workflows on Steward's host", because it puts every run on MAF's
 workflow machinery (checkpoints, step events for the Flows shelf, `evaluate_workflow`) and leaves Jesster only what
-MAF lacks, the scheduler.
+MAF lacks, the scheduler. _(2026-11-05: recipe runs are not evaluated yet; `evaluate_workflow` on them is the Flows
+shelf's piece 5.)_
 
 - **A recipe is data:** `{ name, when, prompt, steps: [...from a fixed list...], summarize?, deliver: [note, telegram] }`,
   kept in SecondBrain's `schedules.json`. The steps are fixed: repo_log, merged_prs, releases, eval_bars, plan_left,

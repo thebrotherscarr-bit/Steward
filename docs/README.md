@@ -28,7 +28,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 
 | ADR | Title | Status |
 |---|---|---|
-| [0001](decisions/0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0004 |
+| [0001](decisions/0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0002, 0003 and 0004 |
 | [0002](decisions/0002-one-model-for-everything.md) | One model for everything | accepted |
 | [0003](decisions/0003-ag-ui-is-the-default-transport.md) | AG-UI is the default transport, Responses the fallback | accepted |
 | [0004](decisions/0004-jesster-is-the-center.md) | Jesster is the center; Neiro retired as a gate; Aurora parked | accepted |

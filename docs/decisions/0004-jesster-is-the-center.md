@@ -5,7 +5,7 @@ date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0004: Jesster is the center; Neiro retired as a gate; Aurora parked
+# Jesster is the center; Neiro retired as a gate; Aurora parked
 
 Supersedes in part [ADR-0001](0001-steward-is-a-maf-harness-agent.md): the platform it names (Manjuel, SecondBrain and
 Atlas) becomes Jesster as the one center; Manjuel stays the ground and the record; Atlas (Aurora) is parked.
@@ -51,8 +51,8 @@ checked versions rather than behaviour.
   Estate's name.
 - **Aurora is parked** until Steward has visible computer control (Playwright-style, open source). No new Aurora work
   until then; its existing rules hold (its look is never changed). The GitHub repository Atlas was renamed Aurora on
-  2026-11-05; the folder `atlas/`, its binaries and tool names are unchanged. Its door (43111) still serves the git
-  tools Steward uses on cards, through Jesster.
+  2026-11-05; the folder `atlas/`, its binaries and tool names are unchanged. The door (43111) runs inside Jesster
+  (`door/listen.cjs`), built from Aurora's code, and serves the git tools Steward uses on cards (corrected 2026-11-05).
 
 ### Consequences
 

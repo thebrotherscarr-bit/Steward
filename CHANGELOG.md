@@ -171,6 +171,16 @@ was never merged and has no entry.
 
 ### Changed
 
+- The design docs checked against MAF and the code (findings A3, A4, A6, C12, C13, C14, D15, D16 and D17 of the
+  SecondBrain note `findings-the-11-04-05-work-checked-again-2486a6`): ARCHITECTURE.md's automation diagram says only
+  an eval recipe skips while Steward is busy; evals are scored with `evaluate_agent` and `LocalEvaluator` (a
+  `LocalEvaluator` per step in the steps set) and recipe runs are not evaluated yet (`evaluate_workflow` is the Flows
+  shelf's piece 5), noted in ARCHITECTURE.md, ADR-0005 and ADR-0006; ADR-0003 notes that an improve conversation stays
+  on Responses; ADR-0004 says the door (43111) runs inside Jesster, built from Aurora's code; ARCHITECTURE.md and
+  AGENTS.md limit the card rule to Steward and note the hand's exception under the ground's CLAUDE.md RULE 12;
+  ADR-0008 records Jesster #86; ADR-0001's status and both indexes name 0002, 0003 and 0004, which now say they
+  supersede it in part; `docs/decisions/README.md` marks where we adapt MAF's process (Kyle as decider, acceptance by
+  his word, partial supersession in the status) and the headings drop their number, as MAF's template has them.
 - ADR-0009, "Flows are ordered tool chains; automations schedule flows" (the operator's rulings, 2026-11-05): a
   flow is an ordered chain of steps saved by itself and runs with no card (the saved flow is his approved plan); an
   automation is a saved flow, when and on/off; no open-ended prompt type; evals run whenever he says, day or night.

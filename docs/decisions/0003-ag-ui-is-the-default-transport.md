@@ -5,7 +5,10 @@ date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0003: AG-UI is the default transport, Responses the fallback
+# AG-UI is the default transport, Responses the fallback
+
+Supersedes in part [ADR-0001](0001-steward-is-a-maf-harness-agent.md): the Agent tab reaches Steward over AG-UI (43122) by default; his Responses host
+(43120) is the fallback.
 
 ## Context and Problem Statement
 
@@ -43,6 +46,8 @@ The operator's word, 2026-11-05: "use it" (recorded in Jesster #77).
   down, the turn falls back to Responses (43120) and one console line says so. Only a Responses choice made in
   Settings stays on Responses.
 - The eval workflows run with `-Transport ag-ui`.
+- Exception (noted 2026-11-05): an improve conversation stays on Responses, because its review card has no AG-UI
+  answer yet (Jesster `electron/agent/service.cjs`, the `!s.improve` test before the AG-UI path).
 
 ### Consequences
 

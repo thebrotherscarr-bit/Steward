@@ -34,7 +34,9 @@ to implementation.
 
 - `.env` and keys are never read, printed, copied, committed or put on a command line. Every file tool refuses `.env*`.
 - The Archive never goes on GitHub.
-- Kyle holds the gate: every write, shell command, commit, push and Estate change is his card. Changes land on main only
+- Kyle holds the gate: for Steward, every write, shell command, commit, push and Estate change is his card (the hand's
+  exception, the ground's CLAUDE.md RULE 12: the coding agent working for the operator runs git and GitHub in this
+  repository from its own shell, with no cards, until Steward runs it reliably). Changes land on main only
   through a pull request whose checks pass. No force-push, tags, releases or history rewrites.
 - No agent puts its own name on the work: no co-author line, no "generated with", no byline. Kyle is the author.
 - Use MAF as it ships: check the MAF Learn pages and the installed `agent_framework` source first, and name the passage.

@@ -5,7 +5,7 @@ date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0009: Flows are ordered tool chains; automations schedule flows
+# Flows are ordered tool chains; automations schedule flows
 
 ## Context and Problem Statement
 
