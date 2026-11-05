@@ -6304,3 +6304,71 @@ def test_the_check_runs_on_a_file_he_wrote_back_to_its_committed_text(monkeypatc
             return check._written()  # noqa: SLF001
 
     assert asyncio.run(_go()) == ["harness/steward/working/sample-project/inventory.py"], "CHECK reads EXECUTE's session"
+
+
+def test_the_steps_eval_credits_a_write_approved_before_a_later_card_and_reads_the_whole_report(monkeypatch: Any) -> None:
+    """The steps set at a3a3519 (2026-11-05 06:05Z): EXECUTE's approved file_access_replace fixed inventory.py, two
+    run_shell cards followed, and MAF's AgentExecutor completed with only the messages since the last card, so
+    execute_step read no write; and the last output was the denied commit's, so the report's "Checks passed" was
+    missed. step_conversations(events, approve) puts each approved card into its step's next completion, and the
+    report is every output of the run."""
+    import contextlib
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+    from agent_framework import AgentExecutorResponse, AgentResponse, EvalResults
+
+    write = Content.from_function_call(call_id="w1", name="file_access_replace", arguments={"file_name": INVENTORY})
+    shell = Content.from_function_call(call_id="s1", name="run_shell", arguments={"command": "pytest -q"})
+
+    def card(call: Content) -> Any:
+        request = Content.from_function_approval_request(id=call.call_id, function_call=call)
+        return SimpleNamespace(type="request_info", source_executor_id=wf.EXECUTE_STEP, data=request, request_id=call.call_id, executor_id=None)
+
+    last = [Message(role="assistant", contents=["All tests pass."])]
+    done = SimpleNamespace(type="executor_completed", executor_id=wf.EXECUTE_STEP, data=[
+        AgentExecutorResponse(wf.EXECUTE_STEP, AgentResponse(messages=last), full_conversation=last)
+    ])
+    events = [card(write), card(shell), done]
+    approve = {"file_access_replace"}
+    [conversation] = evals.step_conversations(events, approve)[wf.EXECUTE_STEP]
+    assert scored(evals.execute_step, "go", conversation).passed, "the approved write before a later card counts"
+    [bare] = evals.step_conversations(events)[wf.EXECUTE_STEP]
+    assert not scored(evals.execute_step, "go", bare).passed, "without the eval's answers, as MAF hands it"
+    [denied] = evals.step_conversations(events, set())[wf.EXECUTE_STEP]
+    assert not scored(evals.execute_step, "go", denied).passed, "a denied write is no work done"
+
+    passed = wf.checks_text(wf.CheckReport(1, True, "$ pytest -q p\n(exit 0)\n4 passed", ""))
+    said = [card(write), done, SimpleNamespace(type="output", data=passed), SimpleNamespace(type="output", data=wf.COMMIT_NOT_APPROVED.format(message="m"))]
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def run_events(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        return said
+
+    class Scoring:
+        def __init__(self, *checks: Any) -> None:
+            self.checks = checks
+
+        async def evaluate(self, items: Any, eval_name: str = "") -> Any:
+            if eval_name == "overall":
+                text = items[0].conversation[-1].text if items else ""
+                seen.append(text)
+            if eval_name == "execute":
+                credited.append(any([(await evals.execute_step(item)).passed for item in items]))
+            return EvalResults(provider="local", result_counts={"passed": 1, "failed": 0})
+
+    seen: list[str] = []
+    credited: list[bool] = []
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "sample_project_as_committed", lambda: None)
+    monkeypatch.setattr(evals, "LocalEvaluator", Scoring)
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", run_events)
+    monkeypatch.setattr(wf, "build_steward", built)
+    asyncio.run(evals.steps_main())
+    assert seen and "Checks passed" in seen[0] and "was not approved" in seen[0], seen
+    assert credited == [True], "steps_main scores EXECUTE with the eval's approved cards"
