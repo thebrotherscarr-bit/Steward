@@ -17,6 +17,10 @@ approval card you answer.
 
 Everything runs on your own PC on local models. No hosted model is used by default.
 
+**The Estate's design** is in [`docs/`](docs/README.md): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the parts,
+their wires, their data and the build plan) and the decision records in [`docs/decisions/`](docs/decisions/README.md).
+Every architectural change gets a decision record before it is built.
+
 Steward himself, built step by step on MAF's "Build your own claw" guide, is in `harness/steward/`
 (see its README). His service, `harness/steward/step04_production_ready/hosted.py`, listens on
 127.0.0.1:43120 for SecondBrain's Agent tab; his MCP endpoint (`mcp_app.py`) is on 127.0.0.1:43121.
