@@ -93,6 +93,22 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The PLAN step ended on a tool call's arguments written as text, so no plan card came (the bar at 0016cf4: the
+  README ask's `{"query":"pytest"}`, which fits `search_code` and `secondbrain_search_notes`; the steps set's
+  `{"edits": [...], "file_name": ".../inventory.py"}`, which fits `file_access_replace_lines` and
+  `file_memory_replace_lines`). In the plan step a write written as text is now the one gated write it fits, which
+  the plan-mode gate answers with its refusal as the tool result ("plan first; writes come after approval"); nothing
+  is written, and file memory's never-asking write is never chosen. A read still runs as before. A reply that is, or
+  ends with, a JSON object and holds no plan is sent back to PLAN once with `PLAN_NOT_A_CALL`, asking for the
+  structured plan. Test: `test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card`.
+- A bare file name was written at the repository root (small run 1, the item_count ask: a stray `inventory.py`
+  beside the sample project's, and `check_covers_writes` failed on it). A write of a bare name that is no file at the
+  root, when the request names a folder holding that file (or the file itself), is refused, even with its card
+  approved, and the refusal names the path the request meant. It is refused rather than moved because MAF's file
+  tools take the path the model gives and the harness never rewrites a call's arguments. The evals' resets (the small
+  asks and the steps set) also remove every untracked file a run created anywhere in the repository, and leave what
+  was untracked before it. Test:
+  `test_a_bare_file_name_the_request_put_in_a_folder_is_refused_and_the_evals_remove_a_runs_stray_files`.
 - The README eval ask asked for a line the README already had (bar run B, 2026-11-04 22:09Z, head 06657a1: "No plan
   card", he said the README already holds "Run the tests:" / "python -m unittest -v", committed since c17cd62). For
   that ask only, `readme_run_tests_removed` takes the how-to block out of the working copy, its line endings kept, and
