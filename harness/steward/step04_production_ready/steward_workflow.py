@@ -67,7 +67,7 @@ from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from agent_framework import (
     Agent,
@@ -96,7 +96,7 @@ from agent_framework import (
 )
 from agent_framework._workflows._message_utils import normalize_messages_input
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -258,7 +258,11 @@ class StewardPlan(PlanningResponse):
     # Required and at least one ("required", "minItems": 1 in the schema): Ollama's structured output (format = this
     # schema) enforces only what the schema says, and a model left free sent no steps, or "[ ]" (live, 2026-11-01);
     # a plan without steps has nothing to approve or run.
-    steps: list[str] = Field(
+    # Each step non-blank ("minLength": 1 per item in the schema Ollama is sent): the bar at 98d54d5 (2026-11-05
+    # 01:47Z) approved a plan whose steps held "" lines, MAF's todo store refuses a blank title on its next load
+    # (TodoItem.from_dict, agent_framework/_harness/_todo.py:92-93), and the run crashed. A reply with one is no plan,
+    # so READ_PLAN asks for it again (PLAN_NOT_A_CALL), as it asks for any reply that is not the plan.
+    steps: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]] = Field(
         min_length=1,
         description=(
             "The plan's steps in order, one short imperative line each (e.g. 'Read inventory.py', 'Fix the discount "
@@ -353,7 +357,10 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
             set_agent_mode(
                 context.session, "execute", source_id=mode_provider.source_id, available_modes=mode_provider.available_modes
             )
-            items = [TodoItem(id=n, title=str(step)) for n, step in enumerate(steps, start=1)]
+            # Only titles MAF's store loads again (TodoItem.from_dict: a non-blank string), so a blank step that got
+            # past the plan's schema never reaches the store, where it would end the run on the next load.
+            titles = [title for title in (str(step).strip() for step in steps) if title]
+            items = [TodoItem(id=n, title=title) for n, title in enumerate(titles, start=1)]
             await todo_provider.store.save_state(
                 context.session, items, next_id=len(items) + 1, source_id=todo_provider.source_id
             )

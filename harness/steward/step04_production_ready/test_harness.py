@@ -5513,3 +5513,51 @@ def test_each_workflow_step_is_offered_only_its_own_tools() -> None:
 
     # A host that runs him without the graph (no step in the session) is offered everything, as before.
     assert wf.offered_in_step("git_commit", None) and wf.offered_in_step("mode_set", None)
+
+
+def test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run() -> None:
+    """The bar at 98d54d5 (2026-11-05 01:47Z, the README ask): an approved plan's steps held "" lines, approved_plan_turn
+    stored them as todos, and MAF's todo store refused a blank title on its next load, ending the run with ValueError.
+    A blank step makes the reply no plan (StewardPlan's schema), so PLAN is asked again; a blank step on an approved
+    plan's message is never stored; and a tool's own argument error (todos_add with an empty title) comes back to him
+    as the tool's error result, which he can correct, and the run goes on."""
+    import steward_workflow as wf
+    from agent_framework import AgentModeProvider, TodoProvider
+
+    blank = '{"type": "approval", "questions": [{"message": "Add a line."}], "steps": ["Add the line", "", "  "]}'
+    plan = '{"type": "approval", "questions": [{"message": "Add a line."}], "steps": ["Add the line"]}'
+    assert wf.steward_plan_in(blank) is None and wf.steward_plan_in(plan) is not None
+    assert wf.StewardPlan.model_json_schema()["properties"]["steps"]["items"]["minLength"] == 1, "Ollama is sent it"
+
+    client = ScriptedChatClient([blank, plan, "Done."])
+
+    async def _workflow() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                events = [e async for e in wf.build_steward_workflow(agent).run("Add a line to the README.", stream=True)]
+        return [e.data.function_call.name for e in events if e.type == "request_info"]
+
+    assert asyncio.run(_workflow()) == [wf.APPROVE_PLAN], "asked again, then the card"
+    assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.calls[1]["messages"])
+
+    client = ScriptedChatClient(["Done."])
+
+    async def _approved() -> list[str]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+            async with agent:
+                wf.build_steward_workflow(agent)  # its middleware, approved_plan_turn among them
+                session = wf.step_session(agent, wf.EXECUTE_STEP)
+                await agent.run(wf.execute_message("Add a line.", "Add a line.", ["Add the line", "", "  "]), session=session)
+                todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
+                assert any(isinstance(p, AgentModeProvider) for p in agent.context_providers)
+                return [item.title for item in await todos.store.load_items(session, source_id=todos.source_id)]
+
+    assert asyncio.run(_approved()) == ["Add the line"], "the blank steps were never stored"
+
+    empty = Content.from_function_call(call_id="t1", name="todos_add", arguments={"todos": [{"title": ""}]})
+    client, _, response = run_steward([empty, "I will name the todo."], "Plan the README line.")
+    [result] = function_results(client.calls[1])
+    assert "Todo input title must be a non-empty string" in result, result
+    assert response.text == "I will name the todo.", "the run went on"
