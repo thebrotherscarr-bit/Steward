@@ -125,6 +125,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A run that stopped on a tool's result (no reply after it) is asked once to go on with its tools on (`GO_ON_NUDGE`,
+  `ended_on_a_result`); only a second stop gets the answer-now turn, and an empty reply gets it as before. The
+  confirmation bar at 1c23f70 (the item_count ask): the run stopped on a tool's error, the answer-now turn (#134) said
+  his tools were off for the rest of the request, and he answered "the tools are disabled" instead of writing the
+  function. Test: `test_a_run_stopped_on_a_tool_result_is_asked_to_go_on_with_tools_on_before_any_answer_now`.
 - A run that ends on a tool's result with no reply after it is ended empty (`ended_empty`), so the harness loop asks
   it for its answer as it asks an empty reply. The confirmation bar at 5039e0e (the item_count ask): after
   todos_get_remaining the reply came back empty, MAF kept no message for it, and the run ended with no answer. Test:
