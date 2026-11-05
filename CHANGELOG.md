@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- `STEWARD_SANDBOX=hyperlight` (off by default, so nothing changes until it is turned on): CodeAct runs in MAF's
+  Hyperlight sandbox (`HyperlightCodeActProvider`, harness/ at `/input/harness`) instead of Monty, and a `run_shell`
+  after untrusted content (a note, an Estate log, the web) is refused without running and sent to `execute_code`.
+  Probed once at start; if Hyperlight cannot run (Windows Hypervisor Platform off), one line is logged
+  (`Hyperlight sandbox off: <reason>`) and the build is today's. Test:
+  `test_the_hyperlight_sandbox_is_off_by_default_and_on_runs_codeact_and_the_untrusted_shell_in_it`.
 - The last Estate controls as skills. `ollama-ops` reads Ollama's loaded models with `secondbrain_estate_status`,
   unloads a stale or crowding model only with `secondbrain_ollama_unload` on Kyle's card, and reads the pinned
   `OLLAMA_*` settings from the Ollama settings note in SecondBrain, never from `.env`. `approvals` answers what Kyle

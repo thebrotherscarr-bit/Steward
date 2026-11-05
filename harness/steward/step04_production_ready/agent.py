@@ -36,6 +36,10 @@ Environment variables:
     STEWARD_CODE_SEARCH        — "off" drops his search_code tool (default on): the workspace's tracked .py and .md
                                  files searched by meaning, embedded on the CPU with embeddinggemma-2:270m; the
                                  vectors are kept in storage/code-search/embeddings.json (gitignored)
+    STEWARD_SANDBOX            — "hyperlight" runs CodeAct in MAF's Hyperlight sandbox and closes run_shell once
+                                 untrusted content is in his context (default off). Needs Windows Hypervisor
+                                 Platform; probed once at start, and if it cannot run, one line is logged and
+                                 nothing changes (<sandbox>)
 """
 
 from __future__ import annotations
@@ -110,6 +114,7 @@ from agent_framework import (
     tool,
     vectorstoremodel,
 )
+from agent_framework.hyperlight import FileMount as HyperlightFileMount, HyperlightCodeActProvider
 from agent_framework.monty import MontyCodeActProvider
 from agent_framework_monty import FileMount
 from agent_framework.ollama import OllamaChatClient, OllamaEmbeddingClient
@@ -1895,6 +1900,99 @@ def _build_shell() -> LocalShellTool:
 # </shell>
 
 
+# <sandbox>
+# STEWARD_SANDBOX=hyperlight (off by default; the operator, 2026-11-04: "go for it"): MAF's Hyperlight sandbox
+# (agent-framework-hyperlight 1.0.0b261030, hyperlight-sandbox 0.8.0), a micro-VM per run on Windows Hypervisor Platform.
+#   * CodeAct: HyperlightCodeActProvider in place of MontyCodeActProvider, which "Mirrors
+#     agent_framework_hyperlight.HyperlightCodeActProvider" (agent_framework_monty/_provider.py:23). Given no host tools,
+#     as Monty is (FIDES does not see host-tool calls inside generated code). Its files are mounts under /input, copied
+#     into a per-sandbox temp folder (_execute_code_tool.py:645-658, :805-813), so harness/ is read-only to it, as to Monty.
+#   * The shell: MAF's own advice is "For untrusted input prefer a sandboxed executor (e.g. DockerShellTool or
+#     HyperlightCodeActProvider)" (agent_framework_tools/shell/_tool.py:178-181; _policy.py:34). Hyperlight's guest runs
+#     Python, not bash, so a run_shell after untrusted content (a web page, a note, an Estate log) is not run on the host:
+#     SANDBOX_SHELL_REFUSAL is his tool result and sends the step to execute_code. "Untrusted" is FIDES's own context label
+#     (LabelTrackingFunctionMiddleware puts it in context.metadata["context_label"], security.py:1976-1977) when FIDES is
+#     wired, and in any case a call this session made to one of the untrusted sources (_SANDBOX_UNTRUSTED_SOURCES).
+#   * The probe, once per process: what MAF's registry does on first use (_SandboxRegistry._build_sandbox,
+#     _execute_code_tool.py:1502-1516): a Sandbox on the wasm backend, then run("None"). The backend's native module loads
+#     winhvplatform.dll and fails with "Windows Hypervisor Platform is not available on this system". Never run when the
+#     switch is off: importing the guest (python_guest.path) copies it to %LOCALAPPDATA% (python_guest/path.py:51).
+#   * Off, or unavailable: one line is logged ("Hyperlight sandbox off: <reason>") and the build is today's exactly.
+SANDBOX_ENV = "STEWARD_SANDBOX"
+SANDBOX_OFF = "Hyperlight sandbox off: %s"
+SANDBOX_SHELL_REFUSAL = (
+    "run_shell did not run: untrusted content (a web page, a note or an Estate log) is in your context and the "
+    "Hyperlight sandbox is on (STEWARD_SANDBOX=hyperlight), so no command runs on the host for the rest of this session. "
+    "Do this step in Python with execute_code, which runs in the sandbox (the workspace's harness folder is at "
+    "/input/harness), or tell Kyle it needs the shell and a new session."
+)
+_SANDBOX_UNTRUSTED_KEY = "steward_untrusted_in_context"
+_SANDBOX_STATE: dict[str, bool] = {}  # the probe's answer, once per process
+
+
+def _probe_hyperlight() -> None:
+    """Start MAF's Hyperlight sandbox as its registry does on first use, and run nothing; raises when it cannot run."""
+    from hyperlight_sandbox import Sandbox  # noqa: PLC0415
+
+    Sandbox(backend="wasm").run("None")
+
+
+def hyperlight_sandbox_on() -> bool:
+    """Whether CodeAct and the untrusted shell go through Hyperlight: STEWARD_SANDBOX is "hyperlight" and the probe ran.
+    Decided once per process; when it is off, one line says why. Never raises."""
+    if "on" not in _SANDBOX_STATE:
+        reason = None
+        if os.environ.get(SANDBOX_ENV, "").strip().lower() != "hyperlight":
+            reason = f"{SANDBOX_ENV} is not hyperlight"
+        else:
+            try:
+                _probe_hyperlight()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:  # noqa: BLE001 - a PyO3 panic is a BaseException; start never fails
+                text = str(exc).strip().splitlines()
+                reason = f"{type(exc).__name__}: {text[0] if text else 'no message'}"
+        if reason is None:
+            logger.info("Hyperlight sandbox on: CodeAct and the shell after untrusted content run in it.")
+        else:
+            logger.warning(SANDBOX_OFF, reason)
+        _SANDBOX_STATE["on"] = reason is None
+    return _SANDBOX_STATE["on"]
+
+
+def HYPERLIGHT_MOUNTS() -> list[HyperlightFileMount]:
+    """CODEACT_MOUNTS for Hyperlight: the harness folder at /input/harness (its mounts live under /input)."""
+    harness = _WORKING_DIR / "harness"
+    return [HyperlightFileMount(host_path=harness, mount_path="harness")] if harness.is_dir() else []
+
+
+def codeact_provider() -> ContextProvider:
+    """His CodeAct: MAF's Hyperlight provider when the sandbox is on (hyperlight_sandbox_on), else Monty, as before."""
+    if hyperlight_sandbox_on():
+        return HyperlightCodeActProvider(approval_mode="never_require", file_mounts=HYPERLIGHT_MOUNTS())
+    return MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())
+
+
+async def sandbox_untrusted_shell(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware, innermost (inside FIDES's label tracker), only when the sandbox is on: a run_shell called
+    with untrusted content in his context gets SANDBOX_SHELL_REFUSAL and runs nothing; a call to an untrusted source marks
+    the session."""
+    name = context.function.name
+    session = context.session or _RUN_SESSION.get()
+    if name == "run_shell":
+        label = context.metadata.get("context_label")
+        seen = session is not None and bool(session.state.get(_SANDBOX_UNTRUSTED_KEY))
+        if seen or getattr(label, "integrity", None) == IntegrityLabel.UNTRUSTED:
+            context.result = SANDBOX_SHELL_REFUSAL
+            return
+    await call_next()
+    if name in _SANDBOX_UNTRUSTED_SOURCES and session is not None:
+        session.state[_SANDBOX_UNTRUSTED_KEY] = True
+
+
+# </sandbox>
+
+
 # <ollama_options>
 # Step 4, 4.2: the Ollama options sent with every model call by Steward and his team (MAF's OllamaChatOptions):
 # his own window, so it never depends on the server's default (2026-11-03: the app's context setting was set to 32K
@@ -2699,6 +2797,9 @@ _UNTRUSTED_NOTE_READS = frozenset(f"secondbrain_{name}" for name in ("search_not
 _DOOR_READS = frozenset({*(f"atlas_{name}" for name in ("git", "git_diff", "records")), PR_CHECKS_TOOL})
 _ESTATE_READ_TOOLS = frozenset(f"secondbrain_{name}" for name in ESTATE_READS)  # the Estate's reads fetch data too
 _WEB_READS = frozenset(f"secondbrain_{name}" for name in ("web_search", "web_fetch"))  # WebResearchAgent's fetchers
+# What puts untrusted content in his context, for the sandbox's shell (<sandbox>): his notes, the Estate's logs, the web,
+# and the background agents' results, which carry WebResearchAgent's pages and which FIDES does not label (#7455 B1).
+_SANDBOX_UNTRUSTED_SOURCES = _UNTRUSTED_NOTE_READS | _ESTATE_READ_TOOLS | _WEB_READS | {"background_agents_get_task_results"}
 
 
 def safety_observe_on() -> bool:
@@ -2810,6 +2911,7 @@ _PROVIDER_SOURCES: tuple[tuple[type, str], ...] = (
     (FileMemoryProvider, "memory"),
     (MemoryContextProvider, "memory"),
     (MontyCodeActProvider, "codeact"),
+    (HyperlightCodeActProvider, "codeact"),
     (BackgroundAgentsProvider, "background"),
     (TodoProvider, "todos"),
     (AgentModeProvider, "modes"),
@@ -3135,7 +3237,8 @@ async def build_steward_agent(
             )
             # And pr_checks over it, one per build like the door itself: a pull request's checks, waited for.
             part3_tools.extend([door, pr_checks_tool(door)])
-        part3_providers: list[Any] = [MontyCodeActProvider(approval_mode="never_require", file_mounts=CODEACT_MOUNTS())]
+        # STEWARD_SANDBOX=hyperlight: MAF's Hyperlight CodeAct, if it can run here; Monty otherwise (<sandbox>).
+        part3_providers: list[Any] = [codeact_provider()]
         # The MCP tools whose content is untrusted (his notes, the Estate): their error text is withheld from him.
         untrusted_sources: list[Any] = []
         if secondbrain_client is not None:
@@ -3256,6 +3359,8 @@ async def build_steward_agent(
                 withhold_untrusted_errors(untrusted_sources),
                 # ADR-0001 item 8: FIDES records what it would block, last (fides_observer); STEWARD_SAFETY_OBSERVE=off drops it.
                 *(fides_observer() if fides_on() else []),
+                # STEWARD_SANDBOX=hyperlight: innermost, inside FIDES's labels, the shell after untrusted content (<sandbox>).
+                *([sandbox_untrusted_shell] if hyperlight_sandbox_on() else []),
             ],
             mode_provider=mode_provider,
             todo_provider=todo_provider,
