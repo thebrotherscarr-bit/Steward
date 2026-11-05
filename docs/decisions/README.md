@@ -24,6 +24,20 @@ The operator's ruling, 2026-11-05: "make this the standard moving forward, this 
 - Stale documents elsewhere (other repositories' READMEs, the ground's SPEC.md, SecondBrain notes) are annotated with
   a dated pointer here, never rewritten.
 
+## Where we adapt MAF's process (marked 2026-11-05)
+
+MAF's records and templates are followed as they ship, with these adaptations, each for a reason of this Estate:
+
+- **Deciders and contact.** MAF lists contributors by GitHub id. Here `contact` and `deciders` are Kyle: the work is
+  his and he is the only decider; no hand or agent is named.
+- **Acceptance.** MAF accepts an ADR by approving its pull request. Here acceptance is Kyle's word, quoted with its date
+  in the ADR; the pull request lands when its checks pass.
+- **Status.** The template's values are used (`proposed`, `rejected`, `accepted`, `deprecated`,
+  `superseded by [ADR-NNNN](...)`). A decision replaced only in part keeps `accepted` and adds
+  `; superseded in part by [ADR-NNNN](...)`, the template's `superseded by` narrowed to a part; a dated note under its
+  heading says what changed and what still stands. The ADR that supersedes says so under its own heading.
+- **Headings.** As in MAF's template and ADRs, the heading is the title alone; the number lives in the file name.
+
 ## Adding one
 
 1. Copy `adr-template.md` (or the short form, `adr-short-template.md`) to `NNNN-title-with-dashes.md`, where `NNNN`
@@ -44,7 +58,7 @@ The operator's ruling, 2026-11-05: "make this the standard moving forward, this 
 
 | ADR | Title | Status |
 |---|---|---|
-| [0001](0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0004 |
+| [0001](0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0002, 0003 and 0004 |
 | [0002](0002-one-model-for-everything.md) | One model for everything | accepted |
 | [0003](0003-ag-ui-is-the-default-transport.md) | AG-UI is the default transport, Responses the fallback | accepted |
 | [0004](0004-jesster-is-the-center.md) | Jesster is the center; Neiro retired as a gate; Aurora parked | accepted |

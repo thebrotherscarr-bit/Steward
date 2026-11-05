@@ -150,7 +150,7 @@ chain of steps, built on the Flows shelf's canvas ("+ New flow") and saved by it
 
 ```mermaid
 flowchart LR
-    C["Jesster's clock<br/>(an automation: flow, when, on/off)"] -->|skip if Steward is busy| R["run_recipe (MCP 43121)"]
+    C["Jesster's clock<br/>(an automation: flow, when, on/off)"] -->|an eval recipe skips if Steward is busy| R["run_recipe (MCP 43121)"]
     N["Run now (Flows shelf)"] --> R
     R --> W["MAF workflow<br/>one executor per step"]
     W --> Sm["summarize<br/>(tool-less Steward run)"]
@@ -169,8 +169,10 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
 - **Whenever the operator says,** day or night: from a flow, an automation, or a request in chat (planned and
   carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
 - An eval flow is `eval_start` then `eval_wait`.
-- Every run is scored by MAF's `evaluate_agent` / `evaluate_workflow` with local evaluators, and lands in the history
-  with its set version. A gating tier runs each case once.
+- Every eval run is scored by MAF's `evaluate_agent` with `LocalEvaluator`, and lands in the history with its set
+  version; the steps set scores each workflow step with its own `LocalEvaluator` (`evals.py`). A gating tier runs each
+  case once. Recipe (flow) runs are not evaluated yet: `evaluate_workflow` on a flow's run is the Flows shelf's piece 5
+  (corrected 2026-11-05: this line said every run was scored by `evaluate_workflow`, which nothing calls yet).
 
 ## 5. The rules that bind the design
 
@@ -180,8 +182,11 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   Every file tool refuses `.env*`.
 - **The Archive never goes on GitHub.** Not a file, a path, a fixture or a log that carries it. `worlds/` stays out of
   the core's remote.
-- **The gate is Kyle's.** Every write, shell command, commit, push and Estate change is his card. No force-push, tag,
-  release or history rewrite without his word for that act. No agent puts its own name on his work.
+- **The gate is Kyle's.** For Steward, every write, shell command, commit, push and Estate change is his card. No
+  force-push, tag, release or history rewrite without his word for that act. No agent puts its own name on his work.
+  The hand's exception (the ground's CLAUDE.md RULE 12, 2026-11-03 and 11-04): until Steward runs it reliably, the
+  coding agent working for the operator runs git and GitHub from its own shell for Steward, Jesster, Aurora, Neiro and
+  the ground (branches, commits, pushes, pull requests, merging on green), with Kyle as author and no cards.
 - **The sitting rule (RULE 9).** Nothing in Manjuel's ground is edited while a sitting is open.
 - **Local first (RULE 4, as amended).** Ollama on this PC; his own integrations on his own accounts; a hosted route
   only on his terms.

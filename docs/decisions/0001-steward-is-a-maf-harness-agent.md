@@ -1,11 +1,11 @@
 ---
-status: accepted; superseded in part by [ADR-0004](0004-jesster-is-the-center.md)
+status: accepted; superseded in part by [ADR-0002](0002-one-model-for-everything.md), [ADR-0003](0003-ag-ui-is-the-default-transport.md) and [ADR-0004](0004-jesster-is-the-center.md)
 contact: Kyle
 date: 2026-10-30
 deciders: Kyle
 ---
 
-# 0001: Steward is a MAF harness agent; Manjuel, SecondBrain and Atlas are its local platform
+# Steward is a MAF harness agent; Manjuel, SecondBrain and Atlas are its local platform
 
 > **Moved here 2026-11-05** from the SecondBrain note `adr-0001-steward-is-a-maf-harness-agent--a9b317`, where it
 > was accepted by Kyle on 2026-10-30. The text is the note's, unchanged; only its sections are arranged under the

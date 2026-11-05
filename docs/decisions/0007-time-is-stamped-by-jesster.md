@@ -5,7 +5,7 @@ date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0007: Every turn's time is stamped by Jesster
+# Every turn's time is stamped by Jesster
 
 ## Context and Problem Statement
 

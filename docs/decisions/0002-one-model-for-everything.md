@@ -5,7 +5,9 @@ date: 2026-11-05
 deciders: Kyle
 ---
 
-# 0002: One model for everything
+# One model for everything
+
+Supersedes in part [ADR-0001](0001-steward-is-a-maf-harness-agent.md): the models it names give way to one model, `steward:1`, for every role.
 
 ## Context and Problem Statement
 
