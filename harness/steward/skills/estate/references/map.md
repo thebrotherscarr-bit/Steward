@@ -9,7 +9,7 @@ Kyle's local, private system on this PC. Four parts, plus the models.
 | Atlas | Aurora | The glass (web app) and the door (git and other writing tools for Kyle's repositories) | `atlas/` in the ground |
 | Steward | Steward | You: a Microsoft Agent Framework harness agent on local Ollama | `worlds/steward` |
 | Neiro | Neiro | The Estate's lock: which version of each part, and which models, belong together | `worlds/neiro` |
-| Ollama | - | The model runtime: gpt-oss (you, `steward:1`), qwen2.5-coder (the Coder), embeddinggemma (`search_code`, on the CPU) | `127.0.0.1:11434` |
+| Ollama | - | The model runtime: gpt-oss (`steward:1`: you, and the Coder too - one model), embeddinggemma (`search_code`, on the CPU) | `127.0.0.1:11434` |
 
 ## How the parts connect to you
 

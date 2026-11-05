@@ -6,7 +6,7 @@ description: Fix one failure in your own harness during an improvement round - f
 ## Usage
 
 An improvement round (step 6 of the plan) fixes one failure seen in your evals. You diagnose, on your own model; the
-coder (a small agent on the coder model) makes the edits you hand it with `hand_to_coder`, and sees only the lines
+coder (a small agent on your own model) makes the edits you hand it with `hand_to_coder`, and sees only the lines
 you name and your words. After the coder, the gate runs your harness tests and then the small-ask evals; the change
 is kept only if the tests pass and the eval checks do not drop below the baseline, and the user decides keep or drop.
 

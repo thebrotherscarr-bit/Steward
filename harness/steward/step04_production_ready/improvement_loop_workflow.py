@@ -21,8 +21,9 @@ the command line) takes the handoff's first top priority (round_task, step 6, 6.
 * The fixer is split in two (2026-11-03, the operator: "the fixer doesn't need some big huge model"), Aider's
   architect and editor in MAF's pieces. Steward diagnoses on his own model (gpt-oss, which reads long prompts
   fast): he finds the failure, its cause and the exact lines, and hands each edit to the coder with his
-  hand_to_coder tool. The coder is a small MAF Agent on the coder model (STEWARD_CODER_MODEL,
-  qwen2.5-coder:14b) with only MAF's file tools: reads run at once and every write asks its card. Its
+  hand_to_coder tool. The coder is a small MAF Agent on Steward's own model (one model, the operator's ruling
+  2026-11-05; STEWARD_CODER_MODEL names another) with only MAF's file tools: reads run at once and every
+  write asks its card. Its
   prompt is the brief and the lines it changes, not the harness: round 1's fixer, Steward's whole harness on
   the coder model, opened at 13,466 tokens before reading any code and read about 50 tokens a second.
   The coder is a workflow step, not an agent-as-tool, because MAF does not carry a child agent's approvals to
@@ -91,7 +92,7 @@ GATE_CHECKS: tuple[tuple[str, ...], ...] = (
 )
 MAX_ATTEMPTS = 3
 # The coder's window: its prompt is the brief and the lines it changes, a few thousand tokens, so 16K is ample and
-# leaves the card room (qwen2.5-coder:14b is 12.1 GB at 32K, measured 2026-11-03).
+# leaves the card room (a separate coder, qwen2.5-coder:14b, was 12.1 GB at 32K, measured 2026-11-03).
 FIXER_CONTEXT = 16_384
 # The most lines one edit may hand the coder: a function's worth, so its prompt stays short.
 EDIT_SPAN_MAX = 80
@@ -221,12 +222,12 @@ def hand_to_coder(
 
 
 def fixer_client() -> Any:
-    """The coder model's chat client, with Steward's own governance and malformed-tool-call retry."""
+    """The coder's chat client (Steward's own model unless STEWARD_CODER_MODEL names another), with Steward's
+    governance, malformed-tool-call retry and Ollama timings, so a coder on another model shows its loads in traces."""
     from agent_framework_ollama import OllamaChatClient  # noqa: PLC0415
 
-    return steward._retry_malformed_tool_calls(  # noqa: SLF001
-        OllamaChatClient(model=steward._CODER_MODEL, middleware=steward._build_governance_middleware())  # noqa: SLF001
-    )
+    client = OllamaChatClient(model=steward._coder_model(), middleware=steward._build_governance_middleware())  # noqa: SLF001
+    return steward._record_ollama_timings(steward._retry_malformed_tool_calls(client))  # noqa: SLF001
 
 
 def build_coder(client: Any = None) -> Agent[Any]:
