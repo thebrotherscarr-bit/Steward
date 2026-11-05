@@ -5993,3 +5993,45 @@ def test_the_eval_answers_twenty_rounds_of_cards_and_a_looping_run_fails_with_a_
         assert evals.raised(BaseExceptionGroup("g", [evals.CardsUnanswered()])) == reason
     finally:
         evals.CASE_ERRORS.pop("q", None)
+
+
+def test_a_steps_run_records_its_check_and_repair_progress_in_the_eval_history(monkeypatch: Any) -> None:
+    """The steps set's history line carries the run's StewardProgress lines (CHECK's "checking: ...", "check failed",
+    REPAIR's "repair attempt n/3"), in order, as "progress", so SecondBrain's Evals shelf can show them; a set with no
+    progress events writes no "progress" key."""
+    import contextlib
+    import json
+    from types import SimpleNamespace
+
+    import evals
+    import steward_workflow as wf
+    from agent_framework import EvalResults
+
+    said = ["checking: pytest -q harness/steward/working/sample-project", "check failed", "repair attempt 1/3"]
+
+    async def built(stack: Any, **build: Any) -> Any:
+        return contextlib.nullcontext(), None
+
+    async def progress_events(workflow: Any, query: str, approve: set[str]) -> list[Any]:
+        return [wf.StewardProgress(text, executor_id="check") for text in said]
+
+    class Scoring:
+        def __init__(self, *checks: Any) -> None:
+            pass
+
+        async def evaluate(self, items: Any, eval_name: str = "") -> Any:
+            return EvalResults(provider="local", result_counts={"passed": 0, "failed": 1})
+
+    monkeypatch.setattr(evals, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evals, "configure_otel_providers", lambda **kwargs: None)
+    monkeypatch.setattr(evals, "discount_bug_planted", contextlib.nullcontext)
+    monkeypatch.setattr(evals, "sample_project_as_committed", lambda: None)
+    monkeypatch.setattr(evals, "LocalEvaluator", Scoring)
+    monkeypatch.setattr(evals, "_run_workflow_answering_cards", progress_events)
+    monkeypatch.setattr(wf, "build_steward", built)
+    assert asyncio.run(evals.steps_main()) == 1
+    entry = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+    assert (entry["set"], entry.get("progress")) == ("steps", said), entry
+
+    evals.record_history("small", {"": SimpleNamespace(passed=1, total=1, items=[])}, 0)
+    assert "progress" not in json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
