@@ -50,10 +50,13 @@ def data_folder(source: dict[str, Any]) -> Path:
 
 def data_fingerprint(folder: Path) -> str:
     """The sha256 of every file under a pinned data folder (paths and contents, CRLF read as LF so a Windows checkout
-    and GitHub's agree): a change to the snapshot is a new set version, as a change to a case is."""
+    and GitHub's agree; the files in order of their "/"-separated names, which Windows' case-blind Path order is not):
+    a change to the snapshot is a new set version, as a change to a case is."""
     digest = hashlib.sha256()
-    for path in sorted(p for p in folder.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
-        digest.update(path.relative_to(folder).as_posix().encode("utf-8") + b"\0")
+    files = {p.relative_to(folder).as_posix(): p for p in folder.rglob("*") if p.is_file() and "__pycache__" not in p.parts}
+    for name in sorted(files):
+        path = files[name]
+        digest.update(name.encode("utf-8") + b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
     return digest.hexdigest()
 
