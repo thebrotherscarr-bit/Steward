@@ -32,6 +32,14 @@ was never merged and has no entry.
 
 ### Added
 
+- The forward plan as ExecPlans (the doc standard; `.agent/PLANS.md`): `docs/plans/0001-capability-evals-build.md`
+  (ADR-0012 and spec 001: the 60 cases in tiers, Milestones 1 and 2 built by #164),
+  `0002-flows-steward-card-and-automation-save.md` (ADR-0008, ADR-0009) and `0003-ag-ui-step-3.md` (ADR-0003), with
+  the plans index and the doc map. `docs/ARCHITECTURE.md` brought current: the notes-only stdio adapter (ADR-0010),
+  the Estate's tools on 43110, MCP's loopback Origin check (Jesster #87), the eval flow's start check (Jesster #92,
+  #161), BFCL's first calibration run (36/80), the capability map and the design among the data, the rules "every
+  capability has an eval" and the doc standard, the Charter at v4.12, and section 6 rewritten in order with each
+  item's ADR and ExecPlan.
 - Everything Steward does has an eval (the operator, 2026-11-05: "all modules and skills, any capabilities always
   come with an eval set for testing. Everything Steward does has an eval, and he can prove himself."). ADR-0012 is
   amended and AGENTS.md's rules say so: a new module, skill, tool or capability lands with its eval case(s) in the
