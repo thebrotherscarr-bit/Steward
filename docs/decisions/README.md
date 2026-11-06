@@ -68,3 +68,4 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0008](0008-the-flows-shelf.md) | The Flows shelf | accepted; superseded in part by 0009 |
 | [0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) | Flows are ordered tool chains; automations schedule flows | accepted |
 | [0010](0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
+| [0011](0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | proposed |
