@@ -32,6 +32,9 @@ was never merged and has no entry.
 
 ### Added
 
+- The T3 bounds baseline in `harness/steward/evals/baselines.json` (`bounds` v1): 4 of 10 cases, 18 of 26 checks, the
+  first run of 2026-11-05 (19:55-20:21, in-process, `steward:1`, head `7b25232`), with the failing cases named. A
+  record to measure the safety guards against, not a gate.
 - The A2UI pilot, Milestones 2 and 3 (ADR-0013, ExecPlan 0004): Jesster carries the plan card's surface on the card
   (Jesster #96) and draws the card from it with `@a2ui/react` 0.15.0 and its own components, today's card the
   fallback (Jesster #97). ExecPlan 0004's Progress, Surprises and Outcomes written; ExecPlan 0003's Milestone 4 done.
