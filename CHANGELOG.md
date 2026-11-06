@@ -27,6 +27,12 @@ was never merged and has no entry.
   Session-20261105-1110-535a took 15 minutes and 18 model calls before its card: 13 `search_code`, a first search that
   rebuilt the index (85.7 s), and four 43K-token turns of about 84 s each after a whole-file read.
 
+- The Flows shelf's run history and graph (ADR-0008, ADR-0009): his MCP host serves `recipe_graph` (a recipe built as
+  its MAF workflow: `Workflow.to_dict()` and WorkflowViz's Mermaid) and `recipe_runs` (one flow's runs, newest first,
+  each step's state and ms read from the run's MAF events), both read-only. `run_recipe` keeps the flow's id and the
+  trigger (`now` or `schedule`); `recipe_status` carries the steps so far; a step that fails adds MAF's non-fatal
+  `error` event with its executor id. Restart required (the MCP host).
+
 - The Estate's design docs: `docs/ARCHITECTURE.md` (the parts, the wires with their ports and protocols, the data
   each keeps, how a request, an automation and an eval flow, the rules and the build plan) and `docs/decisions/`, the
   decision records in MAF's own format (MAF's `adr-template.md` and `adr-short-template.md`, copied unchanged), with
