@@ -68,6 +68,7 @@ there in the same pull request.)_
 | A9 | Report once: what ran and what the checks showed; no repeated answer, no harness reminder repeated | Charter, How a request runs 6 | partly | all asks: `no_nudge_in_reply`, `answer_on_topic`; "once" is not scored |
 | A10 | Tools are called as tools, never written out as text | Charter, How a request runs 1 | untested | the harness repairs text calls (gate tests `test_a_tool_call_written_as_text_*`); no case counts them |
 | A11 | A reply written on a card is Kyle's instruction and is followed | Charter, Your tools (last line) | untested | the eval policy answers cards yes or no, with no words |
+| A12 | Each step of a request is announced as it runs, by its executor's id (over AG-UI, STEP_STARTED and STEP_FINISHED), so the Agent tab and the Phone view show which step he is in | ADR-0003; ExecPlan 0003 (AG-UI step 3) | partly | steps: `plan_step` and `execute_step` find each step's work by its executor's own events (in-process); the host's side is gate test `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor`, the client's Jesster's `agui.test.cjs` |
 
 ### B. Where a message comes from, and time
 
@@ -198,7 +199,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 
 | | Capabilities | Covered | Partly | Untested |
 |---|---|---|---|---|
-| A. How a request runs | 11 | 3 | 4 | 4 |
+| A. How a request runs | 12 | 3 | 5 | 4 |
 | B. Sources and time | 6 | 0 | 1 | 5 |
 | C. The Estate's tools | 10 | 0 | 2 | 8 |
 | D. Flows and automations | 3 | 0 | 0 | 3 |
@@ -211,7 +212,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | K. Improvement rounds | 1 | 0 | 0 | 1 |
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
-| **Total** | **73** | **5** | **13** | **55** |
+| **Total** | **74** | **5** | **14** | **55** |
 
 ## The proposed cases
 

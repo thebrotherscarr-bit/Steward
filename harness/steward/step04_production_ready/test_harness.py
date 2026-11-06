@@ -7250,6 +7250,48 @@ def test_the_ag_ui_host_streams_the_workflow_and_raises_a_write_card_as_an_inter
     assert types[-1] == "RUN_FINISHED" and not refused[-1].get("outcome"), refused[-1]
 
 
+def test_the_ag_ui_host_announces_each_workflow_step_by_its_executor() -> None:
+    """Capability A12 (ADR-0003; ExecPlan 0003, AG-UI step 3): MAF's AG-UI host sends a STEP_STARTED and a STEP_FINISHED
+    per executor, named by the executor's id, which Jesster's agui.cjs turns into the step line of the Agent tab and the
+    Phone view. MAF wraps each superstep in its own pair ("superstep:<n>"), which the client leaves out. Measured with a
+    scripted model, 2026-11-05: the request runs route, explore, plan, read_plan, then ask_approval raises the card,
+    every step finished before RUN_FINISHED; the Approve runs ask_approval again (it takes the answer), then execute.
+    Red when the host stops announcing the steps or an executor's id changes under the client."""
+    import ag_ui_app
+    import steward_workflow as wf
+    from starlette.testclient import TestClient
+
+    plan = '{"type": "approval", "questions": [{"message": "Write x.py."}], "steps": ["Write x.py"]}'
+    replies: list[Any] = [plan, "Nothing to write after all."]
+    calls: list[Any] = []
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies, client.calls = replies, calls
+        return client
+
+    def steps(events: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        return [(e["type"], e["stepName"]) for e in events if e["type"] in ("STEP_STARTED", "STEP_FINISHED") and not e["stepName"].startswith("superstep:")]
+
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        first = _ag_ui_events(http, {"threadId": "t-steps", "runId": "r0", "messages": [{"id": "u1", "role": "user", "content": "Write x.py."}]})
+        seen = steps(first)
+        started = [name for kind, name in seen if kind == "STEP_STARTED"]
+        assert started == [wf.ROUTE_STEP, wf.EXPLORE_STEP, wf.PLAN_STEP, wf.READ_PLAN_STEP, wf.ASK_APPROVAL_STEP], seen
+        assert seen == [(kind, name) for name in started for kind in ("STEP_STARTED", "STEP_FINISHED")], "each finished before the next"
+        assert any(e["type"] == "STEP_STARTED" and e["stepName"].startswith("superstep:") for e in first), "MAF's supersteps, left out by the client"
+        assert first[-1]["type"] == "RUN_FINISHED" and first[-1]["outcome"]["type"] == "interrupt", "the plan's card"
+        [card] = first[-1]["outcome"]["interrupts"]
+        second = _ag_ui_events(http, {
+            "threadId": "t-steps", "runId": "r1", "messages": [],
+            "resume": [{"interruptId": card["id"], "status": "resolved", "payload": {"approved": True}}],
+            "forwardedProps": {"checkpointId": card["metadata"]["agent_framework"]["checkpoint_id"]},
+        })
+    resumed = [name for kind, name in steps(second) if kind == "STEP_STARTED"]
+    assert resumed[:2] == [wf.ASK_APPROVAL_STEP, wf.EXECUTE_STEP], steps(second)
+    assert {wf.CHECK_STEP, wf.REPAIR_STEP, wf.COMMIT_STEP, wf.REPORT_STEP, wf.ANSWER_STEP} == {"check", "repair", "commit", "report", "answer"}, "the names the step line knows"
+
+
 def test_the_bfcl_checker_scores_calls_as_bfcls_ast_check_does() -> None:
     """ext-bfcl's bfcl_ast_match, as BFCL's AST checker: the function, its required parameters, no parameter the answer
     lacks, each value among its acceptable ones (strings case- and punctuation-blind, an int for a float, "" meaning it
@@ -8405,11 +8447,11 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 73
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 74  # A12 added by ExecPlan 0003
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12"}, sorted(required)
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() for t in c.tools} == evals.steward_tool_names()

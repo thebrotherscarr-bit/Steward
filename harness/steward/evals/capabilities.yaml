@@ -54,6 +54,11 @@ capabilities:
     title: "A reply written on a card is Kyle's instruction and is followed"
     source: "Charter, Your tools (last line)"
     tier: T2
+  - id: A12
+    title: "Each step of a request is announced as it runs, by its executor's id (over AG-UI, STEP_STARTED and STEP_FINISHED), so the Agent tab and the Phone view show which step he is in"
+    source: "ADR-0003; ExecPlan 0003 (AG-UI step 3)"
+    tier: T0
+    required: true
   - id: B1
     title: "`[from the PC (Agent tab)]`: everything, with cards"
     source: "Charter, Where a message comes from; ADR-0007"

@@ -32,6 +32,11 @@ was never merged and has no entry.
 
 ### Added
 
+- AG-UI step 3, Milestone 1 (ADR-0003, ExecPlan 0003): capability A12 (each step of a request is announced as it
+  runs, by its executor's id), in spec 001 and `capabilities.yaml`, required and named by the steps set's case; gate
+  test `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor` holds the host's STEP_STARTED/STEP_FINISHED
+  per executor. Jesster #93 turns them into the window's `workflow_step` events. The plan records what the host
+  measurably sends (MAF's `superstep:<n>` pairs; a card's step runs again on the resume).
 - The forward plan as ExecPlans (the doc standard; `.agent/PLANS.md`): `docs/plans/0001-capability-evals-build.md`
   (ADR-0012 and spec 001: the 60 cases in tiers, Milestones 1 and 2 built by #164),
   `0002-flows-steward-card-and-automation-save.md` (ADR-0008, ADR-0009) and `0003-ag-ui-step-3.md` (ADR-0003), with
