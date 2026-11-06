@@ -32,6 +32,8 @@ was never merged and has no entry.
 
 ### Added
 
+- AG-UI step 3, Milestones 2 and 3 (ADR-0003, ExecPlan 0003): the Agent tab (Jesster #94) and the Phone view
+  (Jesster #95) draw the turn's step line from the host's step events. ExecPlan 0003's Progress and Outcomes updated.
 - AG-UI step 3, Milestone 1 (ADR-0003, ExecPlan 0003): capability A12 (each step of a request is announced as it
   runs, by its executor's id), in spec 001 and `capabilities.yaml`, required and named by the steps set's case; gate
   test `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor` holds the host's STEP_STARTED/STEP_FINISHED

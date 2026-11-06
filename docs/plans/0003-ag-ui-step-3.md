@@ -34,9 +34,15 @@ Jesster's own card code.
   `workflow_step` events, with a test (Jesster #93). Steward's side: gate test
   `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor` and capability A12 (this repository's pull
   request for the plan's update).
-- [ ] Milestone 2: the Agent tab's console draws the turn's steps from those events.
-- [ ] Milestone 3: the Phone view draws the same for a phone turn.
-- [ ] Milestone 4 (pilot, on the operator's word to start it): A2UI for the plan's approval card only.
+- [x] (2026-11-05 20:28) Milestone 2: the Agent tab draws the turn's step line from those events (Jesster #94):
+  `stepLine` in `agentConsole.ts`, `StepLine.tsx`, drawn by `AgentView.tsx` above the turn's output.
+- [x] (2026-11-05 20:33) Milestone 3: the Phone view draws the same for a phone turn (Jesster #95): `phoneSession`
+  and `keepSteps` in `agentConsole.ts`, `PhoneView.tsx`.
+- [ ] The live acceptance below, on SecondBrain's build carrying Jesster #95 (the operator's build to install; no
+  build or host was restarted by this work).
+- [ ] Milestone 4 (pilot): A2UI for the plan's approval card only. The operator gave his word on 2026-11-05 ("do the
+  A2UI work, as well"); it is carried out under its own ADR and ExecPlan, as this plan's Milestone 4 asked:
+  ADR-0013 and `docs/plans/0004-a2ui-pilot-plan-card.md`.
 
 ## Surprises & Discoveries
 
@@ -101,7 +107,18 @@ Jesster's own card code.
 
 ## Outcomes & Retrospective
 
-Nothing to report yet.
+2026-11-05, Milestones 1 to 3. The step events Steward's AG-UI host already sent now reach the operator: the Agent
+tab and the Phone view draw a line of steps (plan, approve, execute, check, repair, commit, report) for the turn in
+progress, each running, done or failed, a waiting card shown on its step and "check, attempt 2" counted. Nothing in
+Steward's running code changed; the wire is held on both sides: Steward's gate test
+`test_the_ag_ui_host_announces_each_workflow_step_by_its_executor` and capability A12 (required, `evals.py validate`)
+for the host, Jesster's `agui.test.cjs` and `agentConsole.test.ts` for the client and both views, each red when its
+piece is unplugged. What remains: the live acceptance on the operator's build, and Milestone 4 under its own plan.
+
+Lesson: the plan was written from the code's names and guessed "approve" for a step and an open step at a card;
+measuring the real host first (a scripted model through `build_ag_ui_app`, a few minutes) gave the true names, MAF's
+`superstep:<n>` pairs and the resume behaviour, and the client's own verifier (no RUN_FINISHED with a step open)
+before any UI was built.
 
 ## Context and Orientation
 
