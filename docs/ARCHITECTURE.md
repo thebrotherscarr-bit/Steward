@@ -98,7 +98,9 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
   MCP server and the door refuse a request whose `Origin` is not loopback with 403, and its recipe calls to Steward
   carry `_meta` and the request headers (Jesster #87).
 - **AG-UI** as MAF ships it (`agent-framework-ag-ui` 1.7.1, which pins `ag-ui-protocol` below 0.2). Approvals are
-  AG-UI interrupts; workflow steps are StepStarted and StepFinished events.
+  AG-UI interrupts; workflow steps are StepStarted and StepFinished events, one pair per executor (named by its id;
+  MAF adds a `superstep:<n>` pair per round), which Jesster's Agent tab and Phone view draw as the turn's step line
+  (AG-UI step 3, 2026-11-05: Jesster #93 to #95; capability A12).
 - **A2A** is deferred until a second autonomous agent exists; when it comes, it goes in Jesster, on loopback.
 - **A2UI** is planned as a pilot for approval cards only, after AG-UI step 2.
 - **Outside the PC:** Telegram and WhatsApp on his own accounts, outbound only (RULE 4 as amended 2026-11-04); GitHub
@@ -269,8 +271,8 @@ and automations per ADR-0009, Set up as automations, the prompt type removed, BF
    recipe run) ([ADR-0008](decisions/0008-the-flows-shelf.md),
    [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md),
    [ExecPlan 0002](plans/0002-flows-steward-card-and-automation-save.md)).
-4. **AG-UI step 3:** the console and the Phone view show the workflow's steps from AG-UI's STEP events; then the A2UI
-   pilot for approval cards, with its own ADR ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md),
+4. **AG-UI step 3:** the console and the Phone view show the workflow's steps from AG-UI's STEP events (built
+   2026-11-05, Jesster #93 to #95); then the A2UI pilot for approval cards, with its own ADR ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md),
    [ExecPlan 0003](plans/0003-ag-ui-step-3.md)).
 5. **Reach widens on each tier's bar:** GitHub for his own repository passes from the hand to Steward after T2; then
    Jesster, Manjuel and Aurora one at a time.
