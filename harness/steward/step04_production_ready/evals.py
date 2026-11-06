@@ -823,11 +823,12 @@ NOT_RUN_RESULTS = ('Error: Requested function "', "Error: Argument parsing faile
 
 def _calls_in_order(conversation: list[Any]) -> list[tuple[str, Any, str]]:
     """Every tool call in the run, in order, with its arguments and its outcome: "ran", "card" (left on an
-    approval card), "refused" (the plan-mode gate's corrective feedback) or "not run" (MAF never ran it:
+    approval card), "refused" (the plan-mode gate's corrective feedback, or a bound's refusal) or "not run" (MAF never ran it:
     NOT_RUN_RESULTS)."""
-    from agent import PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
+    from agent import BOUNDS_REFUSED, PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
-    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE)
+    # A bound's refusal (ADR-0014) is refused too: the call ran nothing.
+    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED)
     results = {
         content.call_id: str(content.result or "")
         for message in conversation or []
@@ -1787,11 +1788,12 @@ def standins_conversation(ask: str, events: list[Any]) -> list[Any]:
 
 def _run_calls(conversation: list[Any]) -> list[tuple[str, dict[str, Any], str, str]]:
     """Every tool call of a run once, in order: (name, arguments, outcome, call_id); the outcome "card" (it raised a
-    card: STANDINS_RUNS says its answer), "refused" (the plan-mode gate's corrective feedback), "not run" (MAF never
+    card: STANDINS_RUNS says its answer), "refused" (the plan-mode gate's corrective feedback, or a bound's refusal), "not run" (MAF never
     ran it: not offered, or its arguments did not parse) or "ran"."""
-    from agent import PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
+    from agent import BOUNDS_REFUSED, PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
-    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE)
+    # A bound's refusal (ADR-0014) is refused too: the call ran nothing.
+    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED)
     contents = [c for m in conversation or [] for c in getattr(m, "contents", None) or []]
     results = {c.call_id: str(c.result or "") for c in contents if c.type == "function_result"}
     carded = {c.function_call.call_id for c in contents if c.type == "function_approval_request" and c.function_call is not None}

@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-05, evening (ADRs 0001 to 0012, spec 001, ExecPlans 0001 to 0003).
+- **As of:** 2026-11-06 (ADRs 0001 to 0014, spec 001, ExecPlans 0001 to 0004).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -226,12 +226,19 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   Every file tool refuses `.env*`.
 - **The Archive never goes on GitHub.** Not a file, a path, a fixture or a log that carries it. `worlds/` stays out of
   the core's remote.
+- **The bounds are gates in code** ([ADR-0014](decisions/0014-the-bounds-are-gates-in-code.md), 2026-11-06). At the
+  call, before any card (`bounds_gate` and its auto-approval rule): any tool's path naming `.env*` or a key file, or a
+  path under `Desktop\Archive`, is refused; the host shell is refused once untrusted content (a note, an Estate read,
+  the web) is in the session, whatever the FIDES and sandbox switches say; a write to the ground is refused while a
+  sitting is open. At the request and the plan: a change asked from WhatsApp, or a change to the ground while a
+  sitting is open, is refused with no plan card.
 - **The gate is Kyle's.** For Steward, every write, shell command, commit, push and Estate change is his card. No
   force-push, tag, release or history rewrite without his word for that act. No agent puts its own name on his work.
   The hand's exception (the ground's CLAUDE.md RULE 12, 2026-11-03 and 11-04): until Steward runs it reliably, the
   coding agent working for the operator runs git and GitHub from its own shell for Steward, Jesster, Aurora, Neiro and
   the ground (branches, commits, pushes, pull requests, merging on green), with Kyle as author and no cards.
-- **The sitting rule (RULE 9).** Nothing in Manjuel's ground is edited while a sitting is open.
+- **The sitting rule (RULE 9).** Nothing in Manjuel's ground is edited while a sitting is open (held in code:
+  ADR-0014).
 - **Local first (RULE 4, as amended).** Ollama on this PC; his own integrations on his own accounts; a hosted route
   only on his terms.
 - **Each repository's CI and protected main is its gate.** Changes land only through a pull request whose checks

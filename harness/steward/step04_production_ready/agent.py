@@ -2162,6 +2162,253 @@ def sandbox_shell_closed(session: Any) -> bool:
 # </sandbox>
 
 
+# <bounds>
+# ADR-0014 (2026-11-06; the T3 bounds baseline at 7b25232, 4 of 10 cases): the bounds the Charter states, held in code
+# at the call itself, whatever the model does and whatever the FIDES and sandbox switches say. MAF's place for a refusal
+# is function middleware that sets context.result and does not call call_next (Learn, agents/middleware, "result
+# overrides"; as estate_door_gate and the plan-mode gate). MAF asks a tool's card before function middleware runs, so a
+# call the gate will refuse is let past its card by an auto-approval rule that asks the same question (bounds_refusal),
+# as the plan-mode gate's is: he reads the refusal, and the user never clicks Allow on something that is then refused.
+#   * Keys (RULE 7, P32): a file tool, the shell, the door or any tool's path argument naming a .env file (.env, .env.*)
+#     or a key file (KEY_FILE) is refused. The file store already refuses a .env read; this refuses the call itself,
+#     on every tool, before anything runs.
+#   * The Archive (RULE 1, P33): a path under Desktop\Archive, in any case and with either separator, after resolving
+#     it against his workspace (ARCHIVE_DIR), or written as ARCHIVE_PATH, is refused on every such tool.
+#   * The host shell after untrusted content (the Charter; P34): run_shell is refused once a call to one of the untrusted
+#     sources (_SANDBOX_UNTRUSTED_SOURCES: his notes, the Estate's reads, the web, a background agent's results) is in
+#     the session, or the workflow says one was read before the plan (UNTRUSTED_READ_KEY, carried to EXECUTE). MAF's
+#     own taint is FIDES's LabelTrackingFunctionMiddleware, which labels only when FIDES is wired (its sources are
+#     labelled by SecureMCPToolProxy, labelled_mcp_tool), so with the switch off nothing would be labelled; the gate keeps
+#     its own record, on the same sources, in the session's state.
+#   * The sitting (RULE 9, P29): while the operator's Manjuel sitting is open (sitting_open: the ground's
+#     sessions/sessions.jsonl, whose last line has no "ended" value, or an estate_status read this session that said
+#     sitting.open), a write to the ground is refused: a file write or a shell command naming a ground path
+#     (ground_path: under GROUND_DIR, not under its worlds/, each world its own repository), or a door write on the
+#     ground's repository ("research").
+BOUNDS_REFUSED = "Refused by a bound:"
+# The tools whose arguments are paths: MAF's file tools, his explorer's, the shell (its whole command), and any argument
+# whose name says it is a path; the door's arguments but a commit message (estate_door_gate reads them the same way).
+_PATH_ARGUMENTS = frozenset({"file_name", "directory", "glob_pattern", "path"})
+_PATH_LIKE_NAME = re.compile(r"path|file|dir|folder|glob", re.IGNORECASE)
+# A file that holds keys: any name starting .env (.env, .env.*, a .env* glob: the store's own test, _is_env_file), and the usual key and credential files.
+KEY_FILE = re.compile(
+    r"^(?:\.env.*|.+\.(?:pem|key|pfx|p12|jks|keystore)|id_(?:rsa|dsa|ecdsa|ed25519)|\.netrc|\.pypirc|\.git-credentials)$",
+    re.IGNORECASE,
+)
+# The operator's Archive, outside the ground (RULE 1); and the ground, when this repository sits in its worlds/ folder.
+ARCHIVE_DIR = Path.home() / "Desktop" / "Archive"
+GROUND_DIR: Path | None = _STEWARD_DIR.parents[2] if _STEWARD_DIR.parents[1].name.lower() == "worlds" else None
+# The ground's repository, as the door names it (ESTATE_WORLDS), and the door's writes (_CHANGES_THINGS names them too).
+_GROUND_WORLD = "research"
+_DOOR_WRITES = frozenset(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr"))
+# One shell or argument word: what is between spaces, quotes and the shell's operators.
+_WORD = re.compile(r"""[^\s"'`;|&<>()=,]+""")
+# Session state: an untrusted source was called in this session (or before the plan, carried by the workflow), and the
+# sitting an estate_status read reported ({"open": bool, "n": ...}).
+UNTRUSTED_READ_KEY = "steward_untrusted_read"
+_SITTING_SEEN_KEY = "steward_sitting_seen"
+_ESTATE_STATUS = "secondbrain_estate_status"
+
+
+def _lower(path: Path | str) -> str:
+    return str(path).replace("\\", "/").rstrip("/").lower()
+
+
+def _under(path: Path, root: Path | None) -> bool:
+    """Whether path is root or under it, in any case and with either separator."""
+    if root is None:
+        return False
+    inside, top = _lower(path), _lower(root)
+    return inside == top or inside.startswith(top + "/")
+
+
+def _resolved(word: str) -> Path | None:
+    """A word as the path it names from his workspace (Git Bash's /c/... as C:/...; ~ expanded), or None."""
+    text = word.strip()
+    if not text or "://" in text:
+        return None
+    if re.match(r"^/[a-zA-Z]/", text) and os.name == "nt":
+        text = f"{text[1]}:{text[2:]}"
+    try:
+        return (_WORKING_DIR / os.path.expanduser(text)).resolve(strict=False)
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _path_words(name: str, arguments: Mapping[str, Any]) -> list[str]:
+    """The words of a call's arguments that may be paths: the shell's whole command, a file tool's path arguments, the
+    door's arguments but a commit message, and any argument named as a path."""
+    values: list[str] = []
+    for key, value in arguments.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if (
+            (name == "run_shell" and key == "command")
+            or key in _PATH_ARGUMENTS
+            or (name.startswith("atlas_") and key != "message")
+            or _PATH_LIKE_NAME.search(key)
+        ):
+            values.append(value)
+    return [word for value in values for word in _WORD.findall(value)]
+
+
+def key_file_named(words: Sequence[str]) -> str | None:
+    """The first word naming a key file (KEY_FILE, by its last path part), or None."""
+    return next((w for w in words if KEY_FILE.match(re.split(r"[\\/]", w.rstrip("\\/"))[-1] or "")), None)
+
+
+def archive_named(words: Sequence[str]) -> str | None:
+    """The first word naming a path under the Archive (ARCHIVE_PATH, or resolving under ARCHIVE_DIR), or None."""
+    for word in words:
+        if re.search(ARCHIVE_PATH, word, re.IGNORECASE):
+            return word
+        resolved = _resolved(word) if re.search(r"archive", word, re.IGNORECASE) else None
+        if resolved is not None and _under(resolved, ARCHIVE_DIR):
+            return word
+    return None
+
+
+def ground_path(word: str) -> bool:
+    """Whether a word names a path in Manjuel's ground (GROUND_DIR), not in one of its worlds (each its own repository)."""
+    if GROUND_DIR is None or not re.search(r"[\\/.]", word):
+        return False
+    resolved = _resolved(word)
+    return resolved is not None and _under(resolved, GROUND_DIR) and not _under(resolved, GROUND_DIR / "worlds")
+
+
+def sitting_from_ledger(ground: Path | None = None) -> dict[str, Any]:
+    """The operator's sitting as the ground's ledger has it (sessions/sessions.jsonl): {"open": bool, "n": ...}. Open when
+    its last line has no non-empty "ended" (an open sitting's line may carry the key with no value). No ledger: closed."""
+    ground = GROUND_DIR if ground is None else ground
+    ledger = ground / "sessions" / "sessions.jsonl" if ground is not None else None
+    try:
+        lines = [line for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()] if ledger else []
+    except OSError:
+        return {"open": False}
+    if not lines:
+        return {"open": False}
+    try:
+        last = json.loads(lines[-1])
+    except ValueError:
+        return {"open": False}
+    if not isinstance(last, dict):
+        return {"open": False}
+    return {"open": not last.get("ended"), "n": last.get("n") or last.get("sitting") or last.get("id")}
+
+
+def sitting_in_status(text: str) -> dict[str, Any] | None:
+    """The sitting an estate_status result reports ({"open": bool, "n": ...}), or None when it says nothing of one."""
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    sitting = data.get("sitting") if isinstance(data, dict) else None
+    if not isinstance(sitting, dict):
+        return None
+    return {"open": bool(sitting.get("open")), "n": sitting.get("n")}
+
+
+def sitting_named(sitting: Mapping[str, Any]) -> str:
+    """The sitting as a refusal names it: "Manjuel sitting 112" or "Manjuel sitting"."""
+    n = sitting.get("n")
+    return f"Manjuel sitting {n}" if n not in (None, "") else "Manjuel sitting"
+
+
+def _open_sitting(*sessions: Any) -> dict[str, Any] | None:
+    """The open sitting, from the ledger or an estate_status read in one of these sessions, or None."""
+    for session in sessions:
+        seen = session.state.get(_SITTING_SEEN_KEY) if session is not None else None
+        if isinstance(seen, dict) and seen.get("open"):
+            return seen
+    ledger = sitting_from_ledger()
+    return ledger if ledger.get("open") else None
+
+
+def _untrusted_read(*sessions: Any) -> bool:
+    return any(session is not None and bool(session.state.get(UNTRUSTED_READ_KEY)) for session in sessions)
+
+
+def bounds_refusal(name: str, arguments: Mapping[str, Any] | None, *sessions: Any) -> str | None:
+    """The refusal a call gets from the bounds (ADR-0014), or None. The same answer for the card's rule and the gate."""
+    arguments = arguments if isinstance(arguments, Mapping) else {}
+    words = _path_words(name, arguments)
+    if found := key_file_named(words):
+        return (
+            f"{BOUNDS_REFUSED} {name} names {found}, a file that holds keys (RULE 7). Nothing ran. Keys are never read, "
+            "printed, copied or touched, by any tool; do not try another way. Tell the user it is not done."
+        )
+    if found := archive_named(words):
+        return (
+            f"{BOUNDS_REFUSED} {name} names {found}, under Desktop\\Archive (RULE 1). Nothing ran. The Archive is never "
+            "reached, read or listed, by any tool; do not try another way. Tell the user it is not done."
+        )
+    if name == "run_shell" and _untrusted_read(*sessions):
+        return (
+            f"{BOUNDS_REFUSED} run_shell after untrusted content (a note, an Estate read, the web or a background "
+            "agent's result) in this session. Nothing ran on the host. Do not run the shell again in this session; do "
+            "the step without it, or tell the user it needs the shell in a new session."
+        )
+    writes_ground = (
+        (name in _DOOR_WRITES and str(arguments.get("project") or "").strip().lower() == _GROUND_WORLD)
+        or ((name in FileAccessProvider._WRITE_TOOL_NAMES or name == "run_shell") and any(ground_path(w) for w in words))
+    )
+    if writes_ground and (sitting := _open_sitting(*sessions)) is not None:
+        return (
+            f"{BOUNDS_REFUSED} {name} would change Manjuel's ground while the operator's {sitting_named(sitting)} is "
+            "open (RULE 9). Nothing ran. Nothing in the ground changes until the sitting is closed; tell the user it "
+            "waits for that."
+        )
+    return None
+
+
+def _call_arguments(arguments: Any) -> dict[str, Any]:
+    if hasattr(arguments, "model_dump"):
+        return arguments.model_dump()
+    return dict(arguments) if isinstance(arguments, Mapping) else {}
+
+
+def _result_text(result: Any) -> str:
+    if isinstance(result, list):
+        return "\n".join(str(getattr(c, "text", None) or getattr(c, "result", None) or "") for c in result)
+    return str(result if result is not None else "")
+
+
+async def bounds_gate(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware, outermost: a call the bounds refuse (bounds_refusal) gets the refusal and runs nothing. After
+    a call to an untrusted source the session is marked (UNTRUSTED_READ_KEY), whether it succeeded or not; after an
+    estate_status read, the sitting it reported is kept (_SITTING_SEEN_KEY)."""
+    name = context.function.name
+    session = context.session or _RUN_SESSION.get()
+    refusal = bounds_refusal(name, _call_arguments(context.arguments), context.session, _RUN_SESSION.get())
+    if refusal is not None:
+        logger.warning("Bound held: %s refused.", name)
+        context.result = refusal
+        if name == "run_shell" and session is not None and hyperlight_sandbox_on() and _untrusted_read(context.session, _RUN_SESSION.get()):
+            # With the sandbox on, its own refusal and its closed shell stand (<sandbox>): EXECUTE is offered execute_code.
+            session.state[_SANDBOX_UNTRUSTED_KEY] = True
+            context.result = SANDBOX_SHELL_REFUSAL
+        return
+    try:
+        await call_next()
+    finally:
+        if session is not None and name in _SANDBOX_UNTRUSTED_SOURCES:
+            session.state[UNTRUSTED_READ_KEY] = True
+        if session is not None and name == _ESTATE_STATUS and (seen := sitting_in_status(_result_text(context.result))):
+            session.state[_SITTING_SEEN_KEY] = seen
+
+
+def past_the_card_to_be_bounded(call: Any) -> bool:
+    """Auto-approval rule, first of his rules: a call the bounds will refuse skips its card; bounds_gate refuses it."""
+    try:
+        arguments = call.parse_arguments()
+    except Exception:  # noqa: BLE001 - arguments that do not parse are MAF's to refuse
+        return False
+    return bounds_refusal(getattr(call, "name", "") or "", arguments, _RUN_SESSION.get()) is not None
+
+
+# </bounds>
+
+
 # <ollama_options>
 # Step 4, 4.2: the Ollama options sent with every model call by Steward and his team (MAF's OllamaChatOptions):
 # his own window, so it never depends on the server's default (2026-11-03: the app's context setting was set to 32K
@@ -3706,6 +3953,8 @@ async def build_steward_agent(
         part3_providers.append(RequestHints())
         gate_middleware, gate_rule = plan_mode_gate(mode_provider)
         auto_approval_rules.insert(0, gate_rule)
+        # ADR-0014: the bounds' rule first of all, so a call they refuse never shows a card (bounds_gate refuses it).
+        auto_approval_rules.insert(0, past_the_card_to_be_bounded)
         loop_should_continue, loop_next_message = plan_reply_loop(mode_provider, plan_reply_check, todo_provider)
         agent = create_harness_agent(
             client=part3_client,
@@ -3725,6 +3974,8 @@ async def build_steward_agent(
             auto_approval_rules=auto_approval_rules,
             context_providers=part3_providers,
             middleware=[
+                # ADR-0014: the bounds, outermost of his function middleware, so a refused call reaches nothing else.
+                bounds_gate,
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files,
                 refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code, todo_ids_by_name(todo_provider),
                 point_a_missed_path_at_the_named_one,

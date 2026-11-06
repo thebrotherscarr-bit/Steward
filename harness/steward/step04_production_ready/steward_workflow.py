@@ -105,7 +105,7 @@ from console.observers.planning_models import PlanningQuestion, PlanningResponse
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
 import agent as _agent  # noqa: E402 - hyperlight_sandbox_on, read at call time (offered_in_step)
-from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, UNTRUSTED_READ_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -471,8 +471,16 @@ CHECKS_RUN_THE_TESTS = (
 SAY_WHAT_CHANGED = "When the work is done, end with a line or two saying what you changed, naming each file."
 
 
-def execute_message(request: str, plan: str, steps: list[str]) -> Message:
-    """The message that asks EXECUTE to carry out the approved plan, with the plan's steps on it."""
+def untrusted_read_in(messages: Sequence[Message] | None) -> bool:
+    """Whether a call to one of the untrusted sources (agent._SANDBOX_UNTRUSTED_SOURCES: notes, the Estate's reads, the
+    web, a background agent's results) is in these messages: what EXPLORE read before the plan (ADR-0014)."""
+    sources = _agent._SANDBOX_UNTRUSTED_SOURCES
+    return any(c.type == "function_call" and c.name in sources for m in messages or [] for c in m.contents or [])
+
+
+def execute_message(request: str, plan: str, steps: list[str], untrusted: bool = False) -> Message:
+    """The message that asks EXECUTE to carry out the approved plan, with the plan's steps on it, and whether untrusted
+    content was read before the plan (UNTRUSTED_READ_KEY, ADR-0014: EXECUTE's session is marked, so his shell stays shut)."""
     numbered = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, start=1))
     text = (
         f"The user approved your plan. Carry it out now.\n\nRequest: {request}\n\nPlan: {plan}\n\nSteps (your todos):\n"
@@ -483,7 +491,7 @@ def execute_message(request: str, plan: str, steps: list[str]) -> Message:
     # REQUEST_KEY: his request hints match the request alone, never the plan's wording (agent.asked_request).
     return Message(
         role="user", contents=[Content.from_text(text)],
-        additional_properties={APPROVED_PLAN_KEY: list(steps), REQUEST_KEY: request},
+        additional_properties={APPROVED_PLAN_KEY: list(steps), REQUEST_KEY: request, **({UNTRUSTED_READ_KEY: True} if untrusted else {})},
     )
 
 
@@ -497,6 +505,11 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
     @agent_middleware
     async def approved_plan_turn_(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
         steps = approved_steps(context.messages)
+        # ADR-0014: untrusted content read before the plan marks this session too, so the bounds keep his shell shut.
+        if context.session is not None and any(
+            (getattr(m, "additional_properties", None) or {}).get(UNTRUSTED_READ_KEY) for m in context.messages or []
+        ):
+            context.session.state[UNTRUSTED_READ_KEY] = True
         if steps and context.session is not None:
             if list(steps) != [REPAIR_TODO]:
                 # A new approved plan is a new run of work: the files it writes are the ones its commit takes.
@@ -936,6 +949,8 @@ class ReadPlan(Executor):
             await ctx.yield_output(clarification_text(plan))
         else:
             request = ctx.get_state(_REQUEST_STATE_KEY, None) or _first_user_text(response)
+            # ADR-0014: whether EXPLORE read untrusted content, kept for EXECUTE (in the checkpoint, beside the request).
+            ctx.set_state(UNTRUSTED_READ_KEY, untrusted_read_in(response.full_conversation or response.agent_response.messages))
             plan_data = {"request": request, "plan": plan.questions[0].message, "steps": plan.steps}
             await ctx.send_message(plan_data, target_id=ASK_APPROVAL_STEP)
 
@@ -1015,7 +1030,10 @@ class AskApproval(Executor):
         plan = original_request.function_call.parse_arguments() or {}
         ctx.set_state(_ATTEMPT_KEY, 0)
         ctx.set_state(_APPROVED_REQUEST_KEY, {"request": str(plan.get("request", "")), "plan": str(plan.get("plan", ""))})
-        message = execute_message(str(plan.get("request", "")), str(plan.get("plan", "")), list(plan.get("steps") or []))
+        message = execute_message(
+            str(plan.get("request", "")), str(plan.get("plan", "")), list(plan.get("steps") or []),
+            untrusted=bool(ctx.get_state(UNTRUSTED_READ_KEY, False)),
+        )
         await ctx.send_message(AgentExecutorRequest(messages=[message]))
 
 

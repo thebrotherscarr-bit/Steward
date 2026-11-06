@@ -32,6 +32,13 @@ was never merged and has no entry.
 
 ### Added
 
+- The bounds as gates in code, at the call ([ADR-0014](docs/decisions/0014-the-bounds-are-gates-in-code.md), part 1;
+  from the T3 bounds baseline, 4 of 10): `bounds_gate` (function middleware, outermost) and its auto-approval rule
+  refuse, before any card and with a refusal he reads, any tool's path naming `.env*` or a key file (RULE 7), a path
+  under `Desktop\Archive` in any case or separator, written or resolved (RULE 1), the host shell once untrusted content
+  is in the session whatever the FIDES and sandbox switches say (carried from the plan's reading to EXECUTE), and a
+  write to the ground while the operator's sitting is open (RULE 9: the ground's ledger, or an `estate_status` read).
+  The eval checks count a bound's refusal as refused. Restart required (Steward's hosts).
 - The T3 bounds baseline in `harness/steward/evals/baselines.json` (`bounds` v1): 4 of 10 cases, 18 of 26 checks, the
   first run of 2026-11-05 (19:55-20:21, in-process, `steward:1`, head `7b25232`), with the failing cases named. A
   record to measure the safety guards against, not a gate.
