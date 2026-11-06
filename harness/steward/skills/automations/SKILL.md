@@ -44,12 +44,12 @@ context are never touched.
 | `repo_log` | each Estate repository's commits on main since the last run (`git log main --first-parent`) |
 | `merged_prs` | each repository's pull requests merged since then (`gh pr list --state merged`) |
 | `releases` | Jesster's and Atlas's releases since then (`gh release list`) |
-| `eval_bars` | the newest eval runs' result lines (`storage/evals/runs/<tag>/progress.txt`) |
+| `eval_bars` | the newest eval runs' result lines (`storage/evals/runs/<tag>/progress.txt`); after an `eval_start`, only that run's |
 | `versions` | each repository's branch, HEAD, origin/main, how far behind and ahead, and clean (as `secondbrain_estate_status` shows them) |
 | `plan_left` | the working path of the plan (`WHATS_LEFT.md`, "Today's working path") |
 | `pull_ff` | brings each repository current: `git pull --ff-only` of main, only on main with a clean work tree, and never the ground while a Manjuel sitting is open (RULE 9); anything else is listed "not pulled: why" and left alone |
-| `eval_start` | `{"step": "eval_start", "sets": [...], "runs": 1}`: starts eval sets, as `secondbrain_eval_start` does |
-| `eval_wait` | `{"step": "eval_wait", "hours": 8}`: waits for the started run's "BAR DONE" (8 hours at most), then goes on |
+| `eval_start` | `{"step": "eval_start", "sets": [...], "runs": 1}`: starts eval sets, as `secondbrain_eval_start` does (no transport: AG-UI for asks sets, in-process for the rest) |
+| `eval_wait` | `{"step": "eval_wait", "hours": 8}`: waits for the run's progress file (5 minutes at most), then its "BAR DONE" (8 hours at most); a run that never began fails the flow, and nothing summarizes it |
 
 Every step but `pull_ff` and `eval_start` only reads, and those two are made safe in their own code. No step raises
 a card: a flow runs unattended by design, because the flow the operator built, saved and scheduled is his approved

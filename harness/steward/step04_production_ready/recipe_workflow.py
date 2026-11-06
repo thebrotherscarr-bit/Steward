@@ -61,6 +61,10 @@ MAX_SECTION = 4000
 PLAN_FILE = "WHATS_LEFT.md"
 PLAN_SECTION = "Today's working path"
 EVAL_POLL_SECONDS = 60
+# eval_wait first waits this long for the run's progress file (run-bar.ps1 validates the sets, ~10 s, before its first
+# line), then for BAR DONE; a run with no progress file by then never began, and the flow ends failed with that reason
+EVAL_START_SECONDS = 300
+EVAL_START_POLL_SECONDS = 10
 # the run history (recipe_runs): what may start a run, and how many runs one read lists
 TRIGGERS = ("now", "schedule")
 RUNS_LIMIT = 10
@@ -102,10 +106,12 @@ def validate_recipe(recipe: Mapping[str, Any]) -> dict[str, Any]:
             runs = s.get("runs", 1)
             if not isinstance(runs, int) or not 1 <= runs <= MAX_RUNS:
                 raise RecipeError(f"eval_start runs is 1 to {MAX_RUNS}")
-            transport = s.get("transport", "ag-ui")
-            if transport not in EVAL_SETS_TRANSPORTS:
+            # No transport named: none is sent, and SecondBrain's eval_start picks AG-UI for asks sets only (ADR-0003)
+            # and in-process for the rest, which evals.py refuses on a host (2026-11-05: bfcl over ag-ui exited 2).
+            transport = s.get("transport")
+            if transport is not None and transport not in EVAL_SETS_TRANSPORTS:
                 raise RecipeError(f"eval_start transport is one of {', '.join(EVAL_SETS_TRANSPORTS)}")
-            out.append({"step": name, "sets": [str(x) for x in sets], "runs": runs, "transport": transport})
+            out.append({"step": name, "sets": [str(x) for x in sets], "runs": runs, **({"transport": transport} if transport else {})})
         elif name == "eval_wait":
             hours = s.get("hours", EVAL_MAX_HOURS)
             if not isinstance(hours, (int, float)) or not 0 < hours <= EVAL_MAX_HOURS:
@@ -184,15 +190,19 @@ class Gathered:
     ok: bool = True
     tag: str | None = None
     short: str = ""
+    # why this recipe's eval run never began (eval_start refused or failed, or no progress file): the run's failure
+    eval_failed: str | None = None
 
 
 @dataclass
 class RecipeResult:
-    """The workflow's output: the text for the note, one short line for Telegram, and whether every step went well."""
+    """The workflow's output: the text for the note, one short line for Telegram, whether every step went well, and
+    the error that fails the whole run (an eval run that never began)."""
 
     text: str
     short: str
     ok: bool
+    error: str | None = None
 
 
 def _first(text: str) -> str:
@@ -245,9 +255,16 @@ def read_plan(ground: str) -> str:
     return section[:MAX_SECTION] + "\n..." if len(section) > MAX_SECTION else section
 
 
-def eval_bars(steward_dir: str | None, since: float) -> str:
-    """The newest eval runs' result lines (storage/evals/runs/<tag>/progress.txt in Steward's folder)."""
+def eval_bars(steward_dir: str | None, since: float, tag: str | None = None) -> str:
+    """The newest eval runs' result lines (storage/evals/runs/<tag>/progress.txt in Steward's folder); only ``tag``'s
+    when the recipe started a run, never an older run's in its place."""
     folder = Path(steward_dir or "") / "storage" / "evals" / "runs"
+    if tag:
+        f = folder / tag / "progress.txt"
+        if not f.exists():
+            return f"{tag}: no progress file: the run did not begin"
+        lines = [line for line in f.read_text(encoding="utf-8").splitlines() if _RESULT_LINE.search(line) and not _START_LINE.search(line)]
+        return "\n".join([f"{tag}:", *(f"  {line}" for line in lines[-8:])] if lines else [f"{tag}: no result lines yet"])
     runs = sorted(
         ((f.stat().st_mtime, d.name, f) for d in (folder.iterdir() if folder.is_dir() else []) if (f := d / "progress.txt").exists()),
         reverse=True,
@@ -297,7 +314,9 @@ async def gather(step: Mapping[str, Any], g: Gathered, tools: RecipeTools) -> st
             out.append(f"{r.name}: " + (f"(gh failed: {_first(err)})" if code else listed))
         return "\n".join(out)
     if name == "eval_bars":
-        return f"## Steward's eval bars\n{eval_bars(tools.steward_dir, g.since)}"
+        if g.eval_failed and not g.tag:
+            return f"## Steward's eval bars\n(no eval run: {g.eval_failed})"
+        return f"## Steward's eval bars\n{eval_bars(tools.steward_dir, g.since, g.tag)}"
     if name == "plan_left":
         return f"## What is left ({PLAN_FILE})\n{read_plan(tools.ground) if tools.ground else '(the ground was not found)'}"
     if name == "versions":
@@ -318,18 +337,28 @@ async def gather(step: Mapping[str, Any], g: Gathered, tools: RecipeTools) -> st
             raise RuntimeError("SecondBrain is not connected, so no eval can start")
         now = tools.clock()
         tag = f"{'_'.join(step['sets'])}-{datetime.fromtimestamp(now).strftime('%Y-%m-%d-%H%M')}"
-        started = json.loads(await tools.secondbrain("eval_start", {"sets": step["sets"], "runs": step["runs"], "tag": tag, "transport": step["transport"]}))
+        args = {"sets": step["sets"], "runs": step["runs"], "tag": tag, **({"transport": step["transport"]} if step.get("transport") else {})}
+        started = json.loads(await tools.secondbrain("eval_start", args))
         g.tag = started["tag"]
-        return f"## Eval run started\n{g.tag}: {', '.join(step['sets'])}, {step['runs']} run(s) each, over {step['transport']}"
+        over = started.get("transport") or step.get("transport") or "SecondBrain's default"
+        return f"## Eval run started\n{g.tag}: {', '.join(step['sets'])}, {step['runs']} run(s) each, over {over}"
     if name == "eval_wait":
         if not g.tag or tools.secondbrain is None:
             return "## Eval run\n(nothing to wait for: no eval_start before eval_wait)"
         until = tools.clock() + step["hours"] * 3600
+        # first the run's progress file (bounded): eval_status is an error until run-bar.ps1 writes its first line
+        begin_by = min(until, tools.clock() + EVAL_START_SECONDS)
         while True:
-            status = json.loads(await tools.secondbrain("eval_status", {"tag": g.tag}))
-            if status.get("done") or tools.clock() >= until:
+            try:
+                status = json.loads(await tools.secondbrain("eval_status", {"tag": g.tag}))
                 break
+            except Exception as exc:  # noqa: BLE001 - not begun yet, or never
+                if tools.clock() >= begin_by:
+                    raise RuntimeError(f"the eval run {g.tag} never began: no progress file after {EVAL_START_SECONDS} s ({_first(str(exc))})") from exc
+                await tools.sleep(EVAL_START_POLL_SECONDS)
+        while not status.get("done") and tools.clock() < until:
             await tools.sleep(EVAL_POLL_SECONDS)
+            status = json.loads(await tools.secondbrain("eval_status", {"tag": g.tag}))
         lines = status.get("lines") or ["no progress lines"]
         if status.get("done"):
             g.short = next((line for line in reversed(lines) if " done " in line), "BAR DONE").split(" ", 1)[-1]
@@ -377,8 +406,11 @@ class GatherStep(Executor):
         except Exception as exc:  # noqa: BLE001 - a step's failure is the run's record, not a crash
             g.ok = False
             g.sections.append(f"## {self._step['step']}\nFailed: {exc}")
-            if self._step["step"] == "eval_start":
-                g.short = f"Failed: {exc}"
+            if self._step["step"] in ("eval_start", "eval_wait") and not (self._step["step"] == "eval_wait" and g.eval_failed):
+                # the eval run never began: the whole run fails with this reason, and nothing judges a run that
+                # did not happen (Summarize says so instead of asking the agent)
+                g.eval_failed = f"{self._step['step']}: {exc}"
+                g.short = f"Failed: {g.eval_failed}"
             # MAF's non-fatal "error from user code" event, with this step's id: the run history marks the step failed
             await ctx.add_event(WorkflowEvent("error", data=exc, executor_id=self.id))
         await ctx.send_message(g)
@@ -402,6 +434,11 @@ class Summarize(Executor):
     @handler
     async def summarize(self, g: Gathered, ctx: WorkflowContext[Gathered]) -> None:
         gathered = "\n\n".join(g.sections)
+        if g.eval_failed:
+            # 2026-11-05: asked to judge a run that never began, the agent wrote a verdict from older runs' lines
+            g.sections = [f"The eval run did not happen, so there is nothing to judge. {g.eval_failed}", f"---\n\n{gathered}"]
+            await ctx.send_message(g)
+            return
         text = (
             f"{self._summarize}\n\n"
             + (f"(The automation's own words: {g.prompt})\n\n" if g.prompt else "")
@@ -421,7 +458,8 @@ class Deliver(Executor):
     @handler
     async def deliver(self, g: Gathered, ctx: WorkflowContext[Any, RecipeResult]) -> None:
         text = "\n\n".join(g.sections)
-        await ctx.yield_output(RecipeResult(text=text, short=g.short or _first(re.sub(r"^## .*\n", "", text)), ok=g.ok))
+        short = g.short or _first(re.sub(r"^## .*\n", "", text))
+        await ctx.yield_output(RecipeResult(text=text, short=short, ok=g.ok, error=g.eval_failed))
 
 
 for _t in (RecipeStart, Gathered, RecipeResult):
@@ -534,6 +572,8 @@ class RecipeRuns:
                     result = event.data
             if result is None:
                 state.update(state="failed", error="the workflow ended with no output")
+            elif result.error:
+                state.update(state="failed", ok=False, error=result.error, text=result.text, short=result.short)
             else:
                 state.update(state="done", ok=result.ok, text=result.text, short=result.short)
         except Exception as exc:  # noqa: BLE001 - the run's failure is its record

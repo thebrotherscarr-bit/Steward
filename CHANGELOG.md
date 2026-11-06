@@ -13,6 +13,16 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- An eval flow whose run never began (2026-11-05 18:03, the Flows' "Eval: bfcl"): `eval_wait` failed at once on
+  "No progress file", and summarize wrote a verdict from older runs' lines. `eval_wait` now waits up to 5 minutes
+  for the run's progress file, then for BAR DONE; a run that never began (or an `eval_start` refused) ends the flow
+  FAILED with that reason (`recipe_status` state `failed`), summarize is not asked to judge it, and `eval_bars` after
+  an `eval_start` reads only that run's tag. A recipe's `eval_start` sends no transport unless it names one
+  (SecondBrain picks AG-UI for asks sets only: bfcl over ag-ui exited 2). ADR-0003 carries a dated note; the
+  `automations` skill's step table says so.
+
 ### Added
 
 - ADR-0010, "Notes are central in Jesster": one vault (`worlds/notes`), owned and served by Jesster; a local IDE
