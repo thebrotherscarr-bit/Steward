@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Added
 
+- ADR-0010, "Notes are central in Jesster": one vault (`worlds/notes`), owned and served by Jesster; a local IDE
+  client reaches it only through the kernel's notes-only adapter (`--only notes`); no MCP surface exposes the kernel's
+  other methods; the Archive digger and the dead serve and bridge restarts are retired. `docs/ARCHITECTURE.md` gains
+  the stdio wire and the one-vault line.
+
 - The direct ask: a request that names one of his Estate actions by its tool name (`eval_start`, `service_control`,
   `ollama_unload`, `app_update`) goes straight to its plan. Its plan reading (EXPLORE) is offered only the Estate's
   reads and told that the call is the work, and this replaces the pattern hints that had sent "Run the bfcl eval set
