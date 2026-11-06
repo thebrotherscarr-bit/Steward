@@ -8663,3 +8663,191 @@ def test_the_bounds_checks_fail_a_change_planned_while_his_sitting_is_open_and_a
     env = Content.from_function_call(call_id="e1", name="file_access_read", arguments={"file_name": "worlds/jesster/.env"})
     assert scored(evals.no_env_touched, "q", [Message(role="assistant", contents=[env])]).passed is False
     assert scored(evals.points_elsewhere, "q", [Message(role="assistant", contents=["Ask me from the PC."])]).passed is True
+
+
+# <bounds> ADR-0014: the bounds, held at the call.
+
+
+def _bounded(name: str, arguments: dict[str, Any], session: Any = None, fail: bool = False) -> tuple[Any, bool]:
+    """bounds_gate on one call: (its result, whether the call went on to the tool)."""
+    from types import SimpleNamespace
+
+    reached: list[bool] = []
+
+    async def call_next() -> None:
+        reached.append(True)
+        if fail:
+            raise RuntimeError("the source failed")
+
+    context = SimpleNamespace(function=SimpleNamespace(name=name), arguments=arguments, result=None, session=session)
+    try:
+        asyncio.run(steward.bounds_gate(context, call_next))
+    except RuntimeError:
+        pass
+    return context.result, bool(reached)
+
+
+def test_the_bounds_refuse_a_key_file_and_the_archive_on_every_tool_before_any_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0014, P32 and P33: a file tool, the shell, the door or any path argument naming a .env or key file, or a path
+    under Desktop\\Archive (any case, either separator, written out or resolved), is refused by bounds_gate and never
+    reaches the tool; the card's rule lets it past its card, so the user is never asked to allow it. Words that are not
+    paths (a file's content, a commit message) are not read, and ordinary calls go on."""
+    archive = tmp_path / "vault" / "Archive"  # not written Desktop\Archive: found by resolving the path
+    archive.mkdir(parents=True)
+    monkeypatch.setattr(steward, "ARCHIVE_DIR", archive)
+    windows = str(archive / "models")
+    for name, arguments in (
+        ("file_access_read", {"file_name": "worlds/jesster/.env"}),
+        ("file_access_read", {"file_name": ".ENV.local"}),
+        ("file_access_ls", {"directory": ".", "glob_pattern": ".env*"}),
+        ("file_access_write", {"file_name": "keys/id_ed25519", "content": "x"}),
+        ("read_file", {"path": "certs/server.PEM"}),
+        ("run_shell", {"command": "cat worlds/jesster/.env | head -1"}),
+        ("atlas_git_commit", {"project": "steward", "message": "x", "files": ".env"}),
+        ("file_access_ls", {"directory": "C:\\Users\\novad\\Desktop\\Archive\\models"}),
+        ("file_access_ls", {"directory": "c:/users/NOVAD/desktop/ARCHIVE"}),
+        ("run_shell", {"command": "ls ../../../Archive/models"}),
+        ("run_shell", {"command": f'ls "{windows}"'}),
+        ("file_access_read", {"file_name": windows.replace("\\", "/").upper()}),
+        ("file_access_ls", {"directory": os.path.relpath(archive, steward._WORKING_DIR)}),
+    ):
+        refusal = steward.bounds_refusal(name, arguments)
+        assert refusal is not None and refusal.startswith(steward.BOUNDS_REFUSED), (name, arguments)
+        result, reached = _bounded(name, arguments)
+        assert not reached and result == refusal, (name, arguments, result)
+        call = Content.from_function_call(call_id="c1", name=name, arguments=arguments)
+        assert steward.past_the_card_to_be_bounded(call), (name, arguments)
+    for name, arguments in (
+        ("file_access_read", {"file_name": "README.md"}),
+        ("file_access_write", {"file_name": ".gitignore", "content": ".env\n.env.*\n"}),
+        ("file_access_read", {"file_name": "harness/steward/evals/archive_notes.md"}),
+        ("run_shell", {"command": "pytest -q harness/steward/working/sample-project"}),
+        ("atlas_git_commit", {"project": "steward", "message": "Keep .env out of the index", "files": ".gitignore"}),
+        ("secondbrain_write_note", {"title": "Archive", "content": "The Archive at Desktop/Archive is never reached."}),
+    ):
+        assert steward.bounds_refusal(name, arguments) is None, (name, arguments)
+        assert _bounded(name, arguments) == (None, True), (name, arguments)
+        assert not steward.past_the_card_to_be_bounded(Content.from_function_call(call_id="c1", name=name, arguments=arguments))
+    # On his live build: a write naming .env raises no card and gets the refusal; nothing is written.
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": ".env.test", "content": "K=1"})
+    target = steward._WORKING_DIR / ".env.test"
+    try:
+        client, agent, response = run_steward([write, "Not done."], "Write K=1 into .env.test.", mode="execute")
+        assert not target.exists(), "nothing was written"
+    finally:
+        target.unlink(missing_ok=True)  # unplugged, the rule alone would let the write past its card
+    assert not approval_requests(response), "a refused call never shows a card"
+    assert any(r.startswith(steward.BOUNDS_REFUSED) for r in function_results(client.calls[1]))
+    assert steward.bounds_gate in (agent.middleware or []), "the bounds are on his live build"
+
+
+def test_the_host_shell_is_refused_after_untrusted_content_whatever_fides_and_the_sandbox_say(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0014, P34: with FIDES off (STEWARD_SAFETY_OBSERVE=off, STEWARD_FIDES_ENFORCE unset) and no sandbox, run_shell
+    goes on until a call to an untrusted source (a note, an Estate read, the web, a background agent's results) is in the
+    session, even one that failed; then it is refused. Through the workflow, a note read while EXPLORE read for the plan
+    keeps the shell shut in EXECUTE: the call raises no card and nothing runs. Without the read, the same shell call
+    raises its card as before."""
+    from types import SimpleNamespace
+
+    import steward_workflow as wf
+    from agent_framework import FunctionTool
+
+    monkeypatch.setenv("STEWARD_SAFETY_OBSERVE", "off")
+    assert not steward.fides_on() and not steward.hyperlight_sandbox_on()
+    session = SimpleNamespace(state={})
+    assert _bounded("run_shell", {"command": "pip list"}, session) == (None, True)
+    assert _bounded("secondbrain_read_note", {"id": "n"}, session, fail=True)[1], "the read itself goes on"
+    assert session.state.get(steward.UNTRUSTED_READ_KEY) is True, "a failed read still marks the session"
+    result, reached = _bounded("run_shell", {"command": "pip list"}, session)
+    assert not reached and str(result).startswith(steward.BOUNDS_REFUSED + " run_shell after untrusted content")
+    for source in ("secondbrain_estate_logs", "secondbrain_web_fetch", "background_agents_get_task_results"):
+        fresh = SimpleNamespace(state={})
+        _bounded(source, {}, fresh)
+        assert _bounded("run_shell", {"command": "ls"}, fresh)[1] is False, source
+    message = wf.execute_message("r", "p", ["s"], untrusted=True)
+    assert message.additional_properties[steward.UNTRUSTED_READ_KEY] is True
+    assert steward.UNTRUSTED_READ_KEY not in wf.execute_message("r", "p", ["s"]).additional_properties
+
+    plan = '{"type": "approval", "questions": [{"message": "Read the note, then run pip list."}], "steps": ["Run pip list"]}'
+    ran: list[str] = []
+
+    def shell_stand_in(command: str = "") -> str:
+        ran.append(command)
+        return "pip 25"
+
+    def run(read_first: bool) -> tuple[list[str], list[str]]:
+        note = FunctionTool(name="secondbrain_read_note", description="Read a note.", func=lambda id="": "a note",  # noqa: A002
+                            approval_mode="never_require")
+        shell = FunctionTool(name="run_shell", description="Run a shell command.", func=shell_stand_in, approval_mode="always_require")
+        read = Content.from_function_call(call_id="n1", name="secondbrain_read_note", arguments={"id": "n"})
+        pip = Content.from_function_call(call_id="h1", name="run_shell", arguments={"command": "pip list"})
+        client = ScriptedChatClient([*([read] if read_first else []), "Read.", pip, "Not run."], plans=[plan])
+
+        async def _go() -> tuple[list[str], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=[note, shell])
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent, checks=lambda messages: None)
+                    events = [e async for e in workflow.run("Read the note n, then run pip list.", stream=True)]
+                    card = next(e for e in events if e.type == "request_info")
+                    answer = {card.request_id: card.data.to_function_approval_response(True)}
+                    events = [e async for e in workflow.run(stream=True, responses=answer)]
+                    cards = [e.data.function_call.name for e in events if e.type == "request_info"]
+                    results = [r for call in client.calls for r in function_results(call)]
+                    return cards, results
+
+        return asyncio.run(_go())
+
+    cards, results = run(read_first=True)
+    assert cards == [] and not ran, "after the note, the shell raised no card and ran nothing"
+    assert any(r.startswith(steward.BOUNDS_REFUSED) for r in results), results
+    cards, _ = run(read_first=False)
+    assert cards == ["run_shell"], "with nothing untrusted read, the shell asks its card as before"
+
+
+def test_a_ground_write_is_refused_while_the_operators_sitting_is_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-0014, P29 at the call: while the ground's ledger says a sitting is open (its last line has no "ended" value),
+    or an estate_status read this session said so, a file write or a shell command naming a ground path, or a door write
+    on the ground's repository ("research"), is refused; a world under the ground's worlds/ is its own repository and is
+    not. Closed (an "ended" value), the same calls go on."""
+    from types import SimpleNamespace
+
+    ground = tmp_path / "Research"
+    (ground / "sessions").mkdir(parents=True)
+    (ground / "worlds" / "steward").mkdir(parents=True)
+    ledger = ground / "sessions" / "sessions.jsonl"
+    monkeypatch.setattr(steward, "GROUND_DIR", ground)
+    daybook = {"file_name": str(ground / "DAYBOOK.md"), "content": "today"}
+    world = {"file_name": str(ground / "worlds" / "steward" / "README.md"), "content": "x"}
+    push = {"project": "research"}
+    ledger.write_text('{"n": 111, "ended": "2026-11-05T20:00"}\n{"n": 112, "started": "2026-11-06T07:00", "ended": ""}\n', encoding="utf-8")
+    assert steward.sitting_from_ledger() == {"open": True, "n": 112}
+    for name, arguments in (
+        ("file_access_write", daybook), ("run_shell", {"command": f"echo x >> {ground / 'HANDOFF.md'}"}), ("atlas_git_push", push),
+    ):
+        refusal = steward.bounds_refusal(name, arguments)
+        assert refusal is not None and "sitting 112" in refusal and "RULE 9" in refusal, (name, refusal)
+        assert _bounded(name, arguments)[1] is False
+    assert steward.bounds_refusal("file_access_write", world) is None, "a world is not the ground"
+    assert steward.bounds_refusal("atlas_git_push", {"project": "steward"}) is None
+    assert steward.bounds_refusal("file_access_read", {"file_name": str(ground / "DAYBOOK.md")}) is None, "a read is not a change"
+    ledger.write_text('{"n": 112, "started": "2026-11-06T07:00", "ended": "2026-11-06T09:00"}\n', encoding="utf-8")
+    assert steward.bounds_refusal("file_access_write", daybook) is None and _bounded("atlas_git_push", push)[1]
+    # Jesster's estate_status says the sitting is open: kept in the session, and the write is refused there.
+    session = SimpleNamespace(state={})
+
+    async def status_next(context: Any) -> None:
+        context.result = '{"services": [], "sitting": {"open": true, "n": 113}}'
+
+    context = SimpleNamespace(function=SimpleNamespace(name="secondbrain_estate_status"), arguments={}, result=None, session=session)
+    asyncio.run(steward.bounds_gate(context, lambda: status_next(context)))
+    assert session.state[steward._SITTING_SEEN_KEY] == {"open": True, "n": 113}
+    assert "sitting 113" in str(steward.bounds_refusal("file_access_write", daybook, session))
+    assert steward.bounds_refusal("file_access_write", daybook) is None, "another session has not seen it"
+
+
+# </bounds>
