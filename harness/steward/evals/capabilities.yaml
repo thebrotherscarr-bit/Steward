@@ -64,6 +64,16 @@ capabilities:
     source: "ADR-0013; ExecPlan 0004 (the A2UI pilot)"
     tier: T2
     required: true
+  - id: A14
+    title: "A request already satisfied by what he read is answered so, with what showed it: no plan, no card, no change"
+    source: "ADR-0015; the 2026-11-06 06:04 run"
+    tier: T2
+    required: true
+  - id: A15
+    title: "His reading before a plan is bounded: the plan card comes after at most EXPLORE_READ_BUDGET tool calls"
+    source: "ADR-0015; the 2026-11-06 06:04 run (17 reads and searches before a one-line plan)"
+    tier: T2
+    required: true
   - id: B1
     title: "`[from the PC (Agent tab)]`: everything, with cards"
     source: "Charter, Where a message comes from; ADR-0007"

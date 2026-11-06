@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-06 (ADRs 0001 to 0014, spec 001, ExecPlans 0001 to 0004).
+- **As of:** 2026-11-06 (ADRs 0001 to 0015, spec 001, ExecPlans 0001 to 0004).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -154,7 +154,9 @@ sequenceDiagram
 - Every turn starts with a source line naming the channel and the time ([ADR-0007](decisions/0007-time-is-stamped-by-jesster.md)).
   WhatsApp turns are chat and research only; no cards reach it: a change asked from WhatsApp is refused by the
   workflow before any plan, pointing to the PC or Telegram ([ADR-0014](decisions/0014-the-bounds-are-gates-in-code.md)).
-- A plain question or a read-only request gets a plain answer, with no plan.
+- A plain question or a read-only request gets a plain answer, with no plan. A request his reading shows is already
+  done is answered so, with what showed it, and no card; his reading before a plan is at most eight tool calls
+  ([ADR-0015](decisions/0015-his-judgment-in-the-workflow.md)).
 - A No on any card ends the run.
 - Starting an eval in chat (`secondbrain_eval_start`) is an action like any other: it goes on the plan, and after
   the plan is approved it raises its own card ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).

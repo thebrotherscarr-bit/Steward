@@ -1,0 +1,30 @@
+# T2, his own work: judgment. A request already satisfied is answered so; his reading before a plan is bounded
+# (ADR-0015; the 2026-11-06 06:04 run, transcript b06035a6: the README already said how to run the tests, he planned
+# and wrote the duplicate after 17 reads and searches). The standins runner: each case once through the workflow in an
+# eval's build, every card denied unless the case approves its tool; a fixture is put back after the run.
+# Run: python harness/steward/step04_production_ready/evals.py judgment
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: judgment
+tier: T2
+version: 1
+owner: operator
+runner: standins
+split: full
+bar: {passed: 2, of: 2, runs_in_a_row: 2}
+changes:
+  1: >-
+    ADR-0015's plan-step cases (2026-11-06): already_there (A14), a one-line README ask whose line is already in the
+    README: answered in words naming it, no card, no change; reads_within_budget (A15), a one-function ask:
+    its plan card comes after at most EXPLORE_READ_BUDGET tool calls.
+cases:
+  - id: already_there
+    capability: [A14]
+    ask: Add a line to harness/steward/working/sample-project-2/README.md saying how to run its tests.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    checks: [no_card, no_change_made, keyword_check]
+    keywords: [already]
+  - id: reads_within_budget
+    capability: [A15]
+    ask: Add a function kelvin_to_celsius to harness/steward/working/sample-project-2/units.py.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    checks: [plan_card_first, reads_within_budget]

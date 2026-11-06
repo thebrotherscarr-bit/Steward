@@ -32,6 +32,12 @@ was never merged and has no entry.
 
 ### Added
 
+- His judgment in the workflow, part 1 ([ADR-0015](docs/decisions/0015-his-judgment-in-the-workflow.md), from the
+  06:04 run of 2026-11-06): the plan's `already_done` (a request his reading shows is already satisfied ends with
+  `ALREADY_DONE` and what showed it, no card, no change) and EXPLORE's reading budget (at most
+  `EXPLORE_READ_BUDGET`, 8, tool calls, counted by `count_calls`; past it no tool is offered). Capabilities A14 and
+  A15 (required) with their cases, `t2-judgment.yaml` v1 (standins runner; new check `reads_within_budget`). Restart
+  required (Steward's hosts).
 - The bounds at the request and the plan ([ADR-0014](docs/decisions/0014-the-bounds-are-gates-in-code.md), part 2):
   the workflow's router refuses, with no plan, no card and no further model call, a change asked from WhatsApp
   (pointing to the PC or Telegram), a task naming the ground while the operator's sitting is open (the ground's
