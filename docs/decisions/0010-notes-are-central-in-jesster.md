@@ -74,6 +74,8 @@ one surface he uses in the ground working, and it takes away every exposure noth
 - **Left as they are:** the door's `notes` tool (Aurora's `notes.go`: already four read-only actions; Aurora is parked,
   ADR-0004) and Manjuel's engine `notes_call` (it reaches the kernel through the operator's own declared command in his
   `.env`, which no hand reads or changes, RULE 7; its refusal list in `manjuel/mcp_stdio.py` stays as a second wall).
+  Also left: Jesster's `start-secondbrain.ps1`, the browser-mode launcher (`cli.py serve`), the kernel's own HTTP app
+  for a copy without the desktop app; it is not an MCP surface and SecondBrain on this PC does not use it.
 
 ### Consequences
 
