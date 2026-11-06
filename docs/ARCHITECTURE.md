@@ -102,7 +102,10 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
   MAF adds a `superstep:<n>` pair per round), which Jesster's Agent tab and Phone view draw as the turn's step line
   (AG-UI step 3, 2026-11-05: Jesster #93 to #95; capability A12).
 - **A2A** is deferred until a second autonomous agent exists; when it comes, it goes in Jesster, on loopback.
-- **A2UI** is planned as a pilot for approval cards only, after AG-UI step 2.
+- **A2UI** is a pilot for the plan's approval card only ([ADR-0013](decisions/0013-a2ui-pilot-plan-card.md),
+  2026-11-05): Steward's workflow builds the card's surface (A2UI v0.9, basic catalog) from the plan and sends it as a
+  MAF custom workflow event (AG-UI CUSTOM `a2ui`) beside the card's interrupt; Jesster draws it with `@a2ui/react`
+  and its own components, today's card the fallback; the answer is the AG-UI resume.
 - **Outside the PC:** Telegram and WhatsApp on his own accounts, outbound only (RULE 4 as amended 2026-11-04); GitHub
   for the repositories. No hosted model is used unless the operator turns a route on.
 
@@ -272,8 +275,9 @@ and automations per ADR-0009, Set up as automations, the prompt type removed, BF
    [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md),
    [ExecPlan 0002](plans/0002-flows-steward-card-and-automation-save.md)).
 4. **AG-UI step 3:** the console and the Phone view show the workflow's steps from AG-UI's STEP events (built
-   2026-11-05, Jesster #93 to #95); then the A2UI pilot for approval cards, with its own ADR ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md),
-   [ExecPlan 0003](plans/0003-ag-ui-step-3.md)).
+   2026-11-05, Jesster #93 to #95); then the A2UI pilot for the plan's card
+   ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md), [ExecPlan 0003](plans/0003-ag-ui-step-3.md);
+   [ADR-0013](decisions/0013-a2ui-pilot-plan-card.md), [ExecPlan 0004](plans/0004-a2ui-pilot-plan-card.md)).
 5. **Reach widens on each tier's bar:** GitHub for his own repository passes from the hand to Steward after T2; then
    Jesster, Manjuel and Aurora one at a time.
 6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks

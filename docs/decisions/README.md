@@ -70,3 +70,4 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0010](0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
 | [0011](0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | rejected; superseded by 0012 |
 | [0012](0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals (amended 2026-11-05: everything he does lands with its eval case; `evals.py validate` enforces it) | accepted |
+| [0013](0013-a2ui-pilot-plan-card.md) | A2UI pilot: the plan's approval card as an A2UI surface, sent beside its AG-UI interrupt | accepted (pilot scope) |
