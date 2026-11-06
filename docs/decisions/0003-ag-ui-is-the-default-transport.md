@@ -45,7 +45,11 @@ The operator's word, 2026-11-05: "use it" (recorded in Jesster #77).
 - Step 2, Jesster #70 then #77: the Agent tab, the phone and automation turns reach Steward over AG-UI. If its host is
   down, the turn falls back to Responses (43120) and one console line says so. Only a Responses choice made in
   Settings stays on Responses.
-- The eval workflows run with `-Transport ag-ui`.
+- The eval workflows run with `-Transport ag-ui`. _(2026-11-05, later: for asks sets only. evals.py sends only an
+  asks set (small, heldout) over a host and exits 2 on any other, so the Flows' "Eval: bfcl" failed at once. A
+  workflow's `eval_start` step now sends no transport unless it names one, and SecondBrain's `eval_start` picks AG-UI
+  when every set is an asks set and in-process otherwise; a host transport named for another set is refused before
+  anything starts. Jesster `estate.cjs`, Steward `recipe_workflow.py`; ADR-0009's flows are unchanged.)_
 - Exception (noted 2026-11-05): an improve conversation stays on Responses, because its review card has no AG-UI
   answer yet (Jesster `electron/agent/service.cjs`, the `!s.improve` test before the AG-UI path).
 

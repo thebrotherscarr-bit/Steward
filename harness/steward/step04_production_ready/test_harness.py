@@ -8080,7 +8080,12 @@ def test_a_recipe_is_data_checked_against_the_fixed_steps() -> None:
         with pytest.raises(rw.RecipeError, match=why):
             rw.validate_recipe(bad)
     r = rw.validate_recipe({"name": "Night", "steps": [{"step": "eval_start", "sets": ["aider-py"]}, "eval_wait"]})
-    assert r["steps"] == [{"step": "eval_start", "sets": ["aider-py"], "runs": 1, "transport": "ag-ui"}, {"step": "eval_wait", "hours": 8}]
+    # no transport named, none sent: SecondBrain's eval_start picks AG-UI for asks sets only (bfcl over ag-ui exited 2)
+    assert r["steps"] == [{"step": "eval_start", "sets": ["aider-py"], "runs": 1}, {"step": "eval_wait", "hours": 8}]
+    named = rw.validate_recipe({"steps": [{"step": "eval_start", "sets": ["small"], "transport": "ag-ui"}]})
+    assert named["steps"] == [{"step": "eval_start", "sets": ["small"], "runs": 1, "transport": "ag-ui"}], "a named transport is kept"
+    with pytest.raises(rw.RecipeError, match="transport is one of"):
+        rw.validate_recipe({"steps": [{"step": "eval_start", "sets": ["small"], "transport": "carrier-pigeon"}]})
     graph = rw.recipe_graph({"name": "Startup", "steps": ["versions", "plan_left"], "summarize": "Write it."})
     assert "1_versions" in graph["mermaid"] and "summarize" in graph["mermaid"] and "deliver" in graph["mermaid"]
     assert graph["workflow"]["name"] == "recipe_startup", "WorkflowViz and to_dict for the Flows shelf"
@@ -8133,10 +8138,11 @@ def test_startup_runs_as_a_maf_workflow_gathering_read_only_pulling_only_clean_m
     assert list((tmp_path / "recipes" / "checkpoints").iterdir()), "MAF's FileCheckpointStorage holds its checkpoints"
 
 
-def test_the_nightly_eval_recipe_starts_over_ag_ui_and_waits_for_bar_done(tmp_path: Path) -> None:
-    """eval_start and eval_wait as steps: SecondBrain's eval_start over AG-UI, eval_status read until BAR DONE (a fake
-    sleep between reads), the result its counts; no summarize, so no agent run. A saved flow starts its eval with no card
-    (ADR-0009: the flow is the operator's approved plan); red if the step stops reaching SecondBrain's eval_start."""
+def test_the_nightly_eval_recipe_starts_its_run_and_waits_for_bar_done(tmp_path: Path) -> None:
+    """eval_start and eval_wait as steps: SecondBrain's eval_start with no transport (it picks one by set: aider-py runs
+    in-process), eval_status read until BAR DONE (a fake sleep between reads), the result its counts; no summarize, so
+    no agent run. A saved flow starts its eval with no card (ADR-0009: the flow is the operator's approved plan); red if
+    the step stops reaching SecondBrain's eval_start."""
     import recipe_workflow as rw
 
     ground, steward_dir = _recipe_ground(tmp_path)
@@ -8153,9 +8159,85 @@ def test_the_nightly_eval_recipe_starts_over_ag_ui_and_waits_for_bar_done(tmp_pa
     status = _run_recipe(tmp_path, {"name": "Nightly aider-py", "steps": [{"step": "eval_start", "sets": ["aider-py"]}, {"step": "eval_wait", "hours": 8}]}, tools, summarizer)
     assert status["state"] == "done" and status["ok"] is True, status
     [start] = [a for n, a in sb if n == "eval_start"]
-    assert start["sets"] == ["aider-py"] and start["transport"] == "ag-ui" and start["tag"].startswith("aider-py-")
+    assert start["sets"] == ["aider-py"] and "transport" not in start and start["tag"].startswith("aider-py-")
     assert len(slept) == 2 and summarizer.runs == []
     assert "ended (BAR DONE)" in status["text"] and status["short"] == "done  aider-py v1 (ext) run 1: 21/34 cases"
+
+
+def _clocked() -> tuple[Any, Any, list[float]]:
+    """A fake clock that a fake sleep moves on: (clock, sleep, the sleeps)."""
+    now = [1_000_000.0]
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        now[0] += seconds
+
+    return (lambda: now[0]), sleep, slept
+
+
+def test_an_eval_run_that_never_begins_fails_the_flow_and_nothing_judges_it(tmp_path: Path) -> None:
+    """Live 2026-11-05 18:03 (the Flows "Eval: bfcl"): eval_wait failed at once on "No progress file", and summarize then
+    wrote a verdict from older runs' lines. Now eval_wait waits (bounded) for the progress file; with none, the run ends
+    FAILED with that reason, eval_bars reads only this run's tag (never an older run in its place), and no agent is
+    asked to judge. A refused eval_start ends the same way. Red if eval_wait stops waiting, the old run's lines come
+    back, the summarizer runs, or the run reads done."""
+    import json
+
+    import recipe_workflow as rw
+
+    ground, steward_dir = _recipe_ground(tmp_path)
+    recipe = {"name": "Eval: bfcl", "steps": [{"step": "eval_start", "sets": ["bfcl"]}, "eval_wait", "eval_bars"], "summarize": "Say whether it met its bar."}
+
+    # 1. started, but no progress file ever: eval_status is SecondBrain's error each time
+    asked: list[str] = []
+
+    async def never(name: str, arguments: Mapping[str, Any]) -> str:
+        asked.append(name)
+        if name == "eval_start":
+            return json.dumps({"started": True, "tag": arguments["tag"], "transport": "in-process"})
+        raise RuntimeError(f'No progress file for tag "{arguments["tag"]}": it has not started, or the tag is wrong.')
+
+    clock, sleep, slept = _clocked()
+    summarizer = _Summarizer()
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=never, clock=clock, sleep=sleep)
+    status = _run_recipe(tmp_path, recipe, tools, summarizer)
+    assert status["state"] == "failed" and status["ok"] is False, status
+    assert "never began: no progress file after 300 s" in status["error"], status["error"]
+    assert sum(slept) >= rw.EVAL_START_SECONDS and asked.count("eval_status") > 1, "it waited, bounded"
+    assert summarizer.runs == [], "nothing judges a run that did not happen"
+    assert "did not happen" in status["text"] and "no progress file: the run did not begin" in status["text"]
+    assert "small-night" not in status["text"] and "9/10" not in status["text"], "never an older run's lines"
+    assert status["short"].startswith("Failed: eval_wait: the eval run bfcl-")
+
+    # 2. the progress file appears late: the wait goes on to BAR DONE
+    statuses: list[Any] = [RuntimeError("No progress file"), RuntimeError("No progress file"),
+                           {"done": True, "lines": ["2026-11-05T18:20:00 done  bfcl v1 (ext) run 1: 30/40 cases", "2026-11-05T18:20:01 BAR DONE"]}]
+
+    async def late(name: str, arguments: Mapping[str, Any]) -> str:
+        if name == "eval_start":
+            return json.dumps({"started": True, "tag": arguments["tag"], "transport": "in-process"})
+        s = statuses.pop(0)
+        if isinstance(s, Exception):
+            raise s
+        return json.dumps(s)
+
+    clock, sleep, slept = _clocked()
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=late, clock=clock, sleep=sleep)
+    status = _run_recipe(tmp_path, {"name": "Eval: bfcl", "steps": [{"step": "eval_start", "sets": ["bfcl"]}, "eval_wait"]}, tools, _Summarizer())
+    assert status["state"] == "done" and status["ok"] is True, status
+    assert slept == [rw.EVAL_START_POLL_SECONDS] * 2 and "ended (BAR DONE)" in status["text"]
+
+    # 3. eval_start refused (a host transport for a non-asks set): failed with SecondBrain's reason, nothing judged
+    async def refused(name: str, arguments: Mapping[str, Any]) -> str:
+        raise RuntimeError("evals.py --transport: a host transport runs an asks set (small, heldout) only; bfcl must run in-process. Nothing was started.")
+
+    summarizer = _Summarizer()
+    tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=refused)
+    status = _run_recipe(tmp_path, {**recipe, "steps": [{"step": "eval_start", "sets": ["bfcl"], "transport": "ag-ui"}, "eval_wait", "eval_bars"]}, tools, summarizer)
+    assert status["state"] == "failed" and "eval_start: evals.py --transport: a host transport" in status["error"], status
+    assert summarizer.runs == [] and "(no eval run: eval_start: evals.py --transport" in status["text"]
+    assert "small-night" not in status["text"]
 
 
 def test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him(tmp_path: Path) -> None:
