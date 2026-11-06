@@ -1,11 +1,17 @@
 ---
-status: proposed
+status: rejected
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
 # The harness parity set: τ-bench retail and airline, with Aider's Python exercises second
+
+> 2026-11-05: rejected. The operator, having read it: "ok, so that all seems kind of useless for our system then,
+> seeing as our evals are literally "can he do what is needed for the system reliably" therefore, we need to make
+> custom evals to make sure steward is using everything as expected within our harness." Superseded by
+> [ADR-0012](0012-stewards-bar-is-our-own-capability-evals.md): Steward's bar is our own capability evals. Nothing
+> below is built; the text is kept as it was proposed, and the evidence table stays a record of what was read.
 
 ## Context and Problem Statement
 

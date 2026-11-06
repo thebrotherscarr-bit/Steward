@@ -94,7 +94,10 @@ the whole set runs N times, each pass scored and recorded on its own. A gating t
 
 ## Adding a case or a set (Steward's eval-author work)
 
-1. Start from a failure, not an idea: read the failing traces and the eval history, label each failure, count the
+1. _(2026-11-05, [ADR-0012](../../../docs/decisions/0012-stewards-bar-is-our-own-capability-evals.md): a capability
+   tier's cases come from the coverage map, [spec 001](../../../docs/specs/001-capability-evals.md), one per
+   capability, before any failure; error analysis, below, still adds cases for failures that recur.)_
+   Start from a failure, not an idea: read the failing traces and the eval history, label each failure, count the
    labels, and write a case for the one that recurs (the cookbook's error analysis: label, count, then write the
    case). A public or imported set is for calibration only, never a gate: its cases may already be in a model's
    training data.

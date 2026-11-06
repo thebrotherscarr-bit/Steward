@@ -67,7 +67,9 @@ flowchart LR
   [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **Evals:** `evals.py`, `ext_sets.py`, `eval_transports.py` and the versioned sets in `harness/steward/evals/`
   ([ADR-0006](decisions/0006-evals-are-versioned-long-runs-at-night.md); they run whenever the operator says,
-  [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
+  [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)). The bar is our own
+  capability evals ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)); what each case covers is
+  the coverage map, [spec 001](specs/001-capability-evals.md).
 - **Skills:** `harness/steward/skills/<name>/SKILL.md` (estate, github, automations, bar-runner, eval-history,
   telemetry, ollama-ops, approvals and others).
 - **The Charter:** his instructions, the SecondBrain note `steward-charter` (v4.9), read every turn.
@@ -177,6 +179,15 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
 
 ### An eval
 
+- **The bar is our own capability evals** ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md);
+  the operator, 2026-11-05: "our evals are literally "can he do what is needed for the system reliably""). One small
+  deterministic case per capability Steward must use, scored by `evaluate_agent` with `LocalEvaluator` (MAF's checks
+  and our `@evaluator` functions: a tool called, a card raised and honoured, a rule kept, a file's state); no model
+  judge, no long runs. The capabilities, from the Charter, this file and the ADRs, are listed with their coverage in
+  [spec 001](specs/001-capability-evals.md) (73 on 2026-11-05: 5 covered, 13 partly, 55 untested). They are grouped
+  into the dev-path tiers (T0 and T1 met; T2 his own work, T3 Estate operations, T4 GitHub, then T5 to T7), and a
+  tier's bar is all of its cases, twice in a row. Outside sets (BFCL, Aider Python) stay tier `ext`, calibration
+  only; the parity set of [ADR-0011](decisions/0011-harness-parity-set.md) was rejected.
 - **Whenever the operator says,** day or night: from a flow, an automation, or a request in chat (planned and
   carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
 - An eval flow is `eval_start` then `eval_wait`.
@@ -225,7 +236,9 @@ In order, as the notes stand on 2026-11-05. Each item is one piece and one pull 
    and Aider as eval flows. _Built 2026-11-05, except `automation_save`._
 3. **AG-UI step 3:** the Phone view and the console shelves on AG-UI events; then the A2UI pilot for approval cards.
 4. **Dev-path tiers:** T3 (Estate operations) and T4 (GitHub), then T2 and T5, then the `eval-author` skill; T6 and T7
-   grow with his reach. T5 needs restating now that Neiro is retired.
+   grow with his reach. T5 needs restating now that Neiro is retired. The cases are the proposals of
+   [spec 001](specs/001-capability-evals.md), highest risk first, on the stand-ins it names
+   ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
 5. **Reach widens on each bar:** GitHub for his own repository passes from the hand to Steward after T2; then Jesster,
    Manjuel and Aurora one at a time.
 6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks.

@@ -13,6 +13,13 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Changed
+
+- ADR-0011 (the harness parity set) is `rejected`, its text kept, with the operator's words of 2026-11-05: "ok, so
+  that all seems kind of useless for our system then, seeing as our evals are literally "can he do what is needed for
+  the system reliably" therefore, we need to make custom evals to make sure steward is using everything as expected
+  within our harness."
+
 ### Fixed
 
 - An eval flow whose run never began (2026-11-05 18:03, the Flows' "Eval: bfcl"): `eval_wait` failed at once on
@@ -24,6 +31,15 @@ was never merged and has no entry.
   `automations` skill's step table says so.
 
 ### Added
+
+- ADR-0012, "Steward's bar is our own capability evals" (accepted): one small deterministic case per capability
+  Steward must use inside the harness (MAF `evaluate_agent`, `LocalEvaluator`, its checks and `@evaluator`; no model
+  judge, no long runs), grouped into the dev-path tiers, each tier's bar all of its cases twice in a row; outside
+  sets stay `ext`, calibration only. It supersedes ADR-0011 and amends ADR-0006 in part (a dated note there).
+- Spec 001, the coverage map (`docs/specs/001-capability-evals.md`): 73 capabilities from the Charter,
+  ARCHITECTURE.md and the ADRs, each with its source and its coverage (5 covered, 13 partly, 55 untested), and 60
+  proposed cases for the gaps, by tier (T2, T3, T4) and by risk. Proposals only; no set file is written.
+  `docs/ARCHITECTURE.md`, `docs/README.md`, the ADR index and the evals README point to them.
 
 - ADR-0010, "Notes are central in Jesster": one vault (`worlds/notes`), owned and served by Jesster; a local IDE
   client reaches it only through the kernel's notes-only adapter (`--only notes`); no MCP surface exposes the kernel's

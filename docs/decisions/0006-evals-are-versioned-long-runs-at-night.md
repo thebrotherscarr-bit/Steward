@@ -1,5 +1,5 @@
 ---
-status: accepted; superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)
+status: accepted; superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) and [ADR-0012](0012-stewards-bar-is-our-own-capability-evals.md)
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
@@ -10,6 +10,13 @@ deciders: Kyle
 > 2026-11-05: superseded in part by [ADR-0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md):
 > evals run whenever the operator says, day or night; the night-only rule for long sets is gone. In chat,
 > `eval_start` is planned and carded.
+>
+> 2026-11-05: superseded in part by [ADR-0012](0012-stewards-bar-is-our-own-capability-evals.md): Steward's bar is our
+> own capability evals ("can he do what is needed for the system reliably", the operator). A tier now holds one small
+> deterministic case per capability of the coverage map ([spec 001](../specs/001-capability-evals.md)), written from
+> the map before any failure (error analysis still adds cases for failures that recur), and the bar of every
+> capability tier from T2 is all of its cases, twice in a row. What stands: versioned set files, the validator and
+> fingerprints, the tiers' order, one run per case on a gating tier, and `ext` sets as calibration only.
 
 ## Context and Problem Statement
 
