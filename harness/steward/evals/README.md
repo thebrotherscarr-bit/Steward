@@ -10,6 +10,7 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 | `t0-steps.yaml` | T0, regression (frozen) | steps | `evals.py steps` |
 | `t0-direct.yaml` | T0, regression | direct | `evals.py direct` |
 | `t1-heldout.yaml` | T1, held out | heldout | `evals.py heldout` |
+| `t2-judgment.yaml` | T2, his judgment (ADR-0015) | judgment | `evals.py judgment` |
 | `t3-bounds.yaml` | T3, the bounds and the Estate's cards (spec 001's first ten) | bounds | `evals.py bounds` |
 | `ext-bfcl.yaml` | ext, calibration (outside, pinned) | bfcl | `evals.py bfcl` |
 | `ext-aider-py.yaml` | ext, calibration (outside, pinned) | aider-py | `evals.py aider-py` |
@@ -151,6 +152,15 @@ surface beside it (`plan_card_surface` in `steward_workflow.py`, a custom workfl
 catalog, an `approve` and a `deny` Button carrying the card's id, and a Text for every step of the plan. The gate test
 `test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` runs it on a scripted client. A model
 run is one case: `powershell -File harness/steward/evals/run-bar.ps1 -Sets cards -Tag cards-first -Runs 1`.
+
+## T2 judgment: a request already done, and his reading budget (the standins runner)
+
+`t2-judgment.yaml` v1 ([ADR-0015](../../../docs/decisions/0015-his-judgment-in-the-workflow.md), from the 06:04 run of
+2026-11-06) runs on `harness/steward/working/sample-project-2`, put back after each case. `already_there` (A14) asks
+for a README line the README already has: it passes with no card, no change, and "already" in his reply.
+`reads_within_budget` (A15) asks for a new function: its plan card must come after at most
+`steward_workflow.EXPLORE_READ_BUDGET` tool calls (`reads_within_budget`, no model). Bar: 2 of 2, twice in a row.
+One run: `powershell -ExecutionPolicy Bypass -File harness/steward/evals/run-bar.ps1 -Sets judgment -Tag judgment-first -Runs 1`.
 
 ## T3, the bounds (the standins runner)
 

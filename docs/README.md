@@ -42,6 +42,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals (amended 2026-11-05: everything he does lands with its eval case; `evals.py validate` enforces it) | accepted |
 | [0013](decisions/0013-a2ui-pilot-plan-card.md) | A2UI pilot: the plan's approval card as an A2UI surface, sent beside its AG-UI interrupt | accepted (pilot scope) |
 | [0014](decisions/0014-the-bounds-are-gates-in-code.md) | The bounds are gates in code: refused at the call, and at the plan | accepted |
+| [0015](decisions/0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
 
 ## Specs
 

@@ -83,6 +83,7 @@ from agent_framework import (
     Default,
     Executor,
     FileAccessProvider,
+    FunctionInvocationContext,
     Message,
     TodoItem,
     TodoProvider,
@@ -209,8 +210,14 @@ PLAN_NOW = (
     "the JSON object asked for: type approval, a summary of the plan as its one question, and your steps, one short "
     "imperative line each, a step that changes a file naming that file by its path; they become your todo list when "
     "the user approves. If you need the user's answer first, reply with type clarification and a question that lists "
-    "the choices."
+    "the choices. If what you read shows the request is already done (what it asks for is already there), plan no "
+    "change: set already_done to what showed it, the file and the line."
 )
+# ADR-0015 (the 2026-11-06 06:04 run, transcript b06035a6: he read that the README already said how to run the tests,
+# reasoned "that's what the instruction says... might be okay", planned the duplicate and wrote it): a request already
+# satisfied by what he read is answered so, with its evidence, and no plan card. StewardPlan's already_done carries it,
+# read in code by ReadPlan, as the plan itself is.
+ALREADY_DONE = "Already done, so nothing was changed: {evidence}"
 # The user's request, kept in the workflow's state by ROUTE (so in its checkpoint): the plan card and the commit message
 # name it. The bar at aba870f (steps set, 2026-11-04): PLAN was asked again (PLAN_AGAIN), its second run's conversation
 # started at that message, and the commit message was asked for "Request: Your reply was empty. Reply now with your
@@ -453,6 +460,15 @@ class StewardPlan(PlanningResponse):
     # and live 2026-11-01 a "clarification" came with no questions and its answer stuffed into steps.
     questions: list[PlanningQuestion] = Field(
         min_length=1, description=PlanningResponse.model_fields["questions"].description
+    )
+    # ADR-0015: the request is already satisfied by what he read; ReadPlan answers with it (ALREADY_DONE), no card.
+    already_done: str | None = Field(
+        default=None,
+        description=(
+            "Only when what you read shows the request is already done (what it asks for is already there): what "
+            "showed it, the file and the line, e.g. 'README.md line 7 already says python -m unittest -v'. Nothing is "
+            "then changed. Leave it out otherwise."
+        ),
     )
 
 
@@ -808,6 +824,11 @@ EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, "todos_add", *_MODE_TO
 # offered only the Estate's reads, so his reading is at most a status check and no code search or file read stands
 # between the request and his plan (session-20261105-1110-535a: 18 EXPLORE calls, 15 minutes, before the card).
 DIRECT_ASK_TOOLS = frozenset(f"secondbrain_{name}" for name in ESTATE_READS)
+# ADR-0015, the reading budget: EXPLORE's reads before a plan are at most EXPLORE_READ_BUDGET tool calls (the 06:04 run
+# of 2026-11-06 made 17 reads and searches in two minutes before planning a one-line README change). Past it, EXPLORE's
+# calls are offered no tool, as MAF's own progressive tool exposure cuts a run's list (step_tools_turn), so its reply
+# is its words and the plan call follows; EXECUTE reads what else it needs after the plan is approved.
+EXPLORE_READ_BUDGET = 8
 
 
 def offered_in_step(name: str, step: str | None, shell_closed: bool = False, direct: bool = False) -> bool:
@@ -846,10 +867,28 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         closed = _agent.sandbox_shell_closed(session)
         direct = bool(session.state.get(_agent.DIRECT_ACTION_KEY))
         names = [getattr(t, "name", "") or "" for t in tools]
-        cut = {n for n in names if not offered_in_step(n, step, closed, direct)}
+        spent = step == EXPLORE_STEP and calls_made(session) >= EXPLORE_READ_BUDGET
+        cut = {n for n in names if spent or not offered_in_step(n, step, closed, direct)}
         tools[:] = [t for t, n in zip(tools, names) if n not in cut]
         kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
         session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
+    await call_next()
+
+
+_CALLS_MADE_KEY = "steward_calls_made"
+
+
+def calls_made(session: Any) -> int:
+    """The tool calls this session has run (count_calls): EXPLORE's reads, for EXPLORE_READ_BUDGET."""
+    return int(session.state.get(_CALLS_MADE_KEY, 0) or 0) if session is not None else 0
+
+
+async def count_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware: each call a session runs is counted in its state (a chat call's messages hold only the
+    run's input, not the function loop's calls, so the count is kept here, where MAF runs each call)."""
+    session = context.session or _agent._RUN_SESSION.get()
+    if session is not None:
+        session.state[_CALLS_MADE_KEY] = calls_made(session) + 1
     await call_next()
 
 
@@ -1059,6 +1098,9 @@ class ReadPlan(Executor):
             await ctx.send_message(AgentExecutorRequest(messages=[Message(role="user", contents=[Content.from_text(again)])]), target_id=PLAN_STEP)
             return
         ctx.set_state(_PLAN_ASKED_AGAIN_KEY, False)
+        if plan is not None and (evidence := " ".join((plan.already_done or "").split())):
+            await ctx.yield_output(ALREADY_DONE.format(evidence=evidence))  # ADR-0015: no plan, no card, no change
+            return
         if plan is None:
             await ctx.yield_output(last)
         elif plan.type != PlanningResponseType.APPROVAL:
@@ -1425,6 +1467,7 @@ def build_steward_workflow(
         # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
         # tools (repair_tool_names, recover_text_tool_calls): each step's calls are offered only its tools.
         step_tools_turn,
+        count_calls,  # ADR-0015: EXPLORE's calls, for its reading budget
         *(agent.middleware or []),
     ]
     # His own window and keep-alive on the router's call, so Ollama answers it with the model as loaded.

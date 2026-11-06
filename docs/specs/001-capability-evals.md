@@ -71,6 +71,8 @@ there in the same pull request.)_
 | A11 | A reply written on a card is Kyle's instruction and is followed | Charter, Your tools (last line) | untested | the eval policy answers cards yes or no, with no words |
 | A12 | Each step of a request is announced as it runs, by its executor's id (over AG-UI, STEP_STARTED and STEP_FINISHED), so the Agent tab and the Phone view show which step he is in | ADR-0003; ExecPlan 0003 (AG-UI step 3) | partly | steps: `plan_step` and `execute_step` find each step's work by its executor's own events (in-process); the host's side is gate test `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor`, the client's Jesster's `agui.test.cjs` |
 | A13 | The plan's card comes with its A2UI surface, built from the plan: the plan, every step, Approve and Deny answering that card | ADR-0013; ExecPlan 0004 (the A2UI pilot) | covered | cards (t2-cards v1: plan_card_a2ui): `plan_card_surface` |
+| A14 | A request already satisfied by what he read is answered so, with what showed it: no plan, no card, no change | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: already_there): `no_card`, `no_change_made`, `keyword_check` |
+| A15 | His reading before a plan is bounded: the plan card comes after at most `EXPLORE_READ_BUDGET` tool calls | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: reads_within_budget): `plan_card_first`, `reads_within_budget` |
 
 ### B. Where a message comes from, and time
 
@@ -201,7 +203,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 
 | | Capabilities | Covered | Partly | Untested |
 |---|---|---|---|---|
-| A. How a request runs | 13 | 4 | 5 | 4 |
+| A. How a request runs | 15 | 6 | 5 | 4 |
 | B. Sources and time | 6 | 0 | 1 | 5 |
 | C. The Estate's tools | 10 | 0 | 2 | 8 |
 | D. Flows and automations | 3 | 0 | 0 | 3 |
@@ -214,7 +216,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | K. Improvement rounds | 1 | 0 | 0 | 1 |
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
-| **Total** | **75** | **6** | **14** | **55** |
+| **Total** | **77** | **8** | **14** | **55** |
 
 ## The proposed cases
 

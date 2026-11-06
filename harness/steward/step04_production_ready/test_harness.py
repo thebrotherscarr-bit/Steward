@@ -8508,11 +8508,11 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 75  # A12, A13: ExecPlans 0003, 0004
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 77  # A12, A13: ExecPlans 0003, 0004; A14, A15: ADR-0015
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15"}, sorted(required)
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() for t in c.tools} == evals.steward_tool_names()
@@ -8961,3 +8961,70 @@ def test_the_bounds_cases_whatsapp_sitting_and_archive_pass_on_a_scripted_model(
         assert code == 0 and run_line["passed"] == 1, (case_id, run_line)
 
 # </bounds>
+
+
+# <judgment> ADR-0015: his judgment, held in the workflow.
+
+
+def _judgment_case(case_id: str) -> Any:
+    import dataclasses
+
+    import evals
+
+    judgment = evals.EVAL_SETS["judgment"]
+    return dataclasses.replace(judgment, cases=(judgment.case(case_id),))
+
+
+def test_a_request_already_done_is_answered_with_what_showed_it_and_no_card() -> None:
+    """ADR-0015, A14 (the 06:04 run of 2026-11-06: the README already said how to run the tests, and he wrote it again):
+    a plan whose already_done names what showed it ends the run with ALREADY_DONE and that evidence, no card and no
+    change; the same plan without it goes to its card. The judgment set's already_there case passes on a scripted model
+    that says so, and fails on one that plans the line again."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    assert "already_done" in wf.StewardPlan.model_json_schema()["properties"], "the plan's schema carries it"
+    assert "already_done" in wf.PLAN_NOW, "the plan call is told when to use it"
+    evidence = "README.md line 7 already says python -m unittest -v"
+    done = json.dumps({"type": "approval", "questions": [{"message": "Nothing to add."}], "steps": ["No change"], "already_done": evidence})
+    events, _ = _bounds_run("Add a line to README.md saying how to run its tests.", ["Read."], plans=[done])
+    assert said(events) == [wf.ALREADY_DONE.format(evidence=evidence)] and not [e for e in events if e.type == "request_info"]
+    planned = json.dumps({"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Add the line to README.md"]})
+    events, _ = _bounds_run("Add a line to README.md saying how to run its tests.", ["Read."], plans=[planned])
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+    for plan, passed in ((done, 1), (planned, 0)):
+        client = ScriptedChatClient(["Read."], plans=[plan])
+        asyncio.run(evals.standins_main(_judgment_case("already_there"), client=client, enable_shell=False))
+        run_line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+        assert run_line["passed"] == passed, run_line
+
+
+def test_explores_reading_before_a_plan_stops_at_its_budget() -> None:
+    """ADR-0015, A15 (the 06:04 run: 17 reads and searches before a one-line plan): EXPLORE's calls are offered its read
+    tools until EXPLORE_READ_BUDGET calls are made, then none, so its reply is words and the plan call follows. The
+    judgment set's reads_within_budget case passes with the plan card at the budget and fails past it."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    budget = wf.EXPLORE_READ_BUDGET
+    reads = [Content.from_function_call(call_id=f"r{n}", name="file_access_ls", arguments={"directory": "."}) for n in range(budget + 3)]
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Add it."}], "steps": ["Add kelvin_to_celsius to units.py"]})
+    events, client = _bounds_run("Add a function kelvin_to_celsius to units.py.", [*reads[:budget], "Read enough."], plans=[plan])
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+    assert "file_access_ls" in offered_tools(client.calls[budget - 1]), "within the budget, his reads are offered"
+    assert offered_tools(client.calls[budget]) == set(), "at the budget, EXPLORE is offered no tool"
+    for count, passed in ((budget, 1), (budget + 1, 0)):
+        calls = [Message(role="assistant", contents=[r]) for r in reads[:count]]
+        card = Content.from_function_call(call_id="p1", name=wf.APPROVE_PLAN, arguments={"plan": "Add it."})
+        conversation = [*calls, Message(role="assistant", contents=[card, Content.from_function_approval_request(id="p1", function_call=card)])]
+        assert scored(evals.reads_within_budget, "q", conversation).passed is bool(passed), count
+    client = ScriptedChatClient([*reads[:budget], "Read."], plans=[plan])
+    asyncio.run(evals.standins_main(_judgment_case("reads_within_budget"), client=client, enable_shell=False))
+    assert json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])["passed"] == 1
+
+
+# </judgment>
