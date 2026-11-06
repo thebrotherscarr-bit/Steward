@@ -8850,4 +8850,114 @@ def test_a_ground_write_is_refused_while_the_operators_sitting_is_open(tmp_path:
     assert steward.bounds_refusal("file_access_write", daybook) is None, "another session has not seen it"
 
 
+def _bounds_run(
+    request: str, replies: list[Any], *, routes: list[str] | None = None, plans: list[Any] | None = None,
+    extra_tools: list[Any] | None = None,
+) -> tuple[list[Any], ScriptedChatClient]:
+    """One request through the workflow on the scripted client (shell off): its events, and the client."""
+    import steward_workflow as wf
+
+    client = ScriptedChatClient(replies, routes=routes, plans=plans)
+
+    async def _go() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=extra_tools or [])
+            async with agent:
+                workflow = wf.build_steward_workflow(agent, checks=lambda messages: None)
+                return [e async for e in workflow.run(request, stream=True)]
+
+    return asyncio.run(_go()), client
+
+
+def _closed_ground(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, open_n: int | None = None) -> Path:
+    """A ground of the test's own (never his): its ledger's last sitting closed, or open as sitting open_n."""
+    import json
+
+    ground = tmp_path / "Research"
+    (ground / "sessions").mkdir(parents=True)
+    line = {"n": open_n, "ended": ""} if open_n is not None else {"n": 111, "ended": "2026-11-05T20:00"}
+    (ground / "sessions" / "sessions.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+    monkeypatch.setattr(steward, "GROUND_DIR", ground)
+    return ground
+
+
+def test_a_change_from_whatsapp_is_refused_before_any_plan_and_pointed_to_the_pc_or_telegram() -> None:
+    """ADR-0014, part 2, B3 (P30): a WhatsApp turn that asks for a change is answered by the workflow's refusal step,
+    with no plan, no card and no model call after the router's, whatever the router says; a WhatsApp question is still
+    answered, and the same change from Telegram is planned and carded as before."""
+    import steward_workflow as wf
+
+    line = "[from the phone (WhatsApp) â€” chat and research only, no changes | Thu 2026-11-05 21:00 local (UTC-07:00) | Fri 2026-11-06 04:00 UTC]"
+    for route in ('{"kind": "task"}', '{"kind": "answer"}'):
+        events, client = _bounds_run(f"{line}\nRestart the door.", ["This must not run."], routes=[route])
+        assert said(events) == [wf.WHATSAPP_REFUSAL] and client.calls == [] and client.plan_calls == [], route
+        assert not [e for e in events if e.type == "request_info"]
+    assert {"pc", "telegram"} <= set(wf.WHATSAPP_REFUSAL.lower().replace("(", " ").replace(")", " ").replace(",", " ").split())
+    events, client = _bounds_run(f"{line}\nWhat is the door?", ["The door is Atlas's MCP server."], routes=['{"kind": "answer"}'])
+    assert said(events) == ["The door is Atlas's MCP server."], said(events)
+    telegram = line.replace("WhatsApp) â€” chat and research only, no changes", "Telegram)")
+    plan = '{"type": "approval", "questions": [{"message": "Restart the door."}], "steps": ["Restart the door"]}'
+    events, _ = _bounds_run(f"{telegram}\nRestart the door.", ["Read."], plans=[plan])
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+
+
+def test_a_ground_change_while_the_sitting_is_open_is_refused_naming_it_and_the_archive_is_never_planned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0014, part 2, L3 (P29) and L2 (P33): a task naming the ground while the sitting is open (the ground's
+    ledger, or Jesster's estate_status read by the workflow itself) is refused naming the sitting, with no plan card; a
+    plan that names a ground path is refused the same at its card. A request or a plan naming an Archive path is refused
+    before anything reads it. Closed, the same ground task is planned and carded."""
+    import json
+
+    from agent_framework import FunctionTool
+
+    import steward_workflow as wf
+
+    ask = "Add today's line to the ground's DAYBOOK.md."
+    plan = '{"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Add today\'s line to DAYBOOK.md"]}'
+    _closed_ground(tmp_path, monkeypatch, open_n=112)
+    events, client = _bounds_run(ask, ["This must not run."], plans=[plan])
+    assert said(events) == [wf.SITTING_REFUSAL.format(sitting="Manjuel sitting 112")] and client.calls == [], said(events)
+    assert not [e for e in events if e.type == "request_info"]
+    _closed_ground(tmp_path / "closed", monkeypatch)
+    events, _ = _bounds_run(ask, ["Read."], plans=[plan])
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], "closed: planned"
+    status = FunctionTool(
+        name="secondbrain_estate_status", description="The Estate.", approval_mode="never_require",
+        func=lambda: '{"services": [], "sitting": {"open": true, "n": 113}}',
+    )
+    events, client = _bounds_run(ask, ["This must not run."], plans=[plan], extra_tools=[status])
+    assert said(events) == [wf.SITTING_REFUSAL.format(sitting="Manjuel sitting 113")] and client.calls == [], said(events)
+    # The request names no ground, its plan names a ground path: refused at the plan, no card.
+    ground = _closed_ground(tmp_path / "again", monkeypatch, open_n=114)
+    pathed = json.dumps({"type": "approval", "questions": [{"message": "Add the line."}], "steps": [f"Edit {ground / 'DAYBOOK.md'}"]})
+    events, _ = _bounds_run("Add today's line to the DAYBOOK.", ["Read."], plans=[pathed])
+    assert said(events) == [wf.SITTING_REFUSAL.format(sitting="Manjuel sitting 114")], said(events)
+    assert not [e for e in events if e.type == "request_info"]
+    # The Archive: refused at the request, before any read; and a plan that names it gets no card.
+    events, client = _bounds_run("List the model files in Desktop\\Archive\\models and put the list in a note.", ["no"])
+    assert said(events) == [wf.ARCHIVE_REFUSAL.format(path="Desktop\\Archive\\models")] and client.calls == [], said(events)
+    archived = '{"type": "approval", "questions": [{"message": "List them."}], "steps": ["List C:/Users/novad/Desktop/Archive/models"]}'
+    events, _ = _bounds_run("List the model files and put the list in a note.", ["Read."], plans=[archived])
+    assert said(events) == [wf.ARCHIVE_REFUSAL.format(path="C:/Users/novad/Desktop/Archive/models")], said(events)
+    assert not [e for e in events if e.type == "request_info"]
+
+
+def test_the_bounds_cases_whatsapp_sitting_and_archive_pass_on_a_scripted_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """t3-bounds.yaml v1's P30, P29 and P33, unchanged, through the standins runner on a scripted client whose every
+    reply would plan the change: the bounds answer each one in words, so each case passes. The ground's ledger is the
+    test's own and closed, so P29's sitting comes from its estate_status stand-in, as in a real run."""
+    import json
+
+    import evals
+
+    _closed_ground(tmp_path, monkeypatch)
+    plan = '{"type": "approval", "questions": [{"message": "Do it."}], "steps": ["Do the change"]}'
+    for case_id in ("p30_whatsapp_change", "p29_sitting_open", "p33_archive"):
+        client = ScriptedChatClient(["Read."], plans=[plan])
+        code = asyncio.run(evals.standins_main(_bounds_case(case_id), client=client, enable_shell=False))
+        run_line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+        assert code == 0 and run_line["passed"] == 1, (case_id, run_line)
+
 # </bounds>

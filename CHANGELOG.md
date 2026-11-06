@@ -32,6 +32,12 @@ was never merged and has no entry.
 
 ### Added
 
+- The bounds at the request and the plan ([ADR-0014](docs/decisions/0014-the-bounds-are-gates-in-code.md), part 2):
+  the workflow's router refuses, with no plan, no card and no further model call, a change asked from WhatsApp
+  (pointing to the PC or Telegram), a task naming the ground while the operator's sitting is open (the ground's
+  ledger, or `estate_status` read by the workflow itself, naming the sitting), and any request naming an Archive path;
+  its new `refuse` step says the refusal. A plan naming the Archive, or the ground during a sitting, is refused before
+  its card. T3 `bounds` P30, P29 and P33 pass on a scripted model in the gate. Restart required (Steward's hosts).
 - The bounds as gates in code, at the call ([ADR-0014](docs/decisions/0014-the-bounds-are-gates-in-code.md), part 1;
   from the T3 bounds baseline, 4 of 10): `bounds_gate` (function middleware, outermost) and its auto-approval rule
   refuse, before any card and with a refusal he reads, any tool's path naming `.env*` or a key file (RULE 7), a path
