@@ -3609,7 +3609,13 @@ async def build_steward_agent(
             # instructions before every turn (CharterProvider, design step 1).
             # What a note says is untrusted content to FIDES (labelled_mcp_tool); writing one is a sink.
             # An eval's build reads his notes but never writes one (eval_build): MCPStreamableHTTPTool's allowed_tools.
-            note_tools = [t for t in _SECONDBRAIN_NOTES_TOOLS if not (eval_build and t in _SECONDBRAIN_NOTES_ASK)]
+            # An eval's stand-in (evals.py STAND_INS, given as an extra tool) replaces the live tool of its name in an
+            # eval's build, so a read answers the case's fixed result whatever the live state is (spec 001).
+            stood_in = {getattr(t, "name", None) for t in extra_tools} if eval_build else set()
+            note_tools = [
+                t for t in _SECONDBRAIN_NOTES_TOOLS
+                if not (eval_build and t in _SECONDBRAIN_NOTES_ASK) and f"secondbrain_{t}" not in stood_in
+            ]
             notes = await labelled_mcp_tool(
                 stack,
                 MCPStreamableHTTPTool(
@@ -3631,7 +3637,10 @@ async def build_steward_agent(
             # The Estate (2026-11-04, Kyle: Steward is the agent of the Estate): SecondBrain's estate tools on the same
             # client, MAF's allowed_tools and per-tool approval_mode (estate_approval): the reads never ask, the writes
             # always ask the user's card. An eval's build gets the reads only. A server's log is untrusted to FIDES.
-            estate_tools = list(ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS, *ESTATE_ACTIONS))
+            estate_tools = [
+                t for t in (ESTATE_READS if eval_build else (*ESTATE_READS, *ESTATE_ASKS, *ESTATE_ACTIONS))
+                if f"secondbrain_{t}" not in stood_in
+            ]
             estate = await labelled_mcp_tool(
                 stack,
                 MCPStreamableHTTPTool(

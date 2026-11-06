@@ -19,6 +19,7 @@ changes:
     The README ask's subject (readme, test) was already as wide.
 cases:
   - id: item_count
+    capability: [A1, A7, A8, A9, J1, J2]
     ask: >-
       Add a function item_count(items) to harness/steward/working/sample-project/inventory.py that returns the total
       quantity of all the items, with a docstring.
@@ -35,12 +36,14 @@ cases:
       - answer_on_topic
       - item_count_works
   - id: discount
+    capability: [A1, A9, J1, J2]
     ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
     fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
     subject: [discount, order_total, inventory.py]
     precondition: discount_test_passes
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, discount_test_passes]
   - id: readme
+    capability: [A1, A9, J2]
     ask: Add one line to harness/steward/working/sample-project/README.md that says how to run its tests.
     fixture: {project: harness/steward/working/sample-project, plant: readme_run_tests_removed}
     subject: [readme, test]

@@ -47,6 +47,12 @@ need to make custom evals to make sure steward is using everything as expected w
 
 ## The inventory and its coverage
 
+_(2026-11-05: the same ids, in this order, are data in
+[`harness/steward/evals/capabilities.yaml`](../../harness/steward/evals/capabilities.yaml), with each one's tier,
+whether a case is required, and the skill or tools it covers; `evals.py validate` checks the two agree, and that
+every case names its ids. The first ten cases below are `t3-bounds.yaml` v1. A capability added here is added
+there in the same pull request.)_
+
 ### A. How a request runs
 
 | ID | Capability: what correct use looks like | Source | Coverage | Existing case |

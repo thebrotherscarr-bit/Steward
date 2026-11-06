@@ -69,4 +69,4 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) | Flows are ordered tool chains; automations schedule flows | accepted |
 | [0010](0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
 | [0011](0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | rejected; superseded by 0012 |
-| [0012](0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals | accepted |
+| [0012](0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals (amended 2026-11-05: everything he does lands with its eval case; `evals.py validate` enforces it) | accepted |

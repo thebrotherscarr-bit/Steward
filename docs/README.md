@@ -39,7 +39,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) | Flows are ordered tool chains; automations schedule flows | accepted |
 | [0010](decisions/0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
 | [0011](decisions/0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | rejected; superseded by 0012 |
-| [0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals | accepted |
+| [0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals (amended 2026-11-05: everything he does lands with its eval case; `evals.py validate` enforces it) | accepted |
 
 ## Specs
 
