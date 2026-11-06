@@ -32,6 +32,9 @@ was never merged and has no entry.
 
 ### Added
 
+- ADR-0013, the A2UI pilot for the plan's approval card (accepted for that scope on the operator's word, 2026-11-05:
+  "do the A2UI work, as well"), and ExecPlan 0004 to carry it out; the doc map, the indexes and ARCHITECTURE's
+  protocols name them.
 - AG-UI step 3, Milestones 2 and 3 (ADR-0003, ExecPlan 0003): the Agent tab (Jesster #94) and the Phone view
   (Jesster #95) draw the turn's step line from the host's step events. ExecPlan 0003's Progress and Outcomes updated.
 - AG-UI step 3, Milestone 1 (ADR-0003, ExecPlan 0003): capability A12 (each step of a request is announced as it
