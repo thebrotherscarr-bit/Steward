@@ -196,7 +196,7 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
   deterministic case per capability Steward must use, scored by `evaluate_agent` with `LocalEvaluator` (MAF's checks
   and our `@evaluator` functions: a tool called, a card raised and honoured, a rule kept, a file's state); no model
   judge, no long runs. The capabilities, from the Charter, this file and the ADRs, are listed with their coverage in
-  [spec 001](specs/001-capability-evals.md) (74 on 2026-11-05: 5 covered, 14 partly, 55 untested). They are grouped
+  [spec 001](specs/001-capability-evals.md) (75 on 2026-11-05: 6 covered, 14 partly, 55 untested). They are grouped
   into the dev-path tiers (T0 and T1 met; T2 his own work, T3 Estate operations, T4 GitHub, then T5 to T7), and a
   tier's bar is all of its cases, twice in a row. Outside sets (BFCL, Aider Python) stay tier `ext`, calibration
   only; the parity set of [ADR-0011](decisions/0011-harness-parity-set.md) was rejected.

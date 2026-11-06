@@ -7292,6 +7292,67 @@ def test_the_ag_ui_host_announces_each_workflow_step_by_its_executor() -> None:
     assert {wf.CHECK_STEP, wf.REPAIR_STEP, wf.COMMIT_STEP, wf.REPORT_STEP, wf.ANSWER_STEP} == {"check", "repair", "commit", "report", "answer"}, "the names the step line knows"
 
 
+def test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval() -> None:
+    """ADR-0013 (the A2UI pilot), capability A13: AskApproval sends the plan card's A2UI v0.9 surface, built from the
+    plan by plan_card_surface, as a custom workflow event of type a2ui just before the card. Over MAF's AG-UI host it is
+    a CUSTOM event named a2ui whose request_id is the card's interrupt id; the cards set's case (t2-cards v1, the plans
+    runner) passes on a scripted plan, and plan_card_surface fails a card with no surface or one that drops a step.
+    Red when the event, the surface or the check comes unplugged."""
+    import json
+
+    import ag_ui_app
+    import evals
+    import steward_workflow as wf
+    from agent_framework import Message
+    from starlette.testclient import TestClient
+
+    steps = ["Add a docstring to convert_length", "Run the tests"]
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Document convert_length."}], "steps": steps})
+    # the surface itself: v0.9, the basic catalog, a Text per step, approve and deny carrying the card's id
+    messages = wf.plan_card_surface({"plan": "Document convert_length.", "steps": steps}, "approve_plan-x")
+    assert evals._surface_problems({"request_id": "approve_plan-x", "messages": messages}, "approve_plan-x", steps) == []
+    assert [next(iter(set(m) - {"version"})) for m in messages] == ["createSurface", "updateComponents"]
+    assert evals._surface_problems({"request_id": "approve_plan-y", "messages": messages}, "approve_plan-x", steps + ["Commit"]) == [
+        "the surface names card 'approve_plan-y', not 'approve_plan-x'",
+        "the surface does not show the steps ['Commit']",
+    ]
+    assert "no approve Button carrying the card's id" in evals._surface_problems({"request_id": "approve_plan-q", "messages": messages}, "approve_plan-q", steps)
+
+    # over AG-UI: CUSTOM a2ui, before the card's interrupt, naming it
+    replies: list[Any] = [plan]
+
+    def fresh_client() -> ScriptedChatClient:
+        client = ScriptedChatClient([])
+        client.replies = replies
+        return client
+
+    with TestClient(ag_ui_app.build_ag_ui_app(client_factory=fresh_client, enable_shell=False)) as http:
+        events = _ag_ui_events(http, {"threadId": "t-a2ui", "runId": "r0", "messages": [{"id": "u1", "role": "user", "content": "Document convert_length."}]})
+    [interrupt] = events[-1]["outcome"]["interrupts"]
+    [surface] = [e for e in events if e["type"] == "CUSTOM" and e["name"] == wf.A2UI]
+    assert surface["value"]["request_id"] == interrupt["id"], (surface["value"].get("request_id"), interrupt["id"])
+    assert events.index(surface) < len(events) - 1, "sent before RUN_FINISHED"
+    assert evals._surface_problems(surface["value"], interrupt["id"], steps) == [], surface["value"]
+
+    # the cards eval: a scripted plan card passes plan_card_surface
+    eval_set = evals.EVAL_SETS["cards"]
+    [case] = eval_set.cases
+    assert case.capabilities == ("A13",) and case.checks == ("plan_card_surface",)
+    client = ScriptedChatClient(["I will plan it."], plans=[plan])
+    code = asyncio.run(evals.plans_main(eval_set, client=client, enable_shell=False))
+    [line] = evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()
+    run = json.loads(line)
+    assert code == 0 and (run["set"], run["set_version"], run["passed"], run["total"]) == ("cards", 1, 1, 1), run
+
+    # without the surface, the check fails
+    card = Content.from_function_approval_request(
+        id="approve_plan-z", function_call=Content.from_function_call(call_id="approve_plan-z", name=wf.APPROVE_PLAN, arguments={"steps": steps})
+    )
+    bare = [Message(role="assistant", contents=[card])]
+    assert not scored(evals.plan_card_surface, case.ask, bare).passed
+    assert scored(evals.plan_card_surface, "Something else.", bare).reason == "Not this case."
+
+
 def test_the_bfcl_checker_scores_calls_as_bfcls_ast_check_does() -> None:
     """ext-bfcl's bfcl_ast_match, as BFCL's AST checker: the function, its required parameters, no parameter the answer
     lacks, each value among its acceptable ones (strings case- and punctuation-blind, an int for a float, "" meaning it
@@ -8447,11 +8508,11 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 74  # A12 added by ExecPlan 0003
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 75  # A12, A13: ExecPlans 0003, 0004
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13"}, sorted(required)
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() for t in c.tools} == evals.steward_tool_names()

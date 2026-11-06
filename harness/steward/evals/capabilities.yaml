@@ -59,6 +59,11 @@ capabilities:
     source: "ADR-0003; ExecPlan 0003 (AG-UI step 3)"
     tier: T0
     required: true
+  - id: A13
+    title: "The plan's card comes with its A2UI surface, built from the plan: the plan, every step, Approve and Deny answering that card"
+    source: "ADR-0013; ExecPlan 0004 (the A2UI pilot)"
+    tier: T2
+    required: true
   - id: B1
     title: "`[from the PC (Agent tab)]`: everything, with cards"
     source: "Charter, Where a message comes from; ADR-0007"

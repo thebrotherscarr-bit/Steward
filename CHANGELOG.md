@@ -32,6 +32,10 @@ was never merged and has no entry.
 
 ### Added
 
+- The A2UI pilot, Milestone 1 (ADR-0013, ExecPlan 0004): the plan card's A2UI v0.9 surface, built from the plan
+  (`steward_workflow.plan_card_surface`) and sent by `AskApproval` as a custom workflow event of type `a2ui` (AG-UI
+  CUSTOM `a2ui`) just before the card. Capability A13 (required) with its case, `t2-cards.yaml` v1 (the plans runner,
+  check `plan_card_surface`); the plans runner scores the checks its cases name. Restart required: the AG-UI host.
 - ADR-0013, the A2UI pilot for the plan's approval card (accepted for that scope on the operator's word, 2026-11-05:
   "do the A2UI work, as well"), and ExecPlan 0004 to carry it out; the doc map, the indexes and ARCHITECTURE's
   protocols name them.

@@ -26,8 +26,11 @@ and Deny buttons, not JSON.
 
 - [x] (2026-11-05 20:40) Researched what ships (A2UI v0.9, `@a2ui/react` and `@a2ui/web_core` 0.15.0, MAF 1.7.1's
   `_a2ui`, MAF's custom workflow events over AG-UI) and wrote ADR-0013 and this plan.
-- [ ] Milestone 1 (Steward): the plan card's surface, sent as a custom workflow event; capability A13 with its eval
-  case; gate tests.
+- [x] (2026-11-05 20:46) Milestone 1 (Steward): `plan_card_surface` and `PlanCardSurface` in `steward_workflow.py`,
+  sent by `AskApproval` before its card; `plan_card_surface` check, `plan_phase_conversation` carrying the surface,
+  the `t2-cards` v1 set and A13 (required); gate test
+  `test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` (red with the event removed:
+  checked). Restart required: Steward's AG-UI host.
 - [ ] Milestone 2 (Jesster): the AG-UI client hands the surface to the card; the card's answer path unchanged.
 - [ ] Milestone 3 (Jesster): the Agent tab and the Phone view draw the card from the surface with the A2UI renderer and
   the app's own components; today's card when there is no surface or it cannot be drawn.

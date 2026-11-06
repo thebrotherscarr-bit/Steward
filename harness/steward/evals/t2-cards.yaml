@@ -1,0 +1,23 @@
+# T2, his own work: the cards he raises, scored on the plan card alone (the plans runner, every card denied, nothing
+# runs). ADR-0013 (the A2UI pilot) and ExecPlan 0004: the plan card comes with its A2UI surface, built from the plan.
+# Run: python harness/steward/step04_production_ready/evals.py cards
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: cards
+tier: T2
+version: 1
+owner: operator
+runner: plans
+split: full
+bar: {passed: 1, of: 1, runs_in_a_row: 2}
+changes:
+  1: >-
+    The A2UI pilot's case (ADR-0013, 2026-11-05): the operator's acceptance ask from ExecPlan 0003 and 0004. Its plan
+    card must come with the card's A2UI v0.9 surface on the basic catalog, an approve and a deny Button carrying the
+    card's id, and a Text for every step of the plan (plan_card_surface, no model).
+cases:
+  - id: plan_card_a2ui
+    capability: [A13]
+    ask: Add a docstring to convert_length in harness/steward/working/sample-project-2/units.py.
+    subject: [convert_length]
+    max_calls: 8
+    checks: [plan_card_surface]

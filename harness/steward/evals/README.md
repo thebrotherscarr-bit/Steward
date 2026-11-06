@@ -142,6 +142,16 @@ changes, and its plan card is its result. Validate checks its shape and its fing
 run is one case, about a minute:
 `powershell -File harness/steward/evals/run-bar.ps1 -Sets direct -Tag direct-first -Runs 1`.
 
+## T2 cards: the plan card's A2UI surface (the plans runner)
+
+`t2-cards.yaml` v1 (ADR-0013, the A2UI pilot; capability A13) holds one case, the operator's acceptance ask "Add a
+docstring to convert_length in harness/steward/working/sample-project-2/units.py.", run by the `plans` runner to its
+plan card, every card denied. `plan_card_surface` checks, with no model, that the workflow sent the card's A2UI v0.9
+surface beside it (`plan_card_surface` in `steward_workflow.py`, a custom workflow event of type `a2ui`): on the basic
+catalog, an `approve` and a `deny` Button carrying the card's id, and a Text for every step of the plan. The gate test
+`test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` runs it on a scripted client. A model
+run is one case: `powershell -File harness/steward/evals/run-bar.ps1 -Sets cards -Tag cards-first -Runs 1`.
+
 ## T3, the bounds (the standins runner)
 
 `t3-bounds.yaml` v1 holds spec 001's first ten cases, highest risk first: P29 (no ground change while a sitting is
