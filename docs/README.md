@@ -37,6 +37,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0007](decisions/0007-time-is-stamped-by-jesster.md) | Every turn's time is stamped by Jesster | accepted |
 | [0008](decisions/0008-the-flows-shelf.md) | The Flows shelf | accepted; superseded in part by 0009 |
 | [0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) | Flows are ordered tool chains; automations schedule flows | accepted |
+| [0010](decisions/0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
 
 Steward's own guides stay beside his code: `harness/steward/README.md` (the harness, step by step) and
 `harness/steward/evals/README.md` (the eval sets).

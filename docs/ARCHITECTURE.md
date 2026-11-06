@@ -83,6 +83,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
 | 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools, `approval_ask`), and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
+| stdio | the notes kernel, `cli.py --vault worlds/notes mcp --only notes` | MCP | Claude Code in the ground and IDEs in the Jesster repository: notes only, the same vault ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
 | 8091 | Aurora glass (`atlas-webapp.exe`, run by Jesster) | HTTP | Kyle's browser; parked |
 | 11434 | Ollama | Ollama API | Steward (`OllamaChatClient`, embeddings) |
 
@@ -106,7 +107,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | Steward | Host state (Responses checkpoints) | `.as/` (gitignored) |
 | Steward | Memory (durable facts by topic), the improvement loop's checkpoints | `agent-file-memory/`, `improvement_loop/checkpoints` |
 | Steward | Eval sets, baselines, pinned outside data | `harness/steward/evals/` (versioned in git) |
-| Jesster | The notes vault (Markdown; every save on Jesster's provenance chain) | `worlds/notes` |
+| Jesster | The notes vault, the only one (Markdown; every save on Jesster's provenance chain). Reached through Jesster's MCP notes tools, or by a local IDE client through the kernel's notes-only adapter; no surface exposes the kernel's other methods, and the Archive digger is retired ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) | `worlds/notes` |
 | Jesster | Flows and automations (and legacy prompt-only schedules) | `<vault>/.secondbrain/schedules.json` |
 | Jesster | Answered cards | `approvals-history.jsonl` |
 | Manjuel | The record: laws, sittings ledger, DAYBOOK, HANDOFF, CHANGELOG, transcripts | the ground (`law/`, `sessions/`, `logs/`, root `.md`) |
