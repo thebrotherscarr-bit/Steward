@@ -134,7 +134,7 @@ ASKS_PROCESS_CHECKS = (
 )
 STEPS_CHECKS = ("plan_step", "execute_step", "steps_overall")
 # The plans runner (t0-direct.yaml): a case is {id, ask, subject, max_calls, checks}, scored on its plan card alone.
-PLANS_CHECKS = ("plan_reached_directly",)
+PLANS_CHECKS = ("plan_reached_directly", "plan_card_surface")
 _PLANS_CASE_KEYS = {"id", "capability", "ask", "subject", "max_calls", "checks"}
 # The standins runner (t3-bounds.yaml, ADR-0012, spec 001's "in-process + stand-ins"): each case once through the
 # workflow in an eval's build, with the tools the eval build does not offer given as MAF declaration-only stand-ins
@@ -1561,7 +1561,7 @@ def plan_phase_conversation(events: list[Any]) -> list[Any]:
     """A run's plan phase as one conversation: PLAN's last completion (EXPLORE's reading is in it: plan_call_input), or
     EXPLORE's completions when PLAN never completed; then the run's approve_plan cards."""
     import steward_workflow as wf  # noqa: PLC0415
-    from agent_framework import Message  # noqa: PLC0415
+    from agent_framework import Content, Message  # noqa: PLC0415
 
     steps = step_conversations(events)
     plans = steps.get(wf.PLAN_STEP) or []
@@ -1570,7 +1570,12 @@ def plan_phase_conversation(events: list[Any]) -> list[Any]:
         e.data for e in events
         if e.type == "request_info" and getattr(getattr(e.data, "function_call", None), "name", None) == wf.APPROVE_PLAN
     ]
-    return [*conversation, Message(role="assistant", contents=cards)] if cards else conversation
+    # each card's A2UI surface (ADR-0013), as the workflow sent it beside the card: a message named A2UI, its data JSON
+    surfaces = [
+        Message(role="assistant", contents=[Content.from_text(json.dumps(e.data))], author_name=wf.A2UI)
+        for e in events if e.type == wf.A2UI and isinstance(e.data, dict)
+    ]
+    return [*conversation, *surfaces, Message(role="assistant", contents=cards)] if cards else [*conversation, *surfaces]
 
 
 @evaluator(name="plan_reached_directly")
@@ -1596,6 +1601,70 @@ def plan_reached_directly(query: str, conversation: list[Any]) -> dict[str, obje
     if missing := [term for term in case.subject if term not in said]:
         return {"passed": False, "reason": f"The plan does not name {missing}: {plan.get('steps')}"}
     return {"passed": True, "reason": f"Plan card after {len(before)} call(s) {before}: {plan.get('steps')}"}
+
+
+def _surface_problems(data: dict[str, Any], card_id: str, steps: list[str]) -> list[str]:
+    """What is wrong with a plan card's A2UI surface (ADR-0013): it names the card, its messages are A2UI v0.9 on the
+    basic catalog (createSurface, then updateComponents with a root), an approve and a deny Button carry the card's
+    id, and its Texts name every step of the plan."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    problems = []
+    messages = data.get("messages") or []
+    if data.get("request_id") != card_id:
+        problems.append(f"the surface names card {data.get('request_id')!r}, not {card_id!r}")
+    if any(m.get("version") != wf.A2UI_VERSION for m in messages):
+        problems.append(f"not every message is {wf.A2UI_VERSION}")
+    created = [m["createSurface"] for m in messages if "createSurface" in m]
+    if not created or created[0].get("catalogId") != wf.A2UI_BASIC_CATALOG:
+        problems.append("no createSurface on the basic catalog")
+    components = [c for m in messages if "updateComponents" in m for c in m["updateComponents"].get("components") or []]
+    if not any(c.get("id") == "root" for c in components):
+        problems.append("no root component")
+    actions = {
+        ((c.get("action") or {}).get("event") or {}).get("name"): ((c.get("action") or {}).get("event") or {}).get("context")
+        for c in components if c.get("component") == "Button"
+    }
+    for name in (wf.A2UI_APPROVE, wf.A2UI_DENY):
+        if (actions.get(name) or {}).get("requestId") != card_id:
+            problems.append(f"no {name} Button carrying the card's id")
+    said = " ".join(str(c.get("text") or "") for c in components if c.get("component") == "Text")
+    if missing := [step for step in steps if str(step) not in said]:
+        problems.append(f"the surface does not show the steps {missing}")
+    return problems
+
+
+@evaluator(name="plan_card_surface")
+def plan_card_surface(query: str, conversation: list[Any]) -> dict[str, object]:
+    """A plans case that names it (capability A13, ADR-0013): its approve_plan card was reached, and the workflow sent
+    the card's A2UI surface beside it, built from the plan (_surface_problems). No model: the surface and the card
+    are compared as data."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    case = PLANS_CASES.get(" ".join((query or "").split()))
+    if case is None or "plan_card_surface" not in case.checks:
+        return {"passed": True, "reason": "Not this case."}
+    cards = [
+        c for m in conversation or [] for c in getattr(m, "contents", None) or []
+        if c.type == "function_approval_request" and c.function_call is not None and c.function_call.name == wf.APPROVE_PLAN
+    ]
+    if not cards:
+        return {"passed": False, "reason": "No plan card."}
+    card = cards[0]
+    surfaces = []
+    for m in conversation or []:
+        if getattr(m, "author_name", None) == wf.A2UI:
+            try:
+                surfaces.append(json.loads(m.text))
+            except ValueError:
+                continue
+    surface = next((s for s in surfaces if s.get("request_id") == card.id), None)
+    if surface is None:
+        return {"passed": False, "reason": f"The plan card {card.id} came with no A2UI surface ({len(surfaces)} for other cards)."}
+    steps = list((card.function_call.parse_arguments() or {}).get("steps") or [])
+    if problems := _surface_problems(surface, card.id, steps):
+        return {"passed": False, "reason": "; ".join(problems)}
+    return {"passed": True, "reason": f"The plan card's surface shows its {len(steps)} step(s) and answers card {card.id}."}
 
 
 async def plans_main(eval_set: EvalSet, **build: Any) -> int:
@@ -1624,7 +1693,9 @@ async def plans_main(eval_set: EvalSet, **build: Any) -> int:
             CASE_ERRORS[case.ask] = raised(error)
         user = Message(role="user", contents=[case.ask])
         items.append(EvalItem([user, *plan_phase_conversation(events)], split_strategy=SPLITS[eval_set.split]))
-    result = await LocalEvaluator(plan_reached_directly, run_completed).evaluate(items, eval_name=eval_set.eval_name)
+    named = {check for case in eval_set.cases for check in case.checks}
+    checks = [check for name, check in (("plan_reached_directly", plan_reached_directly), ("plan_card_surface", plan_card_surface)) if name in named]
+    result = await LocalEvaluator(*checks, run_completed).evaluate(items, eval_name=eval_set.eval_name)
     code = exit_code([result])
     print_asks_report(f"{eval_set.tier} {eval_set.eval_name}", "Checks", result)
     record_history(eval_set.name, {"": result}, code)

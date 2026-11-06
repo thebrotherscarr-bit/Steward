@@ -940,9 +940,54 @@ class ReadPlan(Executor):
             await ctx.send_message(plan_data, target_id=ASK_APPROVAL_STEP)
 
 
+# The plan card as an A2UI surface (ADR-0013, the A2UI pilot; ExecPlan 0004): A2UI v0.9 messages for the basic
+# catalog, built from the plan the card carries, sent beside the card as a custom workflow event of type A2UI. MAF's
+# AG-UI host passes a custom workflow event to the client as a CUSTOM event named by its type (agent_framework_ag_ui
+# _workflow_run.py); the Responses host does not pass it, so a client there draws its own card.
+A2UI = "a2ui"
+A2UI_VERSION = "v0.9"
+A2UI_BASIC_CATALOG = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+A2UI_APPROVE, A2UI_DENY = "approve", "deny"
+
+
+def plan_card_surface(plan: dict[str, Any], request_id: str) -> list[dict[str, Any]]:
+    """The plan card's A2UI v0.9 messages: createSurface on the basic catalog, then updateComponents: a Column of a
+    heading, the plan's words, one numbered Text per step, and a Row of the Approve and Deny Buttons, whose actions
+    carry the card's id (the interrupt's id) so the client answers that card."""
+    surface = f"plan-{request_id}"
+    steps = [str(step) for step in plan.get("steps") or []]
+    context = {"requestId": request_id}
+    components: list[dict[str, Any]] = [
+        {"id": "root", "component": "Column", "children": ["heading", "plan", *(f"step-{i}" for i in range(len(steps))), "answers"]},
+        {"id": "heading", "component": "Text", "text": "Steward's plan", "variant": "h4"},
+        {"id": "plan", "component": "Text", "text": str(plan.get("plan") or "")},
+        *({"id": f"step-{i}", "component": "Text", "text": f"{i + 1}. {step}"} for i, step in enumerate(steps)),
+        {"id": "answers", "component": "Row", "children": [A2UI_APPROVE, A2UI_DENY]},
+        {"id": f"{A2UI_APPROVE}-label", "component": "Text", "text": "Approve"},
+        {"id": f"{A2UI_DENY}-label", "component": "Text", "text": "Deny"},
+        {"id": A2UI_APPROVE, "component": "Button", "child": f"{A2UI_APPROVE}-label", "variant": "primary",
+         "action": {"event": {"name": A2UI_APPROVE, "context": context}}},
+        {"id": A2UI_DENY, "component": "Button", "child": f"{A2UI_DENY}-label",
+         "action": {"event": {"name": A2UI_DENY, "context": context}}},
+    ]
+    return [
+        {"version": A2UI_VERSION, "createSurface": {"surfaceId": surface, "catalogId": A2UI_BASIC_CATALOG}},
+        {"version": A2UI_VERSION, "updateComponents": {"surfaceId": surface, "components": components}},
+    ]
+
+
+class PlanCardSurface(WorkflowEvent[dict[str, Any]]):
+    """The plan card's A2UI surface, a custom event of type A2UI: {"request_id": <the card's id>, "messages": [...]}.
+    Over AG-UI it is CUSTOM {name: "a2ui", value: <that>}, sent before the card's interrupt."""
+
+    def __init__(self, request_id: str, messages: list[dict[str, Any]], *, executor_id: str) -> None:
+        super().__init__(A2UI, {"request_id": request_id, "messages": messages}, executor_id=executor_id)  # type: ignore[arg-type]  # a custom type
+
+
 class AskApproval(Executor):
     """The user's approval of the plan (MAF's human input: ctx.request_info). The plan rides in the request, so it is
-    in the checkpoint while the run waits. Approved: EXECUTE is asked to carry it out. Denied: nothing runs."""
+    in the checkpoint while the run waits. Approved: EXECUTE is asked to carry it out. Denied: nothing runs. The card
+    is also described as an A2UI surface (PlanCardSurface, ADR-0013), sent just before it."""
 
     def __init__(self, id: str = ASK_APPROVAL_STEP) -> None:
         super().__init__(id=id)
@@ -951,6 +996,7 @@ class AskApproval(Executor):
     async def ask(self, plan: dict[str, Any], ctx: WorkflowContext[Any, Any]) -> None:
         call_id = f"{APPROVE_PLAN}-{uuid.uuid4().hex[:12]}"
         call = Content.from_function_call(call_id=call_id, name=APPROVE_PLAN, arguments=plan)
+        await ctx.add_event(PlanCardSurface(call_id, plan_card_surface(plan, call_id), executor_id=self.id))
         # The card's id is the request's id, as MAF's AgentExecutor raises its approvals (_agent_executor.py), so an
         # answer through workflow.as_agent() (WorkflowAgent keys answers by the approval's id) finds this request.
         await ctx.request_info(
