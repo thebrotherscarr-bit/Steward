@@ -63,9 +63,10 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0003](0003-ag-ui-is-the-default-transport.md) | AG-UI is the default transport, Responses the fallback | accepted |
 | [0004](0004-jesster-is-the-center.md) | Jesster is the center; Neiro retired as a gate; Aurora parked | accepted |
 | [0005](0005-automations-are-recipes-run-as-maf-workflows.md) | Automations are recipes run as MAF workflows | accepted; superseded in part by 0009 |
-| [0006](0006-evals-are-versioned-long-runs-at-night.md) | Evals are versioned; long runs at night as eval workflows | accepted; superseded in part by 0009 |
+| [0006](0006-evals-are-versioned-long-runs-at-night.md) | Evals are versioned; long runs at night as eval workflows | accepted; superseded in part by 0009 and 0012 |
 | [0007](0007-time-is-stamped-by-jesster.md) | Every turn's time is stamped by Jesster | accepted |
 | [0008](0008-the-flows-shelf.md) | The Flows shelf | accepted; superseded in part by 0009 |
 | [0009](0009-flows-are-ordered-tool-chains-automations-schedule-flows.md) | Flows are ordered tool chains; automations schedule flows | accepted |
 | [0010](0010-notes-are-central-in-jesster.md) | Notes are central in Jesster | accepted |
-| [0011](0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | proposed |
+| [0011](0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | rejected; superseded by 0012 |
+| [0012](0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals | accepted |
