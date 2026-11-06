@@ -152,7 +152,8 @@ sequenceDiagram
 ```
 
 - Every turn starts with a source line naming the channel and the time ([ADR-0007](decisions/0007-time-is-stamped-by-jesster.md)).
-  WhatsApp turns are chat and research only; no cards reach it.
+  WhatsApp turns are chat and research only; no cards reach it: a change asked from WhatsApp is refused by the
+  workflow before any plan, pointing to the PC or Telegram ([ADR-0014](decisions/0014-the-bounds-are-gates-in-code.md)).
 - A plain question or a read-only request gets a plain answer, with no plan.
 - A No on any card ends the run.
 - Starting an eval in chat (`secondbrain_eval_start`) is an action like any other: it goes on the plan, and after
@@ -230,8 +231,8 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   call, before any card (`bounds_gate` and its auto-approval rule): any tool's path naming `.env*` or a key file, or a
   path under `Desktop\Archive`, is refused; the host shell is refused once untrusted content (a note, an Estate read,
   the web) is in the session, whatever the FIDES and sandbox switches say; a write to the ground is refused while a
-  sitting is open. At the request and the plan: a change asked from WhatsApp, or a change to the ground while a
-  sitting is open, is refused with no plan card.
+  sitting is open. At the request and the plan (the workflow's `refuse` step and its plan reader): a change asked from
+  WhatsApp, a change to the ground while a sitting is open, or an Archive path named, is refused with no plan card.
 - **The gate is Kyle's.** For Steward, every write, shell command, commit, push and Estate change is his card. No
   force-push, tag, release or history rewrite without his word for that act. No agent puts its own name on his work.
   The hand's exception (the ground's CLAUDE.md RULE 12, 2026-11-03 and 11-04): until Steward runs it reliably, the

@@ -6,7 +6,7 @@ are such stages, so their order is the graph's, not the model's choice.
 
 Pieces 1 to 4 of the build order:
 
-    request -> route (one structured-output call: Route) -> (answer) answer (AgentExecutor, plain words; plan mode,
+    request -> route (one structured-output call: Route) -> (refused by a bound, ADR-0014) refuse | (answer) answer (AgentExecutor, plain words; plan mode,
             so reads run and writes are refused) | (task, or no Route: Default) explore
     explore (AgentExecutor, plan mode, read-only tools, no response_format) -> plan (AgentExecutor, one call: tools off,
             tool_choice "none", structured output StewardPlan) -> read_plan

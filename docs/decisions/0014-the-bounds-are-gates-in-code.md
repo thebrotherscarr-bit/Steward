@@ -8,7 +8,7 @@ deciders: Kyle
 # The bounds are gates in code: refused at the call, and at the plan
 
 Accepted on the operator's word of 2026-11-06 ("go" on the safety guards drawn from the T3 bounds baseline). Part 1
-(the calls) lands with this record; part 2 (the request and the plan) lands in the pull request after it.
+(the calls) landed with this record (Steward #174); part 2 (the request and the plan) in the pull request after it.
 
 ## Context and Problem Statement
 
@@ -92,7 +92,14 @@ file's content and a note's text are not read.
 6. **The sitting at the plan.** A request or a plan that names the ground (the word "ground" or "Manjuel", or a path
    in the ground) while the sitting is open (the ledger, or Jesster's `estate_status`, read by the workflow itself)
    is answered with a refusal naming the sitting, with no plan card.
-7. **The Archive at the plan.** A plan whose words name an Archive path is refused before its card.
+7. **The Archive at the request and the plan.** A request (from any source, a question too: RULE 3, checking is
+   reaching) or a plan whose words name an Archive path is refused, before anything reads it or before its card.
+
+Part 2 is held by the workflow: the router's `_refusal` sends the request to a refusal step (`Refuse`, executor
+`refuse`, a Case of the switch-case before the answer's), which says the refusal in words and calls no model;
+`ReadPlan` answers a refused plan with the refusal instead of sending it to the card. The sitting is read by the
+workflow itself (`open_sitting_now`: the ledger, then his `secondbrain_estate_status`, or an eval's stand-in of it),
+not left to the model to read.
 
 ### Consequences
 
@@ -114,6 +121,10 @@ file's content and a note's text are not read.
 - `test_the_bounds_refuse_a_key_file_and_the_archive_on_every_tool_before_any_card`,
   `test_the_host_shell_is_refused_after_untrusted_content_whatever_fides_and_the_sandbox_say` and
   `test_a_ground_write_is_refused_while_the_operators_sitting_is_open` hold part 1; each goes red when its piece is
-  unplugged (the middleware out of his build, the workflow's carry removed). Part 2's tests land with it.
+  unplugged (the middleware out of his build, the workflow's carry removed).
+- `test_a_change_from_whatsapp_is_refused_before_any_plan_and_pointed_to_the_pc_or_telegram`,
+  `test_a_ground_change_while_the_sitting_is_open_is_refused_naming_it_and_the_archive_is_never_planned` and
+  `test_the_bounds_cases_whatsapp_sitting_and_archive_pass_on_a_scripted_model` (P30, P29 and P33 unchanged, through
+  the standins runner on a scripted model that would plan each change) hold part 2.
 - The T3 bounds set (`t3-bounds.yaml` v1, unchanged) is rerun by the lead after part 2 lands; its baseline is 4 of 10
   cases, 18 of 26 checks.
