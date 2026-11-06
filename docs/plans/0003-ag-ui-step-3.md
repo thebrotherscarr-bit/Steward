@@ -44,6 +44,10 @@ Jesster's own card code.
   #169, #170; Jesster #96, #97); its live acceptance is plan 0004's. The operator gave his word on 2026-11-05 ("do the
   A2UI work, as well"); it is carried out under its own ADR and ExecPlan, as this plan's Milestone 4 asked:
   ADR-0013 and `docs/plans/0004-a2ui-pilot-plan-card.md`.
+- [x] (2026-11-06) The step line pinned at the bottom of the conversation, after the latest message and just above
+  the input, in the Agent tab and the Phone view (Jesster #98): `StepLinePane` and `following` in `StepLine.tsx`; each
+  pane follows new messages and steps unless the operator has scrolled up. The operator's word of 2026-11-06 (see
+  Surprises & Discoveries).
 
 ## Surprises & Discoveries
 
@@ -65,6 +69,13 @@ Jesster's own card code.
   denied card's step is the one that finishes on the resume.
 - Observation: a denied write card does not end the run in this workflow when the model stops on its own; the
   scripted run went `execute, check, report` after the No. The step line reports what ran.
+- Observation (2026-11-06, the operator on the built line): "the live line of the steps stays at the top of the
+  conversation, should be pinned to the bottom as he works, so you can see progress." Drawn under the turn's own
+  message, the line sat above everything the turn then wrote and scrolled out of view as the turn went on.
+  Evidence: Jesster #94/#95 drew it at `i === lastUser` inside the messages in `AgentView.tsx` and `PhoneView.tsx`.
+- Observation (2026-11-06): a release build of Jesster #94 went red on `keepUpEvery ... a crashed start is retried`
+  while its pull request checks passed; the test counted starts on the real clock, and Windows wakes a 2 ms timer on
+  its ~15.6 ms tick. Not this plan's code; made deterministic on a virtual clock in Jesster #99.
 
 ## Decision Log
 
@@ -100,6 +111,13 @@ Jesster's own card code.
   Rationale: the console panel holds the shelves and has no conversation (it may also be folded); the line belongs
   to the turn the operator is watching. One component (`StepLine.tsx`) draws it in both views.
   Date/Author: 2026-11-05, in the plan.
+- Decision: the step line is the last thing in the conversation (after the latest message and any card, just above
+  the input), not under the turn's own message; it follows each message as it arrives and settles after the final
+  reply. Both views draw their conversation through one `StepLinePane`, and each pane scrolls with new messages and
+  steps only while it is at its bottom (`following`, within 80 px), so a pane scrolled up stays put.
+  Rationale: the operator's word of 2026-11-06 ("pinned to the bottom as he works, so you can see progress").
+  Supersedes the placement "above the turn's output" in the decision above and in Milestone 2.
+  Date/Author: 2026-11-06, Kyle.
 - Decision: the Phone view gets the step events from the same `agent:event` channel, matched by the phone chat's
   Steward session id (each phone entry carries `sessionId`), not as `phone:entry` lines.
   Rationale: the phone log is a capped record of what was said (5000 lines); a step is live state, and every
@@ -192,3 +210,6 @@ MAF's `agent_framework_ag_ui` 1.7.1 as it ships (its STEP_STARTED and STEP_FINIS
 ---
 
 Revision note, 2026-11-05: first version, from ADR-0003 and the code at Steward #163 and Jesster #92.
+
+Revision note, 2026-11-06: the step line moved to the bottom of the conversation on the operator's word (Progress,
+Surprises & Discoveries, Decision Log; Jesster #98), and the flaky keepUpEvery test noted (Jesster #99).
