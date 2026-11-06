@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-05.
+- **As of:** 2026-11-05, evening (ADRs 0001 to 0012, spec 001, ExecPlans 0001 to 0003).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -69,10 +69,13 @@ flowchart LR
   ([ADR-0006](decisions/0006-evals-are-versioned-long-runs-at-night.md); they run whenever the operator says,
   [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)). The bar is our own
   capability evals ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)); what each case covers is
-  the coverage map, [spec 001](specs/001-capability-evals.md).
+  the coverage map, [spec 001](specs/001-capability-evals.md); the cases are built by
+  [ExecPlan 0001](plans/0001-capability-evals-build.md).
 - **Skills:** `harness/steward/skills/<name>/SKILL.md` (estate, github, automations, bar-runner, eval-history,
   telemetry, ollama-ops, approvals and others).
-- **The Charter:** his instructions, the SecondBrain note `steward-charter` (v4.9), read every turn.
+- **The Charter:** his instructions, the SecondBrain note `steward-charter` (v4.12 on 2026-11-05), read every turn.
+  It changes only on the operator's word; a capability it adds or moves updates spec 001's map in the same pull
+  request ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
 
 ## 2. The wires
 
@@ -83,15 +86,17 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | 43120 | Steward `hosted.py` | OpenAI Responses (MAF `ResponsesHostServer`) | Jesster, as the fallback transport; evals `--transport responses` |
 | 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status`, and the Flows shelf's `recipe_graph` / `recipe_runs` (read-only) |
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
-| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools, `approval_ask`), and other MCP clients with a share key |
+| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`; and `approval_ask`), and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
-| stdio | the notes kernel, `cli.py --vault worlds/notes mcp --only notes` | MCP | Claude Code in the ground and IDEs in the Jesster repository: notes only, the same vault ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
+| stdio | the notes kernel's notes-only adapter, `cli.py --vault worlds/notes mcp --only notes` (Jesster #90) | MCP | Claude Code in the ground (its `.mcp.json`, Manjuel #101) and IDEs in the Jesster repository (Jesster #91): notes, `index.search`, `context.for` and `context.now` only (11 tools), on the same vault; no other kernel method group is served anywhere ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
 | 8091 | Aurora glass (`atlas-webapp.exe`, run by Jesster) | HTTP | Kyle's browser; parked |
 | 11434 | Ollama | Ollama API | Steward (`OllamaChatClient`, embeddings) |
 
 **Protocols** (audit 2026-11-05):
 
-- **MCP 2026-07-28**, served beside 2025-06-18 so older clients still work (Jesster #68, #69; Atlas #44).
+- **MCP 2026-07-28**, served beside 2025-06-18 so older clients still work (Jesster #68, #69; Atlas #44). Jesster's
+  MCP server and the door refuse a request whose `Origin` is not loopback with 403, and its recipe calls to Steward
+  carry `_meta` and the request headers (Jesster #87).
 - **AG-UI** as MAF ships it (`agent-framework-ag-ui` 1.7.1, which pins `ag-ui-protocol` below 0.2). Approvals are
   AG-UI interrupts; workflow steps are StepStarted and StepFinished events.
 - **A2A** is deferred until a second autonomous agent exists; when it comes, it goes in Jesster, on loopback.
@@ -109,6 +114,8 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | Steward | Host state (Responses checkpoints) | `.as/` (gitignored) |
 | Steward | Memory (durable facts by topic), the improvement loop's checkpoints | `agent-file-memory/`, `improvement_loop/checkpoints` |
 | Steward | Eval sets, baselines, pinned outside data | `harness/steward/evals/` (versioned in git) |
+| Steward | The capability map: every capability Steward must use, its source and its coverage, and the proposed case for each gap ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)) | `docs/specs/001-capability-evals.md` (versioned in git) |
+| Steward | The design: this file, the ADRs, the specs and the ExecPlans ([README.md](README.md)) | `docs/`, `.agent/PLANS.md` |
 | Jesster | The notes vault, the only one (Markdown; every save on Jesster's provenance chain). Reached through Jesster's MCP notes tools, or by a local IDE client through the kernel's notes-only adapter; no surface exposes the kernel's other methods, and the Archive digger is retired ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) | `worlds/notes` |
 | Jesster | Flows and automations (and legacy prompt-only schedules) | `<vault>/.secondbrain/schedules.json` |
 | Jesster | Answered cards | `approvals-history.jsonl` |
@@ -195,7 +202,12 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
   runner) holds spec 001's first ten cases, the tools the eval build lacks given as declaration-only stand-ins.
 - **Whenever the operator says,** day or night: from a flow, an automation, or a request in chat (planned and
   carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
-- An eval flow is `eval_start` then `eval_wait`.
+- An eval flow is `eval_start` then `eval_wait`. `eval_start` opens `run-bar.ps1` in its own window with
+  Start-Process and verifies that the run began, and sends a host transport (AG-UI) only when every set is an asks set
+  (Jesster #92); `eval_wait` waits for the run to begin, and a run that never began fails the flow and is not
+  summarized (Steward #161).
+- Outside sets are read for calibration only. BFCL's first run, 2026-11-05 at `d71fb78` (in-process, `steward:1`):
+  36/80 (24/65 AST, 12/15 irrelevance). Never a gate, never tuned on.
 - Every eval run is scored by MAF's `evaluate_agent` with `LocalEvaluator`, and lands in the history with its set
   version; the steps set scores each workflow step with its own `LocalEvaluator` (`evals.py`). A gating tier runs each
   case once. Recipe (flow) runs are not evaluated yet: `evaluate_workflow` on a flow's run is the Flows shelf's piece 5
@@ -227,33 +239,53 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **His system, his hours.** Evals and flows run whenever the operator says, day or night (ADR-0009; this replaced
   "By day Steward is Kyle's. Long evals and heavy automations run at night", 2026-11-05).
+- **Every capability has an eval.** Everything Steward does has a small deterministic case in its tier, so he can
+  prove himself (the operator's rule, 2026-11-05; [ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
+- **The doc standard.** An ADR before any change to a part, a wire, a store of data or a rule; a spec for a feature;
+  an ExecPlan for a multi-step build; this file in the same pull request when the shape moves
+  ([README.md](README.md); the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets
+  misaligned").
 
 ## 6. The build plan ahead
 
-In order, as the notes stand on 2026-11-05. Each item is one piece and one pull request, with its wire.
+In order, as of 2026-11-05 evening. Each item is one piece and one pull request at a time, with its wire and, from
+ADR-0012, its eval case. A multi-step item has an ExecPlan in [`plans/`](plans/README.md), which is where its
+progress is kept. _(Rewritten 2026-11-05 evening; the earlier list is in this file's history. Built from it on
+2026-11-05: the Flows shelf's run history and its canvas drawn from the MAF graph (Steward #158, Jesster #89); flows
+and automations per ADR-0009, Set up as automations, the prompt type removed, BFCL and Aider as eval flows (Steward
+#156, Jesster #88, #92; Steward #161).)_
 
-1. **Flows shelf** ([ADR-0008](decisions/0008-the-flows-shelf.md)): run history, the graph from Steward's
-   `to_dict()`, Steward's card with `automation_save` on Kyle's card, evals in flow. _Built 2026-11-05: the run
-   history and the canvas drawn from the MAF graph (`recipe_runs`, `recipe_graph`; Jesster's shelf, live while a run
-   goes). Open: Steward's card with `automation_save`, evals in flow._
-2. **Flows and automations** ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)):
-   Set up as automations (a saved flow, when, on/off), the prompt type removed (Jesster); `automation_save`; BFCL
-   and Aider as eval flows. _Built 2026-11-05, except `automation_save`._
-3. **AG-UI step 3:** the Phone view and the console shelves on AG-UI events; then the A2UI pilot for approval cards.
-4. **Dev-path tiers:** T3 (Estate operations; its first ten cases are `t3-bounds.yaml`, 2026-11-05) and T4 (GitHub),
-   then T2 and T5, then the `eval-author` skill; T6 and T7 grow with his reach. T5 needs restating now that Neiro is
-   retired. The cases are the proposals of [spec 001](specs/001-capability-evals.md), highest risk first, on the
-   stand-ins it names ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
-5. **Reach widens on each bar:** GitHub for his own repository passes from the hand to Steward after T2; then Jesster,
-   Manjuel and Aurora one at a time.
-6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks.
-7. **Aurora:** visible computer control for Steward, when the operator says so.
+1. **The capability-eval wire and the first ten T3 cases:** _built 2026-11-05 (Steward #164)_: the map as data
+   (`harness/steward/evals/capabilities.yaml`), every case naming its capability ids, `evals.py validate` failing an
+   unknown id, a case with none, a required capability with no case, or a skill or tool the map does not name; and
+   T3 `bounds` (`t3-bounds.yaml` v1: P29, P30, P56, P1, P31, P32, P33, P58, P34, P36) on the `standins` runner. Next:
+   its bar, run twice on the operator's word ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md),
+   [spec 001](specs/001-capability-evals.md), [ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 1
+   and 2).
+2. **The remaining cases by risk:** the rest of T3, then T2, then T4 (the rest of spec 001's P1 to P60), and each tier's bar met
+   twice in a row on the operator's word ([ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 3 to 6).
+   Then the `eval-author` skill; T5 restated now that Neiro is retired; T6 and T7 grow with his reach.
+3. **Flows: Steward's card and `automation_save`** on Kyle's card, then evals in flow (`evaluate_workflow` on a
+   recipe run) ([ADR-0008](decisions/0008-the-flows-shelf.md),
+   [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md),
+   [ExecPlan 0002](plans/0002-flows-steward-card-and-automation-save.md)).
+4. **AG-UI step 3:** the console and the Phone view show the workflow's steps from AG-UI's STEP events; then the A2UI
+   pilot for approval cards, with its own ADR ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md),
+   [ExecPlan 0003](plans/0003-ag-ui-step-3.md)).
+5. **Reach widens on each tier's bar:** GitHub for his own repository passes from the hand to Steward after T2; then
+   Jesster, Manjuel and Aurora one at a time.
+6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks
+   ([ADR-0001](decisions/0001-steward-is-a-maf-harness-agent.md), items 8 and 9); checked against each MAF release.
+7. **Aurora:** visible computer control for Steward, when the operator says so
+   ([ADR-0004](decisions/0004-jesster-is-the-center.md)).
 
-The plans, in SecondBrain:
+The SecondBrain notes below hold discussion and status, and each says at its top that this folder is the design of
+record (2026-11-05 evening):
 
 - `plan-steward-controls-the-estate-under-m-c9f628`: the Estate under MAF, its waves and status.
 - `steward-s-dev-path-evals-that-grow-with--cb3211`: the eval tiers and what each bar unlocks.
 - `plan-the-flows-shelf-ide-for-steward-s-f-04a93a`: the Flows shelf.
 - `overnight-plan-steward-s-bar-and-develop-7d69e1`: the bar's night loops and log.
 - `guidance-developing-steward-and-the-esta-27bfd2`: how every hand builds here.
+- `design-the-estate-s-architecture-and-adr-7d6e52`: the index of this folder.
 - `steward-charter`: Steward's instructions.
