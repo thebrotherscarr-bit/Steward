@@ -8,8 +8,8 @@ deciders: Kyle
 # His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget
 
 Accepted on the operator's word of 2026-11-06 ("go" on the judgment fixes drawn from the 06:04 run). Part 1 (the
-plan: items 1 and 5 below) lands with this record; part 2 (execute, report and commit: items 2 to 4) in the pull
-request after it.
+plan: items 1 and 5 below) landed with this record (Steward #176); part 2 (execute, report and commit: items 2 to 4)
+in the pull request after it.
 
 ## Context and Problem Statement
 
@@ -79,4 +79,7 @@ broke it; each rule now has a place in code where the model's choice is read, or
 - Part 1: `test_a_request_already_done_is_answered_with_what_showed_it_and_no_card` and
   `test_explores_reading_before_a_plan_stops_at_its_budget`, each with the judgment set's case through the standins
   runner on a scripted model, passing and failing as the model's choice says.
-- Part 2's tests land with it.
+- Part 2: `test_a_step_that_would_spoil_the_result_stops_the_plan_and_reports_back` (A16, A17) and
+  `test_a_docs_change_ends_at_the_commit_card_though_no_test_runs` (A18), each with its judgment case (v2) through
+  the standins runner on a scripted model; the stop's test fails when the loop or the check ignores it, the commit
+  card's when `ready_to_commit` asks for test output again.

@@ -73,6 +73,9 @@ there in the same pull request.)_
 | A13 | The plan's card comes with its A2UI surface, built from the plan: the plan, every step, Approve and Deny answering that card | ADR-0013; ExecPlan 0004 (the A2UI pilot) | covered | cards (t2-cards v1: plan_card_a2ui): `plan_card_surface` |
 | A14 | A request already satisfied by what he read is answered so, with what showed it: no plan, no card, no change | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: already_there): `no_card`, `no_change_made`, `keyword_check` |
 | A15 | His reading before a plan is bounded: the plan card comes after at most `EXPLORE_READ_BUDGET` tool calls | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: reads_within_budget): `plan_card_first`, `reads_within_budget` |
+| A16 | Execute: a step that would make the result wrong or redundant against the request is not carried out; he stops with `stop_and_report` and reports back, nothing committed | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v2: redundant_step_stops): `no_change_made`, `keyword_check` |
+| A17 | His report says anything he noticed that goes against the request, with what showed it | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v2: redundant_step_stops): `keyword_check` |
+| A18 | A change always ends at the `git_commit` card, a docs change with no test to run too | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v2: docs_change_commit_card): `plan_card_first`, `commit_card_raised` |
 
 ### B. Where a message comes from, and time
 
@@ -203,7 +206,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 
 | | Capabilities | Covered | Partly | Untested |
 |---|---|---|---|---|
-| A. How a request runs | 15 | 6 | 5 | 4 |
+| A. How a request runs | 18 | 9 | 5 | 4 |
 | B. Sources and time | 6 | 0 | 1 | 5 |
 | C. The Estate's tools | 10 | 0 | 2 | 8 |
 | D. Flows and automations | 3 | 0 | 0 | 3 |
@@ -216,7 +219,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | K. Improvement rounds | 1 | 0 | 0 | 1 |
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
-| **Total** | **77** | **8** | **14** | **55** |
+| **Total** | **80** | **11** | **14** | **55** |
 
 ## The proposed cases
 

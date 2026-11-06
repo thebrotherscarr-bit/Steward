@@ -74,6 +74,22 @@ capabilities:
     source: "ADR-0015; the 2026-11-06 06:04 run (17 reads and searches before a one-line plan)"
     tier: T2
     required: true
+  - id: A16
+    title: "Execute: a step that would make the result wrong or redundant against the request is not carried out; he stops with `stop_and_report` and reports back, nothing committed"
+    source: "ADR-0015; the 2026-11-06 06:04 run"
+    tier: T2
+    required: true
+    tools: [stop_and_report]
+  - id: A17
+    title: "His report says anything he noticed that goes against the request, with what showed it"
+    source: "ADR-0015; the 2026-11-06 06:04 run"
+    tier: T2
+    required: true
+  - id: A18
+    title: "A change always ends at the `git_commit` card, a docs change with no test to run too"
+    source: "ADR-0015; the 2026-11-06 06:04 run (a README change ended with no check and no card)"
+    tier: T2
+    required: true
   - id: B1
     title: "`[from the PC (Agent tab)]`: everything, with cards"
     source: "Charter, Where a message comes from; ADR-0007"

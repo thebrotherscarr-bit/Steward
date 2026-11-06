@@ -57,7 +57,9 @@ flowchart LR
   WebResearchAgent), file memory, compaction, looping, OpenTelemetry with the HALO JSONL exporter.
 - **The workflow:** `steward_workflow.py`: plan, the `approve_plan` card, execute (the plan's steps as todos), a
   model-free check (pytest), repair (at most 3 attempts), the `git_commit` card, report. Defined once and served by
-  every host.
+  every host. A change always ends at the `git_commit` card, a docs change with no test to run too; EXECUTE stops and
+  reports back (`stop_and_report`) when a step would make the result wrong or redundant against the request
+  ([ADR-0015](decisions/0015-his-judgment-in-the-workflow.md)).
 - **The hosts:** `hosted.py` (Responses, 43120), `ag_ui_app.py` (AG-UI, 43122), `mcp_app.py` (MCP, 43121, with
   `run_recipe` and `recipe_status`, and the Flows shelf's read-only `recipe_graph` and `recipe_runs`), `devui_app.py`
   (DevUI, for development only).

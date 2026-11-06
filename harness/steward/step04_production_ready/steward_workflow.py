@@ -14,7 +14,8 @@ Pieces 1 to 4 of the build order:
             -> (failed, attempts left) repair -> execute -> check ...
             -> (passed on changed code) ask_commit ("Checks passed") -> commit (one structured-output call writes the
                message: CommitMessage; the workflow raises his git_commit's card with it, and runs it on Approve)
-            -> (nothing changed, or attempts spent) report
+            -> (nothing changed, attempts spent, or he stopped: stop_and_report) report; a docs change with no test
+               to run still goes to ask_commit (ADR-0015)
 
 * ROUTE comes first (live 2026-11-03: a question came back as an approval card, "No further action needed"). Learn,
   Workflows > Edges, switch-case (python pivot): a classifier with structured output gives a typed message and
@@ -106,7 +107,7 @@ from console.observers.planning_models import PlanningQuestion, PlanningResponse
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
 import agent as _agent  # noqa: E402 - hyperlight_sandbox_on, read at call time (offered_in_step)
-from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, UNTRUSTED_READ_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, write_happened, written_files  # noqa: E402, F401
+from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, STOP_AND_REPORT, STOPPED_KEY, UNTRUSTED_READ_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, stopped_reason, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
 
@@ -598,6 +599,22 @@ CHECKS_RUN_THE_TESTS = (
 # last reply was only "All remaining todos are completed and the tests now pass." or "Todos marked complete.", so the
 # user's last line said nothing of what changed. EXECUTE is asked to end on what it changed, by file.
 SAY_WHAT_CHANGED = "When the work is done, end with a line or two saying what you changed, naming each file."
+# ADR-0015, part 2 (the 06:04 run: the line was already in the README; he wrote it again and reported "the rest of the
+# file remains unchanged"): a step that would spoil the result against the request stops the plan (stop_and_report),
+# and his report says what he noticed against the request, with what showed it.
+STOP_IF_IT_SPOILS = (
+    "Before each step, check it against the request: if carrying it out would make the result wrong or redundant (what "
+    "the request asks for is already there, or the step goes against it), do not carry on: call stop_and_report with "
+    "what you found and what showed it."
+)
+SAY_WHAT_GOES_AGAINST = (
+    "Say also anything you noticed that goes against the request (something already there, a step that did not fit), "
+    "with what showed it."
+)
+# The run's answer when he stopped (stop_and_report): his reason, and that nothing more ran or was committed.
+STOPPED_REPORT = "Stopped before finishing, so nothing more was done and nothing is committed: {reason}"
+# A change with no .py file has no test to run (ADR-0015: docs need no test run), and still ends at the commit card.
+NO_TESTS_NEEDED = "No tests to run: no code changed (a docs change needs no test run)."
 
 
 def untrusted_read_in(messages: Sequence[Message] | None) -> bool:
@@ -613,8 +630,8 @@ def execute_message(request: str, plan: str, steps: list[str], untrusted: bool =
     numbered = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, start=1))
     text = (
         f"The user approved your plan. Carry it out now.\n\nRequest: {request}\n\nPlan: {plan}\n\nSteps (your todos):\n"
-        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. {CHECKS_RUN_THE_TESTS} "
-        f"{SAY_WHAT_CHANGED} "
+        f"{numbered}\n\nWork through the todos in order and mark each one complete when it is done. {STOP_IF_IT_SPOILS} "
+        f"{CHECKS_RUN_THE_TESTS} {SAY_WHAT_CHANGED} {SAY_WHAT_GOES_AGAINST} "
         "Do not commit: the checks run when you finish, and once they pass you will be asked to commit."
     )
     # REQUEST_KEY: his request hints match the request alone, never the plan's wording (agent.asked_request).
@@ -643,6 +660,7 @@ def approved_plan_turn(mode_provider: AgentModeProvider, todo_provider: TodoProv
             if list(steps) != [REPAIR_TODO]:
                 # A new approved plan is a new run of work: the files it writes are the ones its commit takes.
                 context.session.state[WRITTEN_FILES_KEY] = []
+                context.session.state.pop(STOPPED_KEY, None)  # and an earlier stop (stop_and_report) is behind it
             set_agent_mode(
                 context.session, "execute", source_id=mode_provider.source_id, available_modes=mode_provider.available_modes
             )
@@ -820,6 +838,7 @@ CODEACT_TOOL = "execute_code"
 # to inventory.py. EXECUTE's todos are the approved plan's steps (approved_plan_turn writes them), so it is offered
 # only the todo tools that work through them (todos_complete, todos_get_remaining, todos_get_all), never one to add.
 EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, "todos_add", *_MODE_TOOLS})
+# stop_and_report (ADR-0015) is EXECUTE's alone: reading for the plan, or answering in words, has nothing to stop.
 # The direct ask (agent.DIRECT_ACTION_KEY: the request names one of his Estate actions by its tool name): EXPLORE is
 # offered only the Estate's reads, so his reading is at most a status check and no code search or file read stands
 # between the request and his plan (session-20261105-1110-535a: 18 EXPLORE calls, 15 minutes, before the card).
@@ -835,6 +854,8 @@ def offered_in_step(name: str, step: str | None, shell_closed: bool = False, dir
     """Whether a step's model calls are offered the tool named name (a step of None is offered every tool); shell_closed
     is whether the sandbox has closed the session's run_shell (agent.sandbox_shell_closed); direct is whether the
     request is a direct ask (agent.DIRECT_ACTION_KEY), which narrows EXPLORE to DIRECT_ASK_TOOLS."""
+    if name == STOP_AND_REPORT and step != EXECUTE_STEP:
+        return False
     if step == EXPLORE_STEP:
         return name in (DIRECT_ASK_TOOLS if direct else PLAN_TOOLS)
     if step == PLAN_STEP:
@@ -907,6 +928,10 @@ class CheckReport:
     passed: bool
     output: str
     answer: str
+    # ADR-0015: whether EXECUTE's run wrote a file (a change that ends at the commit card even with no test to run),
+    # and his reason when he stopped (stop_and_report: REPORT says it, no repair, no commit).
+    changed: bool = False
+    stopped: str | None = None
 
 
 # A check: given EXECUTE's messages, (passed, output), or None when there is nothing to check.
@@ -1206,10 +1231,14 @@ class AskApproval(Executor):
 class Check(Executor):
     """Runs the checks on what EXECUTE did (model-free) and reports the attempt."""
 
-    def __init__(self, checks: Checks, id: str = CHECK_STEP, written: Callable[[], list[str]] | None = None) -> None:
+    def __init__(
+        self, checks: Checks, id: str = CHECK_STEP, written: Callable[[], list[str]] | None = None,
+        stopped: Callable[[], str | None] | None = None,
+    ) -> None:
         super().__init__(id=id)
         self._checks = checks
         self._written = written  # the files EXECUTE's session says he wrote (check_written)
+        self._stopped = stopped  # his reason, when EXECUTE stopped (stop_and_report)
 
     @handler
     async def check(self, response: AgentExecutorResponse, ctx: WorkflowContext[CheckReport]) -> None:
@@ -1230,24 +1259,29 @@ class Check(Executor):
         passed, output = result if result is not None else (True, "")
         if output:
             await ctx.add_event(StewardProgress("check passed" if passed else "check failed", executor_id=self.id))
-        await ctx.send_message(CheckReport(attempt, passed, output, _last_text(response)))
+        changed = bool(self._written()) if self._written is not None else False
+        stopped = self._stopped() if self._stopped is not None else None
+        await ctx.send_message(CheckReport(attempt, passed, output, _last_text(response), changed=changed, stopped=stopped))
 
 
 def needs_repair(report: Any) -> bool:
     """Edge condition: the checks failed and attempts are left."""
-    return isinstance(report, CheckReport) and not report.passed and report.attempt < MAX_ATTEMPTS
+    return isinstance(report, CheckReport) and not report.stopped and not report.passed and report.attempt < MAX_ATTEMPTS
 
 
 def ready_to_commit(report: Any) -> bool:
-    """Edge condition: the checks ran on changed code and passed, so the work can be committed."""
-    return isinstance(report, CheckReport) and report.passed and bool(report.output)
+    """Edge condition: the work changed something and its checks passed (or it had none to run: a docs change,
+    ADR-0015), and he did not stop, so the work can be committed."""
+    return isinstance(report, CheckReport) and not report.stopped and report.passed and (bool(report.output) or report.changed)
 
 
 def ready_for_report(report: Any) -> bool:
     """Edge condition: nothing was checked, or the attempts are spent; no commit is offered."""
     if not isinstance(report, CheckReport):
         return False
-    return (report.passed and not report.output) or (not report.passed and report.attempt >= MAX_ATTEMPTS)
+    if report.stopped:
+        return True
+    return (report.passed and not report.output and not report.changed) or (not report.passed and report.attempt >= MAX_ATTEMPTS)
 
 
 class AskCommit(Executor):
@@ -1343,7 +1377,7 @@ class Commit(Executor):
         approved = ctx.get_state(_APPROVED_REQUEST_KEY, None) or {}
         request = str(approved.get("request", ""))
         files = await asyncio.to_thread(self._changes)
-        message = await self._message(request, files, report.output)
+        message = await self._message(request, files, report.output or NO_TESTS_NEEDED)
         call_id = f"{GIT_COMMIT}-{uuid.uuid4().hex[:12]}"
         call = Content.from_function_call(call_id=call_id, name=GIT_COMMIT, arguments={"message": message})
         # The card's id is the request's id, as AskApproval's (WorkflowAgent keys answers by the approval's id).
@@ -1430,12 +1464,16 @@ class Report(Executor):
 
     @handler
     async def report(self, report: CheckReport, ctx: WorkflowContext[Any, Any]) -> None:
+        if report.stopped:
+            await ctx.yield_output(STOPPED_REPORT.format(reason=report.stopped))
         if report.output:
             await ctx.yield_output(checks_text(report))
 
 
 def checks_text(report: CheckReport) -> str:
-    """The checks' result as the user reads it."""
+    """The checks' result as the user reads it (a change with no test to run says so: NO_TESTS_NEEDED)."""
+    if report.passed and not report.output:
+        return NO_TESTS_NEEDED
     result = "passed" if report.passed else f"still fail after {report.attempt} attempts"
     return f"Checks {result}:\n{report.output[-_OUTPUT_TAIL:]}"
 
@@ -1495,7 +1533,9 @@ def build_steward_workflow(
     read_plan = ReadPlan(sitting=sitting)
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
-    check = Check(checks, written=lambda: written_files(executor_session(execute)))
+    check = Check(
+        checks, written=lambda: written_files(executor_session(execute)), stopped=lambda: stopped_reason(executor_session(execute))
+    )
     repair = Repair()
     ask_commit = AskCommit()
     # His own git_commit, the copy this build gave him (agent.py): a build without it has nothing to commit with.
