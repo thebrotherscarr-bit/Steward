@@ -130,6 +130,8 @@ CHECK_STEP = "check"
 REPAIR_STEP = "repair"
 REPORT_STEP = "report"
 COMMIT_STEP = "commit"
+# The bounds at the request (ADR-0014, part 2): a request the bounds refuse is answered here, with no plan and no card.
+REFUSE_STEP = "refuse"
 # EXECUTE's attempts at a plan before REPORT says the checks still fail (the improvement loop's MAX_ATTEMPTS).
 MAX_ATTEMPTS = 3
 _ATTEMPT_KEY = "steward_check_attempt"
@@ -237,6 +239,29 @@ ANSWER_IN_WORDS = "Answer this question in plain words. Read what you need; chan
 # minutes and be answered No. Its workflow has already gathered what it needs (Jesster electron/agent/workflows.cjs)
 # and asks for words, so it is the answer branch, whatever the model or its opening verb says ("Write the daily ...").
 _FROM_AN_AUTOMATION = re.compile(r"\A\s*\[from an automation \(")
+# The bounds at the request and the plan (ADR-0014, part 2), held in code before any plan card:
+#   * WhatsApp (B3, P30): Jesster's source line "[from the phone (WhatsApp) — chat and research only, no changes | ...]"
+#     (electron/agent/service.cjs SOURCES). A turn from it that asks for a change (the router's task, a request whose
+#     body opens with a change verb, or a direct ask) is refused here and pointed to the PC or Telegram.
+#   * The sitting (L3, RULE 9, P29): a task that names the ground (the words "ground" or "Manjuel", or a path in it,
+#     agent.ground_path), or a plan that does, while the operator's sitting is open (agent.sitting_from_ledger, or
+#     Jesster's estate_status read here by the workflow itself: open_sitting_now) is refused, naming the sitting.
+#   * The Archive (L2, RULE 1, P33): a request or a plan naming a path under Desktop\Archive (agent.archive_named) is
+#     refused; nothing reads, lists or reaches it.
+_FROM_WHATSAPP = re.compile(r"\A\s*\[from the phone \(WhatsApp\)", re.IGNORECASE)
+_SOURCE_LINE = re.compile(r"\A\s*\[[^\]\n]*\]\s*\n?")
+_NAMES_THE_GROUND = re.compile(r"\b(?:ground|manjuel)\b", re.IGNORECASE)
+WHATSAPP_REFUSAL = (
+    "Not done: this message came from WhatsApp, which is for chat and research only, so I make no plan and no change "
+    "from it. Ask for it from the PC (the Agent tab) or from Telegram, where it is planned and goes on your card."
+)
+SITTING_REFUSAL = (
+    "Not done: your {sitting} is open, and nothing in Manjuel's ground changes while a sitting is open (RULE 9). Ask "
+    "again once the sitting is closed."
+)
+ARCHIVE_REFUSAL = (
+    "Not done: that names {path}, under Desktop\\Archive, which I never reach, read or list (RULE 1)."
+)
 
 
 class Route(BaseModel):
@@ -251,11 +276,65 @@ class RoutedRequest(AgentExecutorRequest):
     reply was no Route, which falls to the Default branch (the plan)."""
 
     kind: str | None = None
+    # The refusal, when kind is REFUSE_STEP (ADR-0014): the bounds answer the request themselves.
+    reason: str | None = None
 
 
 def asks_only_to_read(request: str) -> bool:
     """Whether the request names one of the Estate's read-only tools (ESTATE_READS) and no change (_CHANGE_WORDS)."""
     return any(name in request for name in ESTATE_READS) and not _CHANGE_WORDS.search(request)
+
+
+def from_whatsapp(request: str) -> bool:
+    """Whether the request is a WhatsApp turn (_FROM_WHATSAPP): chat and research only."""
+    return bool(_FROM_WHATSAPP.match(request or ""))
+
+
+def request_body(request: str) -> str:
+    """The request without its source line (Jesster's "[from ... | time]" first line), if it has one."""
+    return _SOURCE_LINE.sub("", request or "", count=1)
+
+
+def names_the_ground(text: str) -> bool:
+    """Whether a request or a plan names Manjuel's ground: the word, or a path in it (agent.ground_path)."""
+    return bool(_NAMES_THE_GROUND.search(text or "")) or any(_agent.ground_path(w) for w in _agent._WORD.findall(text or ""))
+
+
+def archive_in(text: str) -> str | None:
+    """The first path under the Archive a request or a plan names (agent.archive_named), or None."""
+    return _agent.archive_named(_agent._WORD.findall(text or ""))
+
+
+def _named_function(agent: Any, name: str) -> Any:
+    """His tool of this name, a FunctionTool or one an MCP tool serves (its functions), or None."""
+    for tool in (getattr(agent, "default_options", None) or {}).get("tools") or []:
+        if getattr(tool, "name", None) == name and callable(getattr(tool, "invoke", None)):
+            return tool
+        try:
+            functions = getattr(tool, "functions", None) or []
+        except Exception:  # noqa: BLE001 - an MCP tool that is not connected serves none
+            functions = []
+        found = next((f for f in functions if getattr(f, "name", None) == name), None)
+        if found is not None:
+            return found
+    return None
+
+
+async def open_sitting_now(agent: Any) -> dict[str, Any] | None:
+    """The operator's open sitting, or None: the ground's ledger (agent.sitting_from_ledger), then Jesster's
+    estate_status (his secondbrain_estate_status, or an eval's stand-in of it), read here by the workflow, not by him."""
+    ledger = _agent.sitting_from_ledger()
+    if ledger.get("open"):
+        return ledger
+    status = _named_function(agent, "secondbrain_estate_status")
+    if status is None:
+        return None
+    try:
+        seen = _agent.sitting_in_status(_agent._result_text(await status.invoke(arguments={})))
+    except Exception as error:  # noqa: BLE001 - a status that cannot be read says nothing of the sitting
+        logger.warning("estate_status could not be read for the sitting: %s", type(error).__name__)
+        return None
+    return seen if seen and seen.get("open") else None
 
 
 def from_an_automation(request: str) -> bool:
@@ -268,6 +347,11 @@ def asks_for_a_change(request: str) -> bool:
     return bool(_OPENS_WITH_A_CHANGE.match(request or ""))
 
 
+def routed_to_refusal(request: Any) -> bool:
+    """The switch-case's first Case: the bounds refused the request (ADR-0014)."""
+    return isinstance(request, RoutedRequest) and request.kind == REFUSE_STEP
+
+
 def routed_to_answer(request: Any) -> bool:
     """The switch-case's one Case: the router said this is a question to answer in words."""
     return isinstance(request, RoutedRequest) and request.kind == "answer"
@@ -278,10 +362,14 @@ class Router(Executor):
     add_switch_case_edge_group): one call on Steward's own client with Route as response_format. Its input handlers
     are AgentExecutor's own (str, Message, list[Message]), so every host starts the graph as it started PLAN."""
 
-    def __init__(self, client: Any, options: dict[str, Any], id: str = ROUTE_STEP) -> None:
+    def __init__(
+        self, client: Any, options: dict[str, Any], id: str = ROUTE_STEP,
+        sitting: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
+    ) -> None:
         super().__init__(id=id)
         self._client = client
         self._options = options
+        self._sitting = sitting  # the open sitting, read when a task names the ground (open_sitting_now)
 
     @handler
     async def from_str(self, text: str, ctx: WorkflowContext[RoutedRequest]) -> None:
@@ -314,9 +402,34 @@ class Router(Executor):
             kind = "answer"
         elif asks_for_a_change(request) or direct:
             kind = "task"
+        if (refusal := await self._refusal(request, kind, direct)) is not None:
+            await ctx.send_message(RoutedRequest(messages=messages, kind=REFUSE_STEP, reason=refusal))
+            return
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
+
+    async def _refusal(self, request: str, kind: str | None, direct: bool) -> str | None:
+        """The bounds' refusal of the request (ADR-0014, part 2), or None: the Archive named, a change from WhatsApp, or
+        a change to the ground while the sitting is open."""
+        if path := archive_in(request):
+            return ARCHIVE_REFUSAL.format(path=path)
+        if from_whatsapp(request) and (kind != "answer" or asks_for_a_change(request_body(request)) or direct):
+            return WHATSAPP_REFUSAL
+        if kind != "answer" and self._sitting is not None and names_the_ground(request) and (sitting := await self._sitting()):
+            return SITTING_REFUSAL.format(sitting=_agent.sitting_named(sitting))
+        return None
+
+
+class Refuse(Executor):
+    """The bounds' answer to a request they refuse (ADR-0014): the refusal, in words; no plan, no card, no model call."""
+
+    def __init__(self, id: str = REFUSE_STEP) -> None:
+        super().__init__(id=id)
+
+    @handler
+    async def refuse(self, request: RoutedRequest, ctx: WorkflowContext[Any, Any]) -> None:
+        await ctx.yield_output(request.reason or "Not done.")
 
 
 class StewardPlan(PlanningResponse):
@@ -914,8 +1027,11 @@ class ReadPlan(Executor):
     definitions as the feedback (the cookbook's repair loops). Once per run; the second reply is read as it is.
     """
 
-    def __init__(self, id: str = READ_PLAN_STEP) -> None:
+    def __init__(
+        self, id: str = READ_PLAN_STEP, sitting: Callable[[], Awaitable[dict[str, Any] | None]] | None = None
+    ) -> None:
         super().__init__(id=id)
+        self._sitting = sitting  # the open sitting, read when a plan names the ground (open_sitting_now)
 
     @handler
     async def read(
@@ -949,6 +1065,14 @@ class ReadPlan(Executor):
             await ctx.yield_output(clarification_text(plan))
         else:
             request = ctx.get_state(_REQUEST_STATE_KEY, None) or _first_user_text(response)
+            # ADR-0014, part 2: a plan that names the Archive, or the ground while the sitting is open, gets no card.
+            planned = "\n".join([plan.questions[0].message, *plan.steps])
+            if path := archive_in(planned):
+                await ctx.yield_output(ARCHIVE_REFUSAL.format(path=path))
+                return
+            if self._sitting is not None and names_the_ground(planned) and (sitting := await self._sitting()):
+                await ctx.yield_output(SITTING_REFUSAL.format(sitting=_agent.sitting_named(sitting)))
+                return
             # ADR-0014: whether EXPLORE read untrusted content, kept for EXECUTE (in the checkpoint, beside the request).
             ctx.set_state(UNTRUSTED_READ_KEY, untrusted_read_in(response.full_conversation or response.agent_response.messages))
             plan_data = {"request": request, "plan": plan.questions[0].message, "steps": plan.steps}
@@ -1307,7 +1431,11 @@ def build_steward_workflow(
     base = {k: v for k, v in (agent.default_options or {}).items() if k in OLLAMA_OPTIONS}
     for step, overrides in step_options.items():
         logger.info("Steward step %s: model options %s", step, {**base, **overrides})
-    route = Router(agent.client, {**base, **step_options.get(ROUTE_STEP, {})})
+    async def sitting() -> dict[str, Any] | None:
+        return await open_sitting_now(agent)
+
+    route = Router(agent.client, {**base, **step_options.get(ROUTE_STEP, {})}, sitting=sitting)
+    refuse = Refuse()
     # The answer step's own session says it answers in words: plan_mode_turns asks it for no StewardPlan. The session,
     # with its state, is in the workflow's checkpoint (AgentExecutor.on_checkpoint_save).
     answer_session = step_session(agent, ANSWER_STEP)
@@ -1321,7 +1449,7 @@ def build_steward_workflow(
     plan = AgentExecutor(
         agent, session=step_session(agent, PLAN_STEP), id=PLAN_STEP, context_mode="custom", context_filter=plan_call_input
     )
-    read_plan = ReadPlan()
+    read_plan = ReadPlan(sitting=sitting)
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
     check = Check(checks, written=lambda: written_files(executor_session(execute)))
@@ -1347,10 +1475,13 @@ def build_steward_workflow(
         WorkflowBuilder(
             name=WORKFLOW_NAME,
             start_executor=route,
-            output_from=[read_plan, ask_approval, repair, ask_commit, commit, report],
+            output_from=[refuse, read_plan, ask_approval, repair, ask_commit, commit, report],
             intermediate_output_from=[answer, execute],
         )
-        .add_switch_case_edge_group(route, [Case(condition=routed_to_answer, target=answer), Default(target=explore)])
+        .add_switch_case_edge_group(
+            route,
+            [Case(condition=routed_to_refusal, target=refuse), Case(condition=routed_to_answer, target=answer), Default(target=explore)],
+        )
         .add_edge(explore, plan)
         .add_edge(plan, read_plan)
         .add_edge(read_plan, plan)  # an empty plan reply, asked again once
