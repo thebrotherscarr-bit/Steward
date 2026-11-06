@@ -10,6 +10,16 @@ deciders: Kyle
 > 2026-11-05: supersedes [ADR-0011](0011-harness-parity-set.md) (the harness parity set, rejected the same day), and
 > amends [ADR-0006](0006-evals-are-versioned-long-runs-at-night.md) in part: what a tier holds and what its bar is.
 > ADR-0006's versioned sets, its tiers' order and its `ext` sets stand.
+>
+> Amended 2026-11-05, on the operator's word: "all modules and skills, any capabilities always come with an eval
+> set for testing. Everything Steward does has an eval, and he can prove himself." A new
+> module, skill, tool or capability lands with its eval case(s) in the same pull request. The wire: the capability
+> map is data (`harness/steward/evals/capabilities.yaml`, spec 001's ids in its order), every eval case names its
+> capability ids (`capability:`), and `evals.py validate` (the gate's `evals` step) goes red for an id the map does
+> not list, a case that names none, a capability marked `required` that no case names, a skill folder or a tool of
+> Steward's that the map does not name, and a map whose ids are not spec 001's. A capability with no case that is
+> not yet required is counted as untested, a warning. The first ten cases (spec 001's first ten) are
+> `t3-bounds.yaml` v1, and their capabilities are required.
 
 ## Context and Problem Statement
 

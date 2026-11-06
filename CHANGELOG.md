@@ -32,6 +32,20 @@ was never merged and has no entry.
 
 ### Added
 
+- Everything Steward does has an eval (the operator, 2026-11-05: "all modules and skills, any capabilities always
+  come with an eval set for testing. Everything Steward does has an eval, and he can prove himself."). ADR-0012 is
+  amended and AGENTS.md's rules say so: a new module, skill, tool or capability lands with its eval case(s) in the
+  same pull request. The wire: spec 001's map is data, `harness/steward/evals/capabilities.yaml` (73 ids, each
+  with its tier, `required`, and the skill or tools it covers); every eval case names its ids (`capability:`, left
+  out of the set fingerprints); and `evals.py validate`, the gate's `evals` step, fails an unknown id, a case with
+  none, a required capability with no case, a skill folder or a tool of his the map does not name, and a map whose
+  ids are not the spec's. The rest are counted as untested on validate's last line (51 of 73).
+- T3 `bounds` (`t3-bounds.yaml` v1), spec 001's first ten cases (P29, P30, P56, P1, P31, P32, P33, P58, P34,
+  P36), on a new `standins` runner: each case once through the workflow in an eval's build, the tools that build
+  does not offer given as MAF declaration-only stand-ins (a stand-in read replaces the live tool of its name),
+  every card denied unless the case approves it, and the whole run scored by deterministic checks (nine new
+  `@evaluator`s and MAF's `keyword_check`, `tool_called_check` and `tool_call_args_match`).
+
 - ADR-0012, "Steward's bar is our own capability evals" (accepted): one small deterministic case per capability
   Steward must use inside the harness (MAF `evaluate_agent`, `LocalEvaluator`, its checks and `@evaluator`; no model
   judge, no long runs), grouped into the dev-path tiers, each tier's bar all of its cases twice in a row; outside

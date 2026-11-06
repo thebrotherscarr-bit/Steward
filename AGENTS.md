@@ -42,6 +42,11 @@ to implementation.
 - Use MAF as it ships: check the MAF Learn pages and the installed `agent_framework` source first, and name the passage.
 - The harness, not the model: fix the task, the context, the tools or the check. One model, `steward:1`.
 - Name the wire: every piece has a test that goes red when it is unplugged.
+- Everything Steward does has an eval (the operator, 2026-11-05: "all modules and skills, any capabilities always come with an eval set for testing. Everything Steward does has an eval, and he can prove himself.").
+  A new module, skill, tool or capability lands with its eval case(s) in the same pull request: its entry in
+  `harness/steward/evals/capabilities.yaml` (and spec 001's table), and a case in a set file that names its id
+  (`capability:`). `evals.py validate` fails a skill folder or a tool of his that the map does not name, a case
+  with an unknown id, and a `required` capability with no case (ADR-0012, amended).
 - One piece, one line of work, one pull request. Say "restart required" when running code changes.
 
 ## Quick Reference

@@ -188,6 +188,11 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
   into the dev-path tiers (T0 and T1 met; T2 his own work, T3 Estate operations, T4 GitHub, then T5 to T7), and a
   tier's bar is all of its cases, twice in a row. Outside sets (BFCL, Aider Python) stay tier `ext`, calibration
   only; the parity set of [ADR-0011](decisions/0011-harness-parity-set.md) was rejected.
+- **Everything he does has an eval** (ADR-0012, amended 2026-11-05: "all modules and skills, any capabilities always
+  come with an eval set for testing"): the map is data, `harness/steward/evals/capabilities.yaml`; every case names its
+  capability ids; `evals.py validate` (the gate) fails a skill folder or a tool of his that the map does not name, a
+  case with an unknown id, and a required capability with no case. T3 `bounds` (`t3-bounds.yaml`, the `standins`
+  runner) holds spec 001's first ten cases, the tools the eval build lacks given as declaration-only stand-ins.
 - **Whenever the operator says,** day or night: from a flow, an automation, or a request in chat (planned and
   carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
 - An eval flow is `eval_start` then `eval_wait`.
@@ -235,10 +240,10 @@ In order, as the notes stand on 2026-11-05. Each item is one piece and one pull 
    Set up as automations (a saved flow, when, on/off), the prompt type removed (Jesster); `automation_save`; BFCL
    and Aider as eval flows. _Built 2026-11-05, except `automation_save`._
 3. **AG-UI step 3:** the Phone view and the console shelves on AG-UI events; then the A2UI pilot for approval cards.
-4. **Dev-path tiers:** T3 (Estate operations) and T4 (GitHub), then T2 and T5, then the `eval-author` skill; T6 and T7
-   grow with his reach. T5 needs restating now that Neiro is retired. The cases are the proposals of
-   [spec 001](specs/001-capability-evals.md), highest risk first, on the stand-ins it names
-   ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
+4. **Dev-path tiers:** T3 (Estate operations; its first ten cases are `t3-bounds.yaml`, 2026-11-05) and T4 (GitHub),
+   then T2 and T5, then the `eval-author` skill; T6 and T7 grow with his reach. T5 needs restating now that Neiro is
+   retired. The cases are the proposals of [spec 001](specs/001-capability-evals.md), highest risk first, on the
+   stand-ins it names ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md)).
 5. **Reach widens on each bar:** GitHub for his own repository passes from the hand to Steward after T2; then Jesster,
    Manjuel and Aurora one at a time.
 6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks.

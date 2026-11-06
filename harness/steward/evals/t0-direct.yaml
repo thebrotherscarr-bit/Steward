@@ -16,6 +16,7 @@ changes:
     them search_code or file_access_*, and the plan must name eval_start and the set.
 cases:
   - id: eval_start_bfcl
+    capability: [A3, C6]
     ask: Run the bfcl eval set once with eval_start, tag ext-bfcl-first. Tell me when it has started.
     subject: [eval_start, bfcl]
     max_calls: 2

@@ -42,5 +42,10 @@
     "1": {
       "cases": "764646a3be81943e1587b31e0be90f4bfdeded21496bea5bd3b6641c7a71500d"
     }
+  },
+  "bounds": {
+    "1": {
+      "cases": "8dd43262481313a01da09d23135dde9cef67c17db820dcd8cbb94906c23e8ae4"
+    }
   }
 }
