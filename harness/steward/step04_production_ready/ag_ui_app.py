@@ -47,8 +47,8 @@ import asyncio
 import logging
 import os
 import sys
-from collections.abc import AsyncGenerator, Callable, Mapping
-from contextlib import AsyncExitStack
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -107,11 +107,27 @@ class StewardAGUIWorkflow(AgentFrameworkWorkflow):
                 yield event
 
 
-def build_ag_ui_app(client_factory: Callable[[], Any] | None = None, **build: Any) -> FastAPI:
+@asynccontextmanager
+async def warm_at_start(_app: FastAPI) -> AsyncIterator[None]:
+    """The app's lifespan (FastAPI's "Lifespan Events"): his code index is brought up to date in the background as the
+    host starts (agent.warm_code_index), not inside the first request that searches; stopped if still running at
+    shutdown. session-20261105-1110-535a: that first search took 85.7 s of the operator's request."""
+    import agent  # noqa: PLC0415 - imported already by hosted.load_host_code
+
+    task = asyncio.create_task(agent.warm_code_index())
+    try:
+        yield
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+def build_ag_ui_app(client_factory: Callable[[], Any] | None = None, warm: bool = False, **build: Any) -> FastAPI:
     """The AG-UI endpoint at PATH, on a FastAPI app (Learn's "Registering the Endpoint", single_user=True). The code
-    each request builds is imported now (hosted.load_host_code), so a pull while the host runs is not mixed into it."""
+    each request builds is imported now (hosted.load_host_code), so a pull while the host runs is not mixed into it.
+    warm (the host's main): the code index is warmed as the app starts (warm_at_start)."""
     hosted.load_host_code()
-    app = FastAPI(title="Steward (AG-UI)")
+    app = FastAPI(title="Steward (AG-UI)", lifespan=warm_at_start if warm else None)
     add_agent_framework_fastapi_endpoint(
         app=app, agent=StewardAGUIWorkflow(client_factory, **build), path=PATH, single_user=True
     )
@@ -125,7 +141,7 @@ async def main() -> None:
     port = int(os.environ.get("STEWARD_AG_UI_PORT", str(PORT)))
     hosted.steward_observability()  # the same local telemetry as hosted.py: nothing of it on stdout
     logger.info("Steward serving on http://%s:%d%s (AG-UI, MAF workflow).", HOST, port, PATH)
-    await uvicorn.Server(uvicorn.Config(build_ag_ui_app(), host=HOST, port=port, log_level="info")).serve()
+    await uvicorn.Server(uvicorn.Config(build_ag_ui_app(warm=True), host=HOST, port=port, log_level="info")).serve()
 
 
 if __name__ == "__main__":

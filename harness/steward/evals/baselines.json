@@ -20,6 +20,11 @@
       "cases": "b05b3c5fbb8ca345a62b71029230695fe6ce7796eee45b5188fd576ec65b973d"
     }
   },
+  "direct": {
+    "1": {
+      "cases": "a426fe4619c554abab61d35510f0328ddc752519e8ae6d4724b49a6770be6924"
+    }
+  },
   "heldout": {
     "1": {
       "cases": "ee0cc8dce8d297be9b23127864303262054ec442783fba673a8aee44407389a5"

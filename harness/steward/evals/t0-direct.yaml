@@ -1,0 +1,22 @@
+# T0, regression: direct asks, scored on the plan card alone (the plans runner). A request that names his tool and its
+# arguments reaches its plan card with no code search and no file read; the plan and its card stay (ADR-0009).
+# Run: python harness/steward/step04_production_ready/evals.py direct
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: direct
+tier: T0
+version: 1
+owner: operator
+runner: plans
+split: full
+bar: {passed: 1, of: 1, runs_in_a_row: 2}
+changes:
+  1: >-
+    The operator's own ask from session-20261105-1110-535a, word for word: it reached its plan card after 18 EXPLORE
+    calls in 15 minutes (13 search_code, 2 whole-file reads). The plan card must come within 2 tool calls, none of
+    them search_code or file_access_*, and the plan must name eval_start and the set.
+cases:
+  - id: eval_start_bfcl
+    ask: Run the bfcl eval set once with eval_start, tag ext-bfcl-first. Tell me when it has started.
+    subject: [eval_start, bfcl]
+    max_calls: 2
+    checks: [plan_reached_directly]

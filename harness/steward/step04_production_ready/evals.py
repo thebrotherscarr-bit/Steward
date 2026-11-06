@@ -93,7 +93,7 @@ EVAL_SETS_DIR = Path(__file__).resolve().parents[1] / "evals"
 EVAL_BASELINES = EVAL_SETS_DIR / "baselines.json"
 # bfcl and exercises: the outside sets' runners (ext_sets.py, tier ext only; their cases are {id, checks} over pinned
 # data, and the set names its source).
-EVAL_RUNNERS = ("asks", "steps", *ext_sets.EXT_RUNNERS)
+EVAL_RUNNERS = ("asks", "steps", "plans", *ext_sets.EXT_RUNNERS)
 _SET_KEYS = {"name", "tier", "version", "owner", "runner", "split", "bar", "changes", "cases"}
 # num_repetitions: opt-in, and only for a non-gating set (tier ext, e.g. a flakiness check); a gating tier runs each
 # case once.
@@ -133,6 +133,9 @@ ASKS_PROCESS_CHECKS = (
     "no_nudge_in_reply", "answer_on_topic",
 )
 STEPS_CHECKS = ("plan_step", "execute_step", "steps_overall")
+# The plans runner (t0-direct.yaml): a case is {id, ask, subject, max_calls, checks}, scored on its plan card alone.
+PLANS_CHECKS = ("plan_reached_directly",)
+_PLANS_CASE_KEYS = {"id", "ask", "subject", "max_calls", "checks"}
 # The result checks the asks runner scores (steps_overall is the steps runner's).
 ASKS_RESULT_CHECKS = tuple(name for name in RESULT_CHECKS if name not in STEPS_CHECKS)
 
@@ -154,6 +157,7 @@ class EvalCase:
     checks: tuple[str, ...]
     expected_output: str | None = None
     expected_tool_calls: tuple[ExpectedToolCall, ...] = ()
+    max_calls: int | None = None  # a plans case's: the tool calls allowed before its plan card
 
 
 @dataclass(frozen=True)
@@ -239,6 +243,8 @@ def _schema_problems(raw: Any, path: Path) -> list[str]:
         problems.append(f"bar {bar['passed']}/{bar['of']} does not fit its {len(cases)} cases")
     if runner in ext_sets.EXT_RUNNERS:
         return [*problems, *ext_sets.schema_problems(raw)]  # {id, checks} over the pinned data
+    if runner == "plans":
+        return [*problems, *_plans_case_problems(cases)]  # {id, ask, subject, max_calls, checks}: no fixture
     known = set(ASKS_PROCESS_CHECKS) | set(ASKS_RESULT_CHECKS) if runner == "asks" else set(STEPS_CHECKS)
     seen: set[str] = set()
     for n, case in enumerate(cases, 1):
@@ -292,6 +298,34 @@ def _schema_problems(raw: Any, path: Path) -> list[str]:
     return problems
 
 
+def _plans_case_problems(cases: list[Any]) -> list[str]:
+    """What is wrong with a plans set's cases: each {id, ask, subject, max_calls, checks}, the checks PLANS_CHECKS'."""
+    problems: list[str] = []
+    seen: set[str] = set()
+    for n, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            problems.append(f"case {n} is not a mapping")
+            continue
+        where = f"case {case.get('id', n)!r}"
+        if set(case) != _PLANS_CASE_KEYS:
+            problems.append(f"{where}: its keys are not {sorted(_PLANS_CASE_KEYS)}: {sorted(case)}")
+            continue
+        if case["id"] in seen:
+            problems.append(f"{where}: the id is used twice")
+        seen.add(case["id"])
+        if not (isinstance(case["ask"], str) and case["ask"].strip()):
+            problems.append(f"{where}: the ask is empty")
+        subject = case["subject"]
+        if not (isinstance(subject, list) and subject and all(isinstance(t, str) and t and t == t.lower() for t in subject)):
+            problems.append(f"{where}: subject is not a list of lower-case terms the plan must name")
+        calls = case["max_calls"]
+        if not (isinstance(calls, int) and not isinstance(calls, bool) and calls >= 0):
+            problems.append(f"{where}: max_calls {calls!r} is not a whole number from 0")
+        if not (isinstance(case["checks"], list) and case["checks"] and set(case["checks"]) <= set(PLANS_CHECKS)):
+            problems.append(f"{where}: checks are not among {list(PLANS_CHECKS)}")
+    return problems
+
+
 def load_eval_set(path: Path) -> EvalSet:
     """A set file read and its shape checked; EvalSetError names every problem."""
     import yaml  # noqa: PLC0415
@@ -315,6 +349,19 @@ def load_eval_set(path: Path) -> EvalSet:
             split=raw["split"], bar=dict(raw["bar"]), changes=dict(raw["changes"]), cases=cases,
             fingerprint=ext_sets.set_fingerprint(raw), path=path, num_repetitions=raw.get("num_repetitions", 1),
             source=dict(raw["source"]),
+        )
+    if raw["runner"] == "plans":  # the plan phase alone: no fixture, plant or precondition (nothing on disk changes)
+        cases = tuple(
+            EvalCase(
+                id=c["id"], ask=" ".join(c["ask"].split()), project="", plant=None, subject=tuple(c["subject"]),
+                precondition="", checks=tuple(c["checks"]), max_calls=c["max_calls"],
+            )
+            for c in raw["cases"]
+        )
+        return EvalSet(
+            name=raw["name"], tier=raw["tier"], version=raw["version"], owner=raw["owner"], runner=raw["runner"],
+            split=raw["split"], bar=dict(raw["bar"]), changes=dict(raw["changes"]), cases=cases,
+            fingerprint=cases_fingerprint(raw["cases"]), path=path,
         )
     cases = tuple(
         EvalCase(
@@ -1180,6 +1227,95 @@ async def steps_main() -> int:
     return code
 
 
+# The plans runner (t0-direct.yaml, 2026-11-05): the plan phase alone. session-20261105-1110-535a: "Run the bfcl eval
+# set once with eval_start, tag ext-bfcl-first." reached its plan card after 18 EXPLORE calls in 15 minutes (13
+# search_code, 2 whole-file reads; the plan itself was right). Each case runs once through the workflow as the Agent tab
+# runs it, in an eval's build (eval_start is not offered there, so nothing could start), to its plan card, and every
+# card is denied, so nothing runs after it. plan_reached_directly scores the card, with no model: reached within the
+# case's max_calls tool calls, none of them reading code (reads_code), and the plan names the case's subject terms.
+# Nothing on disk changes, so a plans case has no fixture, plant or RESULT check: its plan card is its result.
+PLANS_CASES: dict[str, EvalCase] = {case.ask: case for s in EVAL_SETS.values() if s.runner == "plans" for case in s.cases}
+
+
+def reads_code(name: str) -> bool:
+    """A tool call that reads the workspace's code: search_code, or one of MAF's file_access tools."""
+    return name == "search_code" or name.startswith("file_access_")
+
+
+def plan_phase_conversation(events: list[Any]) -> list[Any]:
+    """A run's plan phase as one conversation: PLAN's last completion (EXPLORE's reading is in it: plan_call_input), or
+    EXPLORE's completions when PLAN never completed; then the run's approve_plan cards."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent_framework import Message  # noqa: PLC0415
+
+    steps = step_conversations(events)
+    plans = steps.get(wf.PLAN_STEP) or []
+    conversation = list(plans[-1]) if plans else [m for c in steps.get(wf.EXPLORE_STEP, []) for m in c]
+    cards = [
+        e.data for e in events
+        if e.type == "request_info" and getattr(getattr(e.data, "function_call", None), "name", None) == wf.APPROVE_PLAN
+    ]
+    return [*conversation, Message(role="assistant", contents=cards)] if cards else conversation
+
+
+@evaluator(name="plan_reached_directly")
+def plan_reached_directly(query: str, conversation: list[Any]) -> dict[str, object]:
+    """A plans case: its approve_plan card was reached within its max_calls tool calls, none of them reading code, and
+    the plan (its summary and steps) names each of the case's subject terms."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    case = PLANS_CASES.get(" ".join((query or "").split()))
+    if case is None:
+        return {"passed": True, "reason": "Not this case."}
+    calls = _calls_in_order(conversation)
+    at = next((i for i, (name, _, outcome) in enumerate(calls) if name == wf.APPROVE_PLAN and outcome == "card"), None)
+    if at is None:
+        return {"passed": False, "reason": f"No plan card. Calls: {[name for name, _, _ in calls][:20]}"}
+    before = [name for name, _, outcome in calls[:at] if outcome != "card"]
+    if read := [name for name in before if reads_code(name)]:
+        return {"passed": False, "reason": f"Read code before the plan: {read} (calls: {before})"}
+    if len(before) > (case.max_calls or 0):
+        return {"passed": False, "reason": f"{len(before)} tool calls before the plan card, over {case.max_calls}: {before}"}
+    plan = calls[at][1] or {}
+    said = " ".join([str(plan.get("plan", "")), *(str(step) for step in plan.get("steps") or [])]).lower()
+    if missing := [term for term in case.subject if term not in said]:
+        return {"passed": False, "reason": f"The plan does not name {missing}: {plan.get('steps')}"}
+    return {"passed": True, "reason": f"Plan card after {len(before)} call(s) {before}: {plan.get('steps')}"}
+
+
+async def plans_main(eval_set: EvalSet, **build: Any) -> int:
+    """A plans set: each case once through the workflow to its plan card, every card denied (nothing runs), scored by
+    plan_reached_directly; the exit code is exit_code's, and the run is recorded under the set's name. ``build`` goes
+    to build_steward (the tests' scripted client); a real run reads .env and keeps its traces as the other runners do."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent_framework import EvalItem, Message  # noqa: PLC0415
+
+    if "client" not in build:
+        load_dotenv()
+        configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
+    build["eval_build"] = True
+    items = []
+    for case in eval_set.cases:
+        CASE_ERRORS.pop(case.ask, None)
+        events: list[Any] = []
+        try:
+            async with AsyncExitStack() as stack:
+                agent, workflow = await wf.build_steward(
+                    stack, file_memory_store=isolated_memory(stack), memory_store=isolated_memory_store(stack), **build
+                )
+                async with agent:
+                    events = await _run_workflow_answering_cards(workflow, case.ask, set())  # every card denied
+        except Exception as error:  # the run raised: the case fails with it (run_completed)
+            CASE_ERRORS[case.ask] = raised(error)
+        user = Message(role="user", contents=[case.ask])
+        items.append(EvalItem([user, *plan_phase_conversation(events)], split_strategy=SPLITS[eval_set.split]))
+    result = await LocalEvaluator(plan_reached_directly, run_completed).evaluate(items, eval_name=eval_set.eval_name)
+    code = exit_code([result])
+    print_asks_report(f"{eval_set.tier} {eval_set.eval_name}", "Checks", result)
+    record_history(eval_set.name, {"": result}, code)
+    return code
+
+
 # Step 4: evals as small single asks (the cookbook's evaluation flywheel: today's failures labelled, grouped, and
 # each given a check; MAF's guide evals.py: run each query yourself with its cards answered, then
 # evaluate_agent(..., responses=...)). Each ask runs once through the workflow as the Agent tab runs it
@@ -1810,6 +1946,8 @@ async def set_main(name: str) -> int:
     eval_set = EVAL_SETS[name]
     if eval_set.runner in ext_sets.EXT_RUNNERS:  # an outside set (bfcl, aider-py): ext_sets runs and scores it
         return await ext_sets.ext_main(eval_set, sys.modules[__name__])
+    if eval_set.runner == "plans":  # the plan phase alone (t0-direct.yaml)
+        return await plans_main(eval_set)
     load_dotenv()
     configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     codes = []
@@ -1835,7 +1973,7 @@ def validate_sets(folder: Path = EVAL_SETS_DIR, baselines: Path | None = None) -
     problems: list[str] = []
     missing = [n for n in ASKS_PROCESS_CHECKS + ASKS_RESULT_CHECKS if n not in {e.__name__ for e in SMALL_ASK_EVALUATORS}]
     missing += [f"{n} (measurement {f})" for n, f in RESULT_CHECKS.items() if not callable(globals().get(f))]
-    missing += [n for n in STEPS_CHECKS if not callable(globals().get(n))]
+    missing += [n for n in (*STEPS_CHECKS, *PLANS_CHECKS) if not callable(globals().get(n))]
     missing += [f"plant {n} ({f})" for n, f in PLANTS.items() if not callable(globals().get(f))]
     missing += [n for n in (*ext_sets.BFCL_CHECKS, *ext_sets.EXERCISE_CHECKS) if n not in {e.__name__ for e in ext_sets.EXT_EVALUATORS}]
     problems += [f"evals.py: no check {n}" for n in missing]
@@ -1869,6 +2007,8 @@ def validate_sets(folder: Path = EVAL_SETS_DIR, baselines: Path | None = None) -
         if eval_set.runner in ext_sets.EXT_RUNNERS:  # an outside set: no plant; an exercise's stub must fail its tests
             if eval_set.runner == "exercises":
                 problems += ext_sets.exercise_precondition_problems(eval_set)
+            continue
+        if eval_set.runner == "plans":  # scored on the plan card: no fixture or precondition to measure
             continue
         for case in eval_set.cases:
             if eval_set.runner == "asks" and case.ask in asks:  # the asks runner keys its cases by their ask

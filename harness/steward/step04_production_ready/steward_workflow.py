@@ -307,9 +307,12 @@ class Router(Executor):
             kind: str | None = Route.model_validate_json((reply.text or "").strip()).kind
         except ValueError:
             kind = None  # no Route: the Default branch, the plan as before
-        if asks_only_to_read(request) or from_an_automation(request):
+        # A direct ask (one of his Estate actions named by its tool name) is a task whatever its first word: in chat an
+        # Estate action is planned and carded (ADR-0009). An automation's turn is still answered in words.
+        direct = _agent.directly_named_action(request) is not None
+        if (asks_only_to_read(request) and not direct) or from_an_automation(request):
             kind = "answer"
-        elif asks_for_a_change(request):
+        elif asks_for_a_change(request) or direct:
             kind = "task"
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
@@ -675,13 +678,18 @@ CODEACT_TOOL = "execute_code"
 # to inventory.py. EXECUTE's todos are the approved plan's steps (approved_plan_turn writes them), so it is offered
 # only the todo tools that work through them (todos_complete, todos_get_remaining, todos_get_all), never one to add.
 EXECUTE_LEAVES_OUT = frozenset({GIT_COMMIT, CODEACT_TOOL, "todos_add", *_MODE_TOOLS})
+# The direct ask (agent.DIRECT_ACTION_KEY: the request names one of his Estate actions by its tool name): EXPLORE is
+# offered only the Estate's reads, so his reading is at most a status check and no code search or file read stands
+# between the request and his plan (session-20261105-1110-535a: 18 EXPLORE calls, 15 minutes, before the card).
+DIRECT_ASK_TOOLS = frozenset(f"secondbrain_{name}" for name in ESTATE_READS)
 
 
-def offered_in_step(name: str, step: str | None, shell_closed: bool = False) -> bool:
+def offered_in_step(name: str, step: str | None, shell_closed: bool = False, direct: bool = False) -> bool:
     """Whether a step's model calls are offered the tool named name (a step of None is offered every tool); shell_closed
-    is whether the sandbox has closed the session's run_shell (agent.sandbox_shell_closed)."""
+    is whether the sandbox has closed the session's run_shell (agent.sandbox_shell_closed); direct is whether the
+    request is a direct ask (agent.DIRECT_ACTION_KEY), which narrows EXPLORE to DIRECT_ASK_TOOLS."""
     if step == EXPLORE_STEP:
-        return name in PLAN_TOOLS
+        return name in (DIRECT_ASK_TOOLS if direct else PLAN_TOOLS)
     if step == PLAN_STEP:
         return False  # the plan call: tools off (plan_phases_turn), so it can only answer with the plan
     if step == ANSWER_STEP:
@@ -700,13 +708,22 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
     (FunctionInvocationContext.remove_tools, agent_framework/_middleware.py:580-625, "self.tools[:] = ..."): MAF's
     function loop runs calls from that same list, and a provider's chat middleware later in the chain adds its tools to
     it (MemoryContextProvider's write_memory), so a copy would lose those. A tool the step leaves out cannot run either.
+
+    The tools cut are his tools, not misspellings: they are kept in the session (agent.LEFT_OUT_KEY, added to on each
+    call, as the run's list stays cut for its later calls), so his name repair (agent.repair_tool_names, later in the
+    chain) never turns a call to one of them into another tool's call; MAF answers it as not found.
     """
     session = context.session
     step = session.state.get(STEP_KEY) if session is not None else None
     tools = (context.options or {}).get("tools")
     if step is not None and isinstance(tools, list):
         closed = _agent.sandbox_shell_closed(session)
-        tools[:] = [t for t in tools if offered_in_step(getattr(t, "name", "") or "", step, closed)]
+        direct = bool(session.state.get(_agent.DIRECT_ACTION_KEY))
+        names = [getattr(t, "name", "") or "" for t in tools]
+        cut = {n for n in names if not offered_in_step(n, step, closed, direct)}
+        tools[:] = [t for t, n in zip(tools, names) if n not in cut]
+        kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
+        session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
     await call_next()
 
 
