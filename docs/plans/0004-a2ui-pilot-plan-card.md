@@ -31,9 +31,14 @@ and Deny buttons, not JSON.
   the `t2-cards` v1 set and A13 (required); gate test
   `test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` (red with the event removed:
   checked). Restart required: Steward's AG-UI host.
-- [ ] Milestone 2 (Jesster): the AG-UI client hands the surface to the card; the card's answer path unchanged.
-- [ ] Milestone 3 (Jesster): the Agent tab and the Phone view draw the card from the surface with the A2UI renderer and
-  the app's own components; today's card when there is no surface or it cannot be drawn.
+- [x] (2026-11-05 20:44) Milestone 1 merged as Steward #170 (the ADR and this plan as #169).
+- [x] (2026-11-05 20:47) Milestone 2 (Jesster #96): `agui.cjs` keeps CUSTOM `a2ui` by the card's id and hands it to
+  `approve(..., {a2ui})`; `service.cjs` puts it on the card (window, `onCard`, `cards()`); Telegram and Discord keep
+  it on the phone log's card line; red with the CUSTOM case removed (checked).
+- [x] (2026-11-05 20:54) Milestone 3 (Jesster #97): `@a2ui/react` and `@a2ui/web_core` 0.15.0 and `zod` pinned;
+  `a2uiCard.ts` (the app's catalog, `processCard`, `planCardAnswer`), `A2uiCard.tsx` (the app's Column, Row, Text and
+  Button; an error boundary and today's card as the fallback), drawn by `AgentView.tsx` (reply box kept) and
+  `PhoneView.tsx` (an open card); `a2uiCard.test.ts`.
 - [ ] The live acceptance below, on the operator's builds (Steward's AG-UI host restarted, SecondBrain's build
   installed: both his, or the lead's).
 
@@ -51,6 +56,16 @@ and Deny buttons, not JSON.
   CHANGELOG: "`@a2ui/react/v0_9` no longer ships a React implementation of the basic catalog ... they render as W3C
   Custom Elements"); the app supplies its own implementations with `createComponentImplementation` against the basic
   catalog's component APIs (`ColumnApi`, `RowApi`, `TextApi`, `ButtonApi` from `@a2ui/web_core/v0_9/basic_catalog`).
+
+- Observation: `@a2ui/react` 0.15.0 defines its React host element (a custom element, `class extends HTMLElement`)
+  when it is imported, and `A2uiSurface` keeps its state in a store with no server snapshot, so it cannot be drawn by
+  React's server renderer; Jesster's tests run in Node with no DOM. Evidence: "ReferenceError: HTMLElement is not
+  defined ... @a2ui/src/catalog/react_host_element.ts:35" on import, and "Missing getServerSnapshot, which is required
+  for server-rendered content" from `renderToStaticMarkup`. So the tests prove the surface through `web_core`'s
+  processor (taken, refused, actions answering only their own card) and the fallback by the server renderer, and the
+  drawn card itself is seen live. No DOM library was added for it.
+- Observation: `@a2ui/web_core`'s `MessageProcessor` refuses an `updateComponents` with no components and a message of
+  another version, and accepts Steward's surface as `plan_card_surface` builds it (the probe and the tests).
 
 ## Decision Log
 
@@ -78,7 +93,19 @@ and Deny buttons, not JSON.
 
 ## Outcomes & Retrospective
 
-Nothing to report yet.
+2026-11-05, Milestones 1 to 3. Steward's plan card now comes with its A2UI v0.9 surface, built from the plan by his
+workflow and sent over AG-UI as a CUSTOM `a2ui` event before the card; Jesster carries it on the card and draws the
+card from it with the A2UI React renderer and the app's own four components, today's card whenever the surface is
+missing, refused or fails to draw; Approve and Deny answer through the same AG-UI resume as before. The wire, both
+sides: capability A13 (required) with its case `t2-cards` v1 and the gate test
+`test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` (red with the event removed), and
+Jesster's `agui.test.cjs` and `a2uiCard.test.ts`. What remains: the live acceptance once Steward's AG-UI host is
+restarted and SecondBrain's build carrying Jesster #97 is installed, and one model run of `cards` (the operator's).
+Other cards and model-generated surfaces are outside ADR-0013.
+
+Lesson: the shipped pieces did not fit the plan's first picture in two places (MAF's A2UI support is for agents with
+a generated surface; the React renderer no longer ships basic components), and reading the installed packages before
+writing the ADR settled both before any code.
 
 ## Context and Orientation
 
