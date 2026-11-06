@@ -32,6 +32,11 @@ was never merged and has no entry.
 
 ### Added
 
+- His judgment in the workflow, part 2 ([ADR-0015](docs/decisions/0015-his-judgment-in-the-workflow.md)): EXECUTE is
+  told to check each step against the request and to report what goes against it; `stop_and_report` (EXECUTE only)
+  ends the run there, with his reason, no repair and no commit card; a change always ends at the `git_commit` card, a
+  docs change with no test to run too (`NO_TESTS_NEEDED`). Capabilities A16 to A18 (required) with their cases,
+  `t2-judgment.yaml` v2 (new check `commit_card_raised`). Restart required (Steward's hosts).
 - His judgment in the workflow, part 1 ([ADR-0015](docs/decisions/0015-his-judgment-in-the-workflow.md), from the
   06:04 run of 2026-11-06): the plan's `already_done` (a request his reading shows is already satisfied ends with
   `ALREADY_DONE` and what showed it, no card, no change) and EXPLORE's reading budget (at most

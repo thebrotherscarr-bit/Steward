@@ -408,6 +408,45 @@ async def invoke_through_middleware(agent: Any, function: FunctionTool, argument
 
 # </git_commit>
 
+
+# <stop_and_report>
+# ADR-0015, part 2 (the 06:04 run of 2026-11-06: he wrote a README line that was already there and carried on): when a
+# step would make the result wrong or redundant against the request, EXECUTE stops and reports back. Stopping is this
+# tool, offered in EXECUTE only (steward_workflow.offered_in_step): record_stop keeps his reason in the session
+# (STOPPED_KEY), the harness loop ends the run there (plan_reply_loop's should_continue), and the workflow's check
+# sends the run to REPORT with the reason and no commit card (steward_workflow.Check). The user's answer is his next
+# request. A new approved plan clears it (steward_workflow.approved_plan_turn).
+STOP_AND_REPORT = "stop_and_report"
+STOPPED_KEY = "steward_stopped"
+STOPPED = "Stopped. Nothing more runs for this plan; your reason goes to the user as your report. End your reply now."
+
+
+@tool(name=STOP_AND_REPORT, approval_mode="never_require")
+def stop_and_report(
+    reason: Annotated[str, Field(description="What you found that goes against the request, and what showed it (the file and the line).")],
+) -> str:
+    """Stop carrying out the plan and report back: call this when a step would make the result wrong or redundant
+    against the request (what it asks for is already there, or the step contradicts it). Nothing more runs and nothing
+    is committed; the user answers your reason."""
+    return STOPPED
+
+
+async def record_stop(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware: a stop_and_report call keeps its reason in the session (STOPPED_KEY), for the loop and the check."""
+    await call_next()
+    session = context.session or _RUN_SESSION.get()
+    if context.function.name == STOP_AND_REPORT and session is not None:
+        arguments = context.arguments.model_dump() if hasattr(context.arguments, "model_dump") else dict(context.arguments or {})
+        session.state[STOPPED_KEY] = " ".join(str(arguments.get("reason") or "").split()) or "a step did not fit the request"
+
+
+def stopped_reason(session: Any) -> str | None:
+    """His reason for stopping (stop_and_report) in this session, or None."""
+    return session.state.get(STOPPED_KEY) if session is not None else None
+
+
+# </stop_and_report>
+
 # <small_commit_rule>
 # The guide's "a rule of your own": it auto-approves trades under $1,000; Steward auto-approves a
 # commit when the whole change is small. Rules run in order and the first that returns True wins;
@@ -1904,6 +1943,8 @@ def plan_reply_loop(
 
     async def should_continue(*, session: Any = None, last_result: Any = None, iteration: int = 0, **kwargs: Any) -> Any:
         if denied_by_user(kwargs.get("messages")):
+            return False
+        if stopped_reason(session):  # ADR-0015: he stopped and reported back; his open todos wait for the user
             return False
         if reading_stopped(session, last_result, kwargs.get("messages")):
             return (True, "read on")
@@ -3818,7 +3859,7 @@ async def build_steward_agent(
         part4 = part == 4
         # A copy per build: MAF's native workflow host builds Steward for every request and refuses a tool object
         # shared between requests (agent_framework_foundry_hosting WorkflowResolver), and git_commit is module-level.
-        part3_tools: list[Any] = [*tools, copy.copy(git_commit), *extra_tools]
+        part3_tools: list[Any] = [*tools, copy.copy(git_commit), copy.copy(stop_and_report), *extra_tools]
         if code_search_on():
             # His search_code (<code_search>): reads only, so no card; nothing is embedded until his first search.
             part3_tools.append(code_search_tool())
@@ -3976,6 +4017,7 @@ async def build_steward_agent(
             middleware=[
                 # ADR-0014: the bounds, outermost of his function middleware, so a refused call reaches nothing else.
                 bounds_gate,
+                record_stop,  # ADR-0015: stop_and_report's reason, kept in the session
                 memory_owner, estate_door_gate, *gate_middleware, record_written_files,
                 refuse_a_bare_name_the_request_put_in_a_folder, refuse_unicode_punctuation_in_code, todo_ids_by_name(todo_provider),
                 point_a_missed_path_at_the_named_one,

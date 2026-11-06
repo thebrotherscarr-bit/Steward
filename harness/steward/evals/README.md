@@ -159,7 +159,12 @@ run is one case: `powershell -File harness/steward/evals/run-bar.ps1 -Sets cards
 2026-11-06) runs on `harness/steward/working/sample-project-2`, put back after each case. `already_there` (A14) asks
 for a README line the README already has: it passes with no card, no change, and "already" in his reply.
 `reads_within_budget` (A15) asks for a new function: its plan card must come after at most
-`steward_workflow.EXPLORE_READ_BUDGET` tool calls (`reads_within_budget`, no model). Bar: 2 of 2, twice in a row.
+`steward_workflow.EXPLORE_READ_BUDGET` tool calls (`reads_within_budget`, no model). v2 adds the execute step's:
+`redundant_step_stops` (A16, A17) asks again for a README line already there, its plan approved: it passes when no
+write is asked for and his reply says "already" (he stops with `stop_and_report`, or answers so at the plan);
+`docs_change_commit_card` (A18) asks for a new README line, its plan and writes approved: it passes when the change
+ends at the `git_commit` card (`commit_card_raised`; the card is denied, the README put back). Bar: 4 of 4, twice in
+a row.
 One run: `powershell -ExecutionPolicy Bypass -File harness/steward/evals/run-bar.ps1 -Sets judgment -Tag judgment-first -Runs 1`.
 
 ## T3, the bounds (the standins runner)

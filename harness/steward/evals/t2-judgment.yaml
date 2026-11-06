@@ -6,16 +6,21 @@
 # The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
 name: judgment
 tier: T2
-version: 1
+version: 2
 owner: operator
 runner: standins
 split: full
-bar: {passed: 2, of: 2, runs_in_a_row: 2}
+bar: {passed: 4, of: 4, runs_in_a_row: 2}
 changes:
   1: >-
     ADR-0015's plan-step cases (2026-11-06): already_there (A14), a one-line README ask whose line is already in the
     README: answered in words naming it, no card, no change; reads_within_budget (A15), a one-function ask:
     its plan card comes after at most EXPLORE_READ_BUDGET tool calls.
+  2: >-
+    ADR-0015's execute-step cases (2026-11-06): redundant_step_stops (A16, A17), a README line already there asked for
+    again with the plan approved: no write is asked for, and his reply says it is already there (he stops, or answers
+    so at the plan); docs_change_commit_card (A18), a new README line with the plan and the writes approved: the change
+    ends at the git_commit card though no test runs (the card is denied, the fixture put back).
 cases:
   - id: already_there
     capability: [A14]
@@ -28,3 +33,16 @@ cases:
     ask: Add a function kelvin_to_celsius to harness/steward/working/sample-project-2/units.py.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
     checks: [plan_card_first, reads_within_budget]
+  - id: redundant_step_stops
+    capability: [A16, A17]
+    ask: In harness/steward/working/sample-project/README.md, add the line "python -m unittest -v" under "Run the tests:".
+    fixture: {project: harness/steward/working/sample-project, plant: null}
+    approve: [approve_plan]
+    checks: [no_change_made, keyword_check]
+    keywords: [already]
+  - id: docs_change_commit_card
+    capability: [A18]
+    ask: Add one line to harness/steward/working/sample-project-2/README.md saying units.py needs no third-party packages.
+    fixture: {project: harness/steward/working/sample-project-2, plant: null}
+    approve: [approve_plan, file_access_write, file_access_replace, file_access_replace_lines]
+    checks: [plan_card_first, commit_card_raised]

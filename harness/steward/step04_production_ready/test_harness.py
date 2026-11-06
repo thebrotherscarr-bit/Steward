@@ -8508,11 +8508,11 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 77  # A12, A13: ExecPlans 0003, 0004; A14, A15: ADR-0015
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 80  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18"}, sorted(required)
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() for t in c.tools} == evals.steward_tool_names()
@@ -9026,5 +9026,81 @@ def test_explores_reading_before_a_plan_stops_at_its_budget() -> None:
     asyncio.run(evals.standins_main(_judgment_case("reads_within_budget"), client=client, enable_shell=False))
     assert json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])["passed"] == 1
 
+
+def test_a_step_that_would_spoil_the_result_stops_the_plan_and_reports_back() -> None:
+    """ADR-0015, A16 and A17: EXECUTE is told to check each step against the request and to say what goes against it;
+    stop_and_report, offered in EXECUTE only, ends the run there: no further loop turn, no repair, no commit card, and
+    REPORT says his reason. The judgment set's redundant_step_stops case passes on a scripted model that stops, and
+    fails on one that writes the line again."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    message = wf.execute_message("r", "p", ["s"]).text
+    assert wf.STOP_IF_IT_SPOILS in message and wf.SAY_WHAT_GOES_AGAINST in message
+    assert wf.offered_in_step(steward.STOP_AND_REPORT, wf.EXECUTE_STEP)
+    assert not any(wf.offered_in_step(steward.STOP_AND_REPORT, step) for step in (wf.EXPLORE_STEP, wf.PLAN_STEP, wf.ANSWER_STEP))
+    reason = "README.md line 7 already says python -m unittest -v"
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Add the line to README.md"]})
+    stop = Content.from_function_call(call_id="s1", name=steward.STOP_AND_REPORT, arguments={"reason": reason})
+
+    def approved(replies: list[Any]) -> tuple[list[str], list[str], ScriptedChatClient]:
+        client = ScriptedChatClient(["Read.", *replies], plans=[plan])
+
+        async def _go() -> tuple[list[str], list[str]]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    workflow = wf.build_steward_workflow(agent, checks=lambda messages: None)
+                    events = [e async for e in workflow.run("Add the run line to README.md.", stream=True)]
+                    card = next(e for e in events if e.type == "request_info")
+                    events = [e async for e in workflow.run(stream=True, responses={card.request_id: card.data.to_function_approval_response(True)})]
+                    return said(events), [e.data.function_call.name for e in events if e.type == "request_info"]
+
+        shown, cards = asyncio.run(_go())
+        return shown, cards, client
+
+    shown, cards, client = approved([stop, "Stopped: the line is already there."])
+    assert wf.STOPPED_REPORT.format(reason=reason) in shown and cards == [], (shown, cards)
+    assert len(client.calls) == 3, "EXPLORE's one call, then the stop and his words: the loop ran no further turn"
+    for script, passed in (([stop, "Already there."], 1), ([Content.from_function_call(
+        call_id="w1", name="file_access_replace",
+        arguments={"file_name": "harness/steward/working/sample-project/README.md", "old_string": "Run the tests:", "new_string": "Run the tests:\npython -m unittest -v"},
+    ), "Added."], 0)):
+        client = ScriptedChatClient(["Read.", *script], plans=[plan])
+        asyncio.run(evals.standins_main(_judgment_case("redundant_step_stops"), client=client, enable_shell=False))
+        assert json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])["passed"] == passed, script
+
+
+def test_a_docs_change_ends_at_the_commit_card_though_no_test_runs() -> None:
+    """ADR-0015, A18 (the 06:04 run: a README change ended with no check and no card): a change that wrote no .py file
+    has no test to run, the check says so (NO_TESTS_NEEDED), and the run still ends at the git_commit card; with
+    nothing written, it ends at REPORT as before. The judgment set's docs_change_commit_card case passes through the
+    standins runner on a scripted model (its plan and write approved, the commit card denied, the README put back)."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    assert wf.ready_to_commit(wf.CheckReport(1, True, "", "", changed=True))
+    assert not wf.ready_to_commit(wf.CheckReport(1, True, "", "")) and wf.ready_for_report(wf.CheckReport(1, True, "", ""))
+    assert not wf.ready_to_commit(wf.CheckReport(1, True, "", "", changed=True, stopped="no"))
+    assert wf.checks_text(wf.CheckReport(1, True, "", "", changed=True)) == wf.NO_TESTS_NEEDED
+    readme = steward._WORKING_DIR / "harness/steward/working/sample-project-2/README.md"
+    before = readme.read_bytes()
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Add the line to README.md"]})
+    write = Content.from_function_call(call_id="w1", name="file_access_replace", arguments={
+        "file_name": "harness/steward/working/sample-project-2/README.md", "old_string": "Run the tests:",
+        "new_string": "units.py needs no third-party packages.\n\nRun the tests:",
+    })
+    done = Content.from_function_call(call_id="d1", name="todos_complete", arguments={"items": [{"id": 1, "reason": "added"}]})
+    client = ScriptedChatClient(
+        ["Read.", write, done, "Added the line to README.md.", '{"message": "Say units.py needs no third-party packages"}'], plans=[plan]
+    )
+    asyncio.run(evals.standins_main(_judgment_case("docs_change_commit_card"), client=client, enable_shell=False))
+    run_line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+    assert run_line["passed"] == 1, run_line
+    assert readme.read_bytes() == before, "the fixture was put back"
 
 # </judgment>
