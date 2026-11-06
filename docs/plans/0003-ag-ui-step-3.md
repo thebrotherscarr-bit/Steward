@@ -40,7 +40,8 @@ Jesster's own card code.
   and `keepSteps` in `agentConsole.ts`, `PhoneView.tsx`.
 - [ ] The live acceptance below, on SecondBrain's build carrying Jesster #95 (the operator's build to install; no
   build or host was restarted by this work).
-- [ ] Milestone 4 (pilot): A2UI for the plan's approval card only. The operator gave his word on 2026-11-05 ("do the
+- [x] (2026-11-05 20:55) Milestone 4 (pilot): A2UI for the plan's approval card only, built under plan 0004 (Steward
+  #169, #170; Jesster #96, #97); its live acceptance is plan 0004's. The operator gave his word on 2026-11-05 ("do the
   A2UI work, as well"); it is carried out under its own ADR and ExecPlan, as this plan's Milestone 4 asked:
   ADR-0013 and `docs/plans/0004-a2ui-pilot-plan-card.md`.
 

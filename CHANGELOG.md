@@ -32,6 +32,9 @@ was never merged and has no entry.
 
 ### Added
 
+- The A2UI pilot, Milestones 2 and 3 (ADR-0013, ExecPlan 0004): Jesster carries the plan card's surface on the card
+  (Jesster #96) and draws the card from it with `@a2ui/react` 0.15.0 and its own components, today's card the
+  fallback (Jesster #97). ExecPlan 0004's Progress, Surprises and Outcomes written; ExecPlan 0003's Milestone 4 done.
 - The A2UI pilot, Milestone 1 (ADR-0013, ExecPlan 0004): the plan card's A2UI v0.9 surface, built from the plan
   (`steward_workflow.plan_card_surface`) and sent by `AskApproval` as a custom workflow event of type `a2ui` (AG-UI
   CUSTOM `a2ui`) just before the card. Capability A13 (required) with its case, `t2-cards.yaml` v1 (the plans runner,
