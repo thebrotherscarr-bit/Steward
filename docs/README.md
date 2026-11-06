@@ -47,5 +47,17 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 |---|---|---|
 | [001](specs/001-capability-evals.md) | Capability evals: what Steward must use, what covers it, and the cases still to write | accepted |
 
+## ExecPlans
+
+The plan of record and its order is [ARCHITECTURE.md](ARCHITECTURE.md), section 6; each multi-step item there has its
+ExecPlan here, kept living to [`.agent/PLANS.md`](../.agent/PLANS.md). The index with each plan's state is
+[plans/README.md](plans/README.md).
+
+| Plan | Title | Carries out |
+|---|---|---|
+| [0001](plans/0001-capability-evals-build.md) | Build Steward's capability evals: one small case for every capability, in tiers T2, T3 and T4 | ADR-0012, spec 001 |
+| [0002](plans/0002-flows-steward-card-and-automation-save.md) | Let Steward build flows and automations from the Flows shelf, on the operator's card | ADR-0008, ADR-0009 |
+| [0003](plans/0003-ag-ui-step-3.md) | AG-UI step 3: show Steward's workflow steps live in the Agent tab's console and the Phone view | ADR-0003 |
+
 Steward's own guides stay beside his code: `harness/steward/README.md` (the harness, step by step) and
 `harness/steward/evals/README.md` (the eval sets).
