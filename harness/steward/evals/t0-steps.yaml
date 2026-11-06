@@ -19,7 +19,7 @@ changes:
     in any of them still fails the step. A re-asked plan that then reaches the card passes. The case is unchanged.
 cases:
   - id: discount_fix
-    capability: [A1, A5, J2]
+    capability: [A1, A5, A12, J2]
     ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
     fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
     subject: [inventory.py, discount]

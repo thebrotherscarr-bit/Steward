@@ -28,7 +28,12 @@ Jesster's own card code.
 - [x] (2026-11-05) AG-UI step 2: the Agent tab, the phone and automation turns reach Steward over AG-UI by default,
   Responses (43120) the fallback (Jesster #70, #77).
 - [x] (2026-11-05) This ExecPlan written.
-- [ ] Milestone 1: Jesster's AG-UI client turns STEP_STARTED and STEP_FINISHED into console events, with a test.
+- [x] (2026-11-05 20:05) Measured what the real host sends (a scripted model through `ag_ui_app.build_ag_ui_app`): see
+  Surprises & Discoveries.
+- [x] (2026-11-05 20:20) Milestone 1: Jesster's AG-UI client turns STEP_STARTED and STEP_FINISHED into
+  `workflow_step` events, with a test (Jesster #93). Steward's side: gate test
+  `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor` and capability A12 (this repository's pull
+  request for the plan's update).
 - [ ] Milestone 2: the Agent tab's console draws the turn's steps from those events.
 - [ ] Milestone 3: the Phone view draws the same for a phone turn.
 - [ ] Milestone 4 (pilot, on the operator's word to start it): A2UI for the plan's approval card only.
@@ -40,6 +45,19 @@ Jesster's own card code.
   per executor"), and `test_harness.py`'s scripted AG-UI streams carrying `{"type": "STEP_STARTED", "stepName":
   "plan"}`; Jesster's `secondbrain/electron/agent/agui.cjs` handles TEXT_MESSAGE_*, REASONING_*, TOOL_CALL_* and
   RUN_FINISHED, and has no case for STEP_*.
+
+- Observation: MAF wraps each superstep of the graph in its own STEP_STARTED/STEP_FINISHED pair, named
+  `superstep:<n>`, around the executor's own pair; the executors' names are their ids (`route`, `explore`, `plan`,
+  `read_plan`, `ask_approval`, `execute`, `check`, `repair`, `commit`, `report`, `answer`), not the "approve" this plan
+  first wrote. Evidence, the first run of "Write x.py." with a scripted plan: `superstep:1, route, superstep:2,
+  explore, superstep:3, plan, superstep:4, read_plan, superstep:5, ask_approval (request_info), RUN_FINISHED`.
+- Observation: every step is finished before a card's RUN_FINISHED, and the card's step runs again on the resume,
+  where it takes the answer. Evidence: the resume after Approve streams `ask_approval` again, then `execute`; the
+  AG-UI client itself refuses a run that ends with a step open ("Cannot send 'RUN_FINISHED' while steps are still
+  active: execute", seen in a first fake stream). So "a step still open when the card is denied" never happens: a
+  denied card's step is the one that finishes on the resume.
+- Observation: a denied write card does not end the run in this workflow when the model stops on its own; the
+  scripted run went `execute, check, report` after the No. The step line reports what ran.
 
 ## Decision Log
 
@@ -53,6 +71,32 @@ Jesster's own card code.
 - Decision: no change to the look beyond the step line; Jesster's UI rules hold (current, simple, readable, consistent;
   the app's own components and CSS variables).
   Rationale: the operator's UI rules of 2026-11-04, kept in the guidance note.
+  Date/Author: 2026-11-05, in the plan.
+
+- Decision: the client's event is `{type: 'workflow_step', name, state: 'started' | 'finished' | 'failed'}`, not
+  `type: 'step'`.
+  Rationale: `'step'` is already the local loop's step counter in Jesster's `AgentEvent` (`src/types/desktop.ts`).
+  Date/Author: 2026-11-05, in the plan.
+- Decision: MAF's `superstep:<n>` pairs are not passed to the window; a card answered No marks its step `failed` when
+  that step finishes on the resume; a step open when a run errors is marked `failed`.
+  Rationale: the measured stream (Surprises & Discoveries); the supersteps are the engine's rounds, not his steps.
+  Date/Author: 2026-11-05, in the plan.
+- Decision: the capability is A12 in spec 001 and `capabilities.yaml` ("each step of a request is announced as it
+  runs, by its executor's id"), required, named by the steps set's `discount_fix` case (its `plan_step` and
+  `execute_step` find each step's work by its executor's own events), with the host's side in a gate test and the
+  client's in Jesster's tests. No new eval set version: a case's `capability` ids are not in its fingerprint.
+  Rationale: the operator's rule that every capability comes with its eval (ADR-0012, amended); no eval is run for
+  this (a baseline run was in progress), and `evals.py validate` passes.
+  Date/Author: 2026-11-05, in the plan.
+- Decision: the step line is drawn in the Agent tab's conversation (`AgentView.tsx`), above the turn's output, and
+  not inside the console panel (`AgentConsole.tsx`) that Milestone 2 first named.
+  Rationale: the console panel holds the shelves and has no conversation (it may also be folded); the line belongs
+  to the turn the operator is watching. One component (`StepLine.tsx`) draws it in both views.
+  Date/Author: 2026-11-05, in the plan.
+- Decision: the Phone view gets the step events from the same `agent:event` channel, matched by the phone chat's
+  Steward session id (each phone entry carries `sessionId`), not as `phone:entry` lines.
+  Rationale: the phone log is a capped record of what was said (5000 lines); a step is live state, and every
+  session's events, phone sessions included, already reach the window on `agent:event` (`service.cjs` `send`).
   Date/Author: 2026-11-05, in the plan.
 
 ## Outcomes & Retrospective
