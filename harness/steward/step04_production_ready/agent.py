@@ -1047,13 +1047,22 @@ _CHANGES_THINGS = frozenset({
 PLAN_MODE_TOOL_POLICY = (
     "\n\nTool policy in plan mode: you have the tools that change things ("
     + ", ".join(sorted(_CHANGES_THINGS))
-    + "), and each asks the user's approval when called. In plan mode do not call them. Add the work as todos "
-    "(todos_add), then present the plan for the user's approval. Once the user approves, you are in execute "
-    "mode, and you use those tools to do the todos."
+    + "), and each asks the user's approval when called. In plan mode do not call them. Put the work in your "
+    "plan's steps, then present the plan for the user's approval. Once the user approves, you are in execute "
+    "mode, the steps are your todos, and you use those tools to do them."
 )
 _MAF_MODE_INSTRUCTIONS = AgentModeProvider().mode_instructions
 # Gate run 2 (2026-11-01): in plan mode he edited a file as an "exploratory check", MAF's plan step 3. The
 # rule goes in that step, where he acts on it: explore with tools that only read.
+# t3-away's first run (2026-11-08, storage/evals/runs/away-first, head 095fe12): MAF's step 2, "Create a list of todo
+# items.", and the old tool policy's "Add the work as todos (todos_add)" sent him to todos_add and todo_get_remaining in
+# plan mode, where the workflow offers no todo tool (steward_workflow.offered_in_step), two or three "not found" errors
+# a case, enough to trip MAF's three consecutive function-call errors. In plan mode the todo list is his plan's steps,
+# written as his todos when the user approves (steward_workflow.approved_plan_turn).
+_MAF_PLAN_STEP_2 = "2. Create a list of todo items.\n"
+_STEWARD_PLAN_STEP_2 = (
+    "2. List the steps of your plan, one short line each; they become your todo list when the user approves.\n"
+)
 _MAF_PLAN_STEP_3 = (
     "3. If needed, use the provided tools to do some exploratory checks to help build a plan and determine "
     "what clarifying questions you may need from the user.\n"
@@ -1074,13 +1083,14 @@ _STEWARD_PLAN_STEP_7 = (
     "7. When the user approves, the application switches you to execute mode; do not call mode_set for it. "
     "Follow the steps for *Execute mode* once the mode has changed."
 )
-for _step in (_MAF_PLAN_STEP_3, _MAF_PLAN_STEP_7):
+for _step in (_MAF_PLAN_STEP_2, _MAF_PLAN_STEP_3, _MAF_PLAN_STEP_7):
     if _step not in _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]:
         # MAF changed its plan-mode text: refuse to start rather than lose the rule.
         raise RuntimeError("MAF's plan-mode instructions changed; update the plan steps in agent.py.")
 STEWARD_MODE_INSTRUCTIONS = {
     **_MAF_MODE_INSTRUCTIONS,
     _PLAN_MODE: _MAF_MODE_INSTRUCTIONS[_PLAN_MODE]
+    .replace(_MAF_PLAN_STEP_2, _STEWARD_PLAN_STEP_2)
     .replace(_MAF_PLAN_STEP_3, _STEWARD_PLAN_STEP_3)
     .replace(_MAF_PLAN_STEP_7, _STEWARD_PLAN_STEP_7)
     + PLAN_MODE_TOOL_POLICY,
@@ -1743,9 +1753,8 @@ class ReturnToPlanWhenDone(ContextProvider):
 # auto-approved call can never run. In execute mode none of this applies and every write asks as before.
 _RUN_SESSION: ContextVar[Any] = ContextVar("steward_run_session", default=None)
 PLAN_MODE_REFUSAL = (
-    "Refused: you are in plan mode, and {name} changes things. Do not call it yet. Add the work as todos "
-    "(todos_add) and present the plan for the user's approval; once the user approves, you are in execute "
-    "mode and can call it."
+    "Refused: you are in plan mode, and {name} changes things. Do not call it yet. Put it in your plan's steps "
+    "and present the plan for the user's approval; once the user approves, you are in execute mode and can call it."
 )
 PLAN_MODE_SWITCH_REFUSAL = (
     "Refused: only the user's Approve switches you to execute mode. Present the plan for the user's approval; "

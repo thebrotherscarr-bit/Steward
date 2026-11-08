@@ -107,6 +107,14 @@ door was restarted and that `estate_status` now shows it up.
   runner (which runs the workflow as an agent) cannot see the `steward_profile` event; the router also appends its pick
   to a context variable (`steward_workflow.PROFILE_PICKS`) that the eval runner sets per case. Evidence:
   `agent_framework/_workflows/_agent.py`, `AGENT_FORWARDED_EVENT_TYPES`.
+- Observation (2026-11-08, the lead's review of t3-away, `storage/evals/runs/away-first/cases/*.jsonl`, head `095fe12`):
+  in plan mode he called `todos_add` and `todo_get_remaining` two or three times a case and got "Requested function
+  ... not found", because MAF's plan-mode text ("2. Create a list of todo items."), the tool policy ("Add the work as
+  todos (todos_add)") and the todo provider's text named tools the workflow's EXPLORE does not offer; those errors
+  trip MAF's three consecutive function-call errors. His reasoning: "The plan mode expects me to create todos via
+  todos_add but the tool is not listed". Fixed by `StepInstructions` and the plan-mode text (Lane A); validate now
+  refuses a profile whose instructions name a tool it does not offer. One denied case also reasoned "the request is
+  from the phone (Telegram) which is allowed to read but not write?": a Charter line (the operator's) is proposed.
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).

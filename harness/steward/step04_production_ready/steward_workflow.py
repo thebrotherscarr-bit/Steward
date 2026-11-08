@@ -79,6 +79,7 @@ from agent_framework import (
     AgentExecutorResponse,
     AgentModeProvider,
     ChatContext,
+    ContextProvider,
     Case,
     Content,
     Default,
@@ -1090,6 +1091,40 @@ async def profile_options_turn(context: AgentContext, call_next: Callable[[], Aw
     await call_next()
 
 
+# The todo tools (MAF's TodoProvider) a step's instructions may name only when the step offers them.
+TODO_TOOLS = ("todos_add", "todos_complete", "todos_remove", "todos_get_remaining", "todos_get_all")
+_TOOL_WORD = r"(?<![\w]){}(?![\w])"
+
+
+def lines_naming_only_offered(text: str, left_out: Sequence[str]) -> str:
+    """The instruction text without its lines that name a tool in ``left_out`` (a tool the step does not offer)."""
+    if not left_out:
+        return text
+    named = re.compile("|".join(_TOOL_WORD.format(re.escape(name)) for name in left_out))
+    return "\n".join(line for line in text.split("\n") if not named.search(line))
+
+
+class StepInstructions(ContextProvider):
+    """A step's instructions name only the todo tools the step offers. MAF's TodoProvider and the plan-mode text are the
+    agent's, the same for every step, and told him to call todos_add where the workflow offers no todo tool (t3-away's
+    first run, 2026-11-08, storage/evals/runs/away-first: two or three "Requested function ... not found" a case in plan
+    mode, tripping MAF's three consecutive function-call errors; his reasoning, "the plan mode expects me to create
+    todos via todos_add but the tool is not listed"). Last of his context providers, so it reads what the others added
+    (SessionContext.instructions), and drops each line naming a todo tool offered_in_step leaves out of this step: none
+    in EXPLORE, PLAN and ANSWER, todos_add in EXECUTE (its todos are the approved plan's). A session with no step (a host
+    that runs him without the graph) is left as it was."""
+
+    def __init__(self) -> None:
+        super().__init__("steward-step-instructions")
+
+    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        step = (getattr(session, "state", None) or {}).get(STEP_KEY) if session is not None else None
+        if step is None:
+            return
+        left_out = [name for name in TODO_TOOLS if not offered_in_step(name, step)]
+        context.instructions[:] = [lines_naming_only_offered(text, left_out) for text in context.instructions]
+
+
 _CALLS_MADE_KEY = "steward_calls_made"
 
 
@@ -1706,6 +1741,9 @@ def build_steward_workflow(
     # The picked profile's instructions, added for the task by MAF's own context-provider seam (ProfileInstructions).
     if not any(isinstance(p, ProfileInstructions) for p in agent.context_providers):
         agent.context_providers.append(ProfileInstructions())
+    # Last: a step's instructions name only the todo tools it offers (StepInstructions reads what the others added).
+    if not any(isinstance(p, StepInstructions) for p in agent.context_providers):
+        agent.context_providers.append(StepInstructions())
     agent.middleware = [
         approved_plan_turn(modes, todos),
         plan_mode_turns(modes, response_format=StewardPlan),

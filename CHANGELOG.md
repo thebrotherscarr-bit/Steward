@@ -13,6 +13,16 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- A step's instructions name only the todo tools it offers (t3-away's first run, 2026-11-08, `away-first`: in plan mode
+  he was told to call `todos_add`, which the workflow's EXPLORE does not offer, and two or three "not found" errors a
+  case tripped MAF's three consecutive function-call errors). `StepInstructions` (the workflow's last context provider)
+  drops each instruction line naming a todo tool the step leaves out (none in EXPLORE, PLAN, ANSWER; `todos_add` in
+  EXECUTE); the plan-mode text's step 2, its tool policy and the plan-mode refusal now say the plan's steps become his
+  todos on Approve instead of naming `todos_add`; validate refuses a profile whose instructions name a tool it does not
+  offer.
+
 ### Added
 
 - The harness profile mechanism (ADR-0018, specs 002 and 003; ExecPlan 0005, M0's mechanism): profiles as YAML in
