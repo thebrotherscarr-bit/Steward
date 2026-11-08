@@ -832,7 +832,9 @@ ESTATE_WORLDS: dict[str, str] = {
 # hold_status (2026-11-04, the approvals skill) is the door's read of how one held call ended (SecondBrain
 # electron/door/registry.cjs), served on the same MCP; read here beside approvals_history, so the door's gate is not on it.
 # eval_status (2026-11-05, the bar-runner skill) reads one eval_start run's progress file: a read like the rest.
-ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status", "eval_status")
+# saved_flows and saved_flow_status (ADR-0017, 2026-11-08, the automations skill): the Flows shelf's saved flows and
+# how one flow's run went (its steps, their ms, a failed run's reason), served by SecondBrain's estate.cjs; reads.
+ESTATE_READS = ("estate_status", "estate_logs", "approvals_history", "hold_status", "eval_status", "saved_flows", "saved_flow_status")
 ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
 # The Estate's bounded actions: eval_start starts his eval sets (run-bar.ps1 in its own window) and nothing else, only
 # for set files in harness/steward/evals/ and only while no eval runs (SecondBrain estate.cjs serves it with the
@@ -841,7 +843,11 @@ ESTATE_ASKS = ("service_control", "ollama_unload", "app_update")
 # (_CHANGES_THINGS), and its own card after the plan is approved. Inside a flow it runs with no card: recipe_workflow.py
 # calls SecondBrain's eval_start on its own client, as the saved flow is the operator's approved plan. An eval's own
 # build is never offered it (no eval starts an eval).
-ESTATE_ACTIONS = ("eval_start",)
+# saved_flow_run (ADR-0017, 2026-11-08) is the Flows shelf's Run now on one saved flow, by id, through the shelf's own
+# path in SecondBrain: by the operator's button the saved flow is his approved plan and runs with no card; asked of
+# him in chat it is an action like eval_start, planned and carded (ADR-0009's rule for chat). An eval's build is never
+# offered it either.
+ESTATE_ACTIONS = ("eval_start", "saved_flow_run")
 
 
 def estate_approval(tools: Sequence[str]) -> dict[str, Any]:

@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-08 (ADRs 0001 to 0016, spec 001, ExecPlans 0001 to 0005).
+- **As of:** 2026-11-08 (ADRs 0001 to 0017, spec 001, ExecPlans 0001 to 0005).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -88,7 +88,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | 43120 | Steward `hosted.py` | OpenAI Responses (MAF `ResponsesHostServer`) | Jesster, as the fallback transport; evals `--transport responses` |
 | 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status`, and the Flows shelf's `recipe_graph` / `recipe_runs` (read-only) |
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
-| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`, `saved_flows` and `saved_flow_run` (the Flows shelf's Run now); and `approval_ask`), and other MCP clients with a share key |
+| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`, and the Flows shelf's own actions: `saved_flows`, `saved_flow_run` (Run now) and `saved_flow_status`, [ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md); and `approval_ask`). The door's `flow_*` (Manjuel's engine flows) are on the same MCP and are another system, and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
 | stdio | the notes kernel's notes-only adapter, `cli.py --vault worlds/notes mcp --only notes` (Jesster #90) | MCP | Claude Code in the ground (its `.mcp.json`, Manjuel #101) and IDEs in the Jesster repository (Jesster #91): notes, `index.search`, `context.for` and `context.now` only (11 tools), on the same vault; no other kernel method group is served anywhere ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
 | 8091 | Aurora glass (`atlas-webapp.exe`, run by Jesster) | HTTP | Kyle's browser; parked |
@@ -166,6 +166,10 @@ sequenceDiagram
 - A direct ask names one of his Estate actions by its tool name ("Run the bfcl eval set with eval_start, tag X"). It
   goes straight to the plan: its reading is offered only the Estate's reads, with no code search and no file read, and
   the plan and card follow as above. The T0 `direct` eval set checks it.
+- A saved flow asked for by name ("Run the Repo drift check flow") is found with `secondbrain_saved_flows` and run
+  with `secondbrain_saved_flow_run`, planned first and then on its own card, as `eval_start` is; how a flow's run
+  went is a read (`secondbrain_saved_flow_status`), answered with no plan
+  ([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). The T3 `flows` set checks it.
 
 ### A flow and an automation
 
@@ -195,6 +199,16 @@ step raises a card, and a step that could do harm is made safe in its own code (
 never during a sitting; `eval_start`: eval sets only, one at a time). Run now is held only while that flow runs;
 never by a conversation with Steward (ADR-0009, dated note 2026-11-08). There is no open-ended prompt type; prompt-only
 schedules saved before 2026-11-05 keep running and are shown as legacy. Startup (weekdays 06:00) is the baseline.
+
+Every action on the shelf has its tool on Jesster's MCP, on the shelf's own path
+([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)): the list is `saved_flows`, Run
+now is `saved_flow_run` (start-verified: Steward's state read back once, or `started: false` with the reason), and a
+run's steps and reason are `saved_flow_status`. Jesster's `estate.SHELF_ACTIONS` maps each `schedules:*` handler to
+its tool or says why it has none (the saves wait on `automation_save`); a test goes red on a handler without an
+entry. Jesster's Playwright suite (`secondbrain/e2e/`, a required `e2e` check on Windows) presses Run now on an
+eval, a recipe and a legacy prompt flow against a fake Steward host. **Not yet centralized:** the door's `flow_*`
+(Manjuel's engine flows, Aurora's line tools, used by the glass's Workflows page and the release flow) are a second
+flow system on the same MCP, kept apart by name until Aurora is taken up again.
 
 ### An eval
 
@@ -259,7 +273,8 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 - **The harness, not the model.** A failure is fixed in the task, the context, the tools or the check, never by a
   bigger model.
 - **Name the wire.** Every piece has a test that goes red when it is unplugged.
-- **The card rule.** In chat, everything that changes something is planned and carded, `eval_start` included. A
+- **The card rule.** In chat, everything that changes something is planned and carded, `eval_start` and
+  `saved_flow_run` included ([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). A
   saved flow runs unattended by design: the flow is the approval
   ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **His system, his hours.** Evals and flows run whenever the operator says, day or night (ADR-0009; this replaced

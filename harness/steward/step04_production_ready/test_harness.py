@@ -4118,6 +4118,19 @@ def _estate_server() -> Any:
     def eval_status(tag: str = "") -> str:
         return '{"done": false, "lines": []}'
 
+    # the Flows shelf's tools (ADR-0017)
+    @server.tool()
+    def saved_flows() -> str:
+        return '[{"id": "f-drift", "name": "Repo drift check", "steps": ["versions", "repo_log"], "running": false}]'
+
+    @server.tool()
+    def saved_flow_run(id: str) -> str:
+        return '{"id": "f-drift", "started": true, "run_id": "r1", "state": "running"}'
+
+    @server.tool()
+    def saved_flow_status(id: str = "", run_id: str = "") -> str:
+        return '{"id": "f-drift", "state": "failed", "steps": [{"step": "repo_log", "state": "failed", "ms": 40}], "reason": "git exited 128"}'
+
     return server
 
 
@@ -4196,7 +4209,7 @@ def test_eval_start_in_chat_is_planned_and_carded_and_eval_status_is_a_read(monk
     monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
     server = _estate_server()
     monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
-    assert steward.ESTATE_ACTIONS == ("eval_start",) and "eval_status" in steward.ESTATE_READS
+    assert "eval_start" in steward.ESTATE_ACTIONS and "eval_status" in steward.ESTATE_READS
     assert "secondbrain_eval_start" in steward._CHANGES_THINGS, "plan mode leaves eval_start for the plan"
     assert steward.estate_approval(["eval_start", "eval_status"]) == {
         "always_require_approval": ["eval_start"], "never_require_approval": ["eval_status"], "default": "always_require",
@@ -4222,6 +4235,50 @@ def test_eval_start_in_chat_is_planned_and_carded_and_eval_status_is_a_read(monk
     bar = (steward._SKILLS_DIR / "bar-runner" / "SKILL.md").read_text(encoding="utf-8")
     assert "secondbrain_eval_start" in bar and "secondbrain_eval_status" in bar and "eval-history" in bar
     assert "plan" in bar and "card" in bar and "only at night" not in bar and "never during the day" not in bar
+
+
+def test_saved_flow_run_in_chat_is_planned_and_carded_and_the_flow_reads_never_ask(monkeypatch: Any) -> None:
+    """ADR-0017: the Flows shelf's actions are his tools on SecondBrain's MCP. saved_flow_run (the shelf's Run now) is
+    an action in chat like eval_start (ADR-0009): refused in plan mode, so it goes on the plan, and its own card once
+    the plan is approved; saved_flows and saved_flow_status are reads with no card. The automations and bar-runner
+    skills send a saved eval flow to saved_flow_run, not eval_start, and the names never shadow the door's flow_*.
+    Red if saved_flow_run runs in chat without a card or a read starts asking."""
+    import json
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    assert "saved_flow_run" in steward.ESTATE_ACTIONS
+    assert {"saved_flows", "saved_flow_status"} <= set(steward.ESTATE_READS)
+    assert "secondbrain_saved_flow_run" in steward._CHANGES_THINGS, "plan mode leaves saved_flow_run for the plan"
+    assert not {f"secondbrain_{t}" for t in ("saved_flows", "saved_flow_status")} & steward._CHANGES_THINGS
+    assert steward.estate_approval(["saved_flows", "saved_flow_run", "saved_flow_status"]) == {
+        "always_require_approval": ["saved_flow_run"], "never_require_approval": ["saved_flows", "saved_flow_status"],
+        "default": "always_require",
+    }
+    assert not any(t.startswith("flow_") for t in (*steward.ESTATE_READS, *steward.ESTATE_ACTIONS)), "the door's flow_* names"
+
+    run = Content.from_function_call(call_id="f1", name="secondbrain_saved_flow_run", arguments={"id": "f-drift"})
+    client, _, response = run_steward([run, "Here is the plan."], "Run the Repo drift check flow.")
+    assert not approval_requests(response), "no card in plan mode: the gate refuses instead"
+    assert any("Refused: you are in plan mode" in r for r in function_results(client.calls[1]))
+    _, _, response = run_steward([run, "Waiting on your card."], "Run the Repo drift check flow.", mode="execute")
+    assert [r.function_call.name for r in approval_requests(response)] == ["secondbrain_saved_flow_run"], "ran without a card"
+
+    status = Content.from_function_call(call_id="f2", name="secondbrain_saved_flow_status", arguments={"id": "f-drift"})
+    client, _, response = run_steward([status, "It failed at repo_log."], "How did the Repo drift check go?", mode="execute")
+    assert not approval_requests(response), "saved_flow_status asked a card"
+    assert "git exited 128" in function_results(client.calls[1])[0]
+    rows = {row["name"]: row for row in json.loads(steward.TOOL_POLICY_PATH.read_text(encoding="utf-8"))["tools"]}
+    assert rows["secondbrain_saved_flow_run"]["approval"] == "always" and "ADR-0009" in rows["secondbrain_saved_flow_run"]["notes"]
+    assert rows["secondbrain_saved_flows"]["approval"] == "never" and rows["secondbrain_saved_flow_status"]["approval"] == "never"
+
+    skills = steward._SKILLS_DIR
+    automations = (skills / "automations" / "SKILL.md").read_text(encoding="utf-8")
+    assert all(f"secondbrain_{t}" in automations for t in ("saved_flows", "saved_flow_run", "saved_flow_status"))
+    bar = (skills / "bar-runner" / "SKILL.md").read_text(encoding="utf-8")
+    assert "secondbrain_saved_flow_run" in bar and "A saved eval flow first" in bar
 
 
 def test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task() -> None:
@@ -8625,11 +8682,11 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 98  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; N1 to N18: ADR-0016
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 101  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; N1 to N18: ADR-0016; D4 to D6: ADR-0017
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6"}, sorted(required)
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() if not c.withheld for t in c.tools} == evals.steward_tool_names()

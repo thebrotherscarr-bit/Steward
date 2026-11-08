@@ -393,6 +393,23 @@ STAND_INS: dict[str, dict[str, Any]] = {
         "Start, stop or restart one server SecondBrain runs (a name from estate_status), as the Servers shelf's buttons "
         "do. A write: it waits on the operator's card. Never SecondBrain itself, and never the door while a Manjuel "
         "sitting is open.")},
+    # The Flows shelf's tools (ADR-0017), as Jesster's estate.cjs declares them. saved_flow_run is carded in chat, so
+    # here it is declaration-only like a write: its card is denied and nothing runs.
+    "secondbrain_saved_flows": {"write": False, "parameters": {"type": "object", "properties": {}}, "description": (
+        "The Flows shelf's saved flows: each one's id, name, steps, when, whether it is running or waiting on its run "
+        "(and Steward's run id), and its last run's time and result (a failed run's reason).")},
+    "secondbrain_saved_flow_run": {"write": True, "parameters": {
+        "type": "object", "properties": {"id": {"type": "string", "description": "a flow id from saved_flows"}},
+        "required": ["id"]}, "description": (
+        "Run one saved flow now, by its id from saved_flows: exactly the Flows shelf's Run now (the same path in "
+        "SecondBrain). Refused while that flow runs. Returns whether it started, Steward's run id and its state read "
+        "back once; read saved_flow_status for how it goes.")},
+    "secondbrain_saved_flow_status": {"write": False, "parameters": {
+        "type": "object", "properties": {"id": {"type": "string", "description": "a flow id from saved_flows"},
+                                         "run_id": {"type": "string", "description": "Steward's run id, from saved_flow_run"}}},
+        "description": (
+        "How one saved flow's run is going or went, by the flow's id (its current or last run) or Steward's run_id: "
+        "state (running, done or failed), each step's state and ms, and the reason a failed run gave. Read-only.")},
     "secondbrain_write_note": {"write": True, "parameters": {
         "type": "object", "properties": {"id": _TEXT, "title": _TEXT, "content": _TEXT, "tags": {"type": "array", "items": _TEXT},
                                          "category": _TEXT}, "required": ["title", "content"]}, "description": (

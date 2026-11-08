@@ -110,6 +110,9 @@ there in the same pull request.)_
 | D1 | Explain a flow or an automation as they are: a flow is ordered steps from the fixed list; an automation is a saved flow, when, on or off | Charter, Your tools (Flows and automations); ADR-0009 | untested | none |
 | D2 | A new or changed flow: proposed in words, from the fixed step list only, and left to Kyle's request and card; no save tool yet | Charter, Your tools (Flows and automations); ADR-0009; ARCH 6.1 | untested | none |
 | D3 | A recipe run (`run_recipe`, `recipe_status`, `recipe_runs`, served by his MCP host to Jesster, not offered to the agent): one executor per step, no card, the run's state recorded | ARCH 2 and 4; ADR-0005, ADR-0008, ADR-0009 | untested | gate tests `test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him` and the recipe tests; no `evaluate_workflow` on a run (ADR-0008 piece 5) |
+| D4 | `saved_flows` read freely: a flow asked for by its name is found by its id in the shelf's list | ADR-0017; the automations skill | covered | `flows` (t3-flows v1: run_drift_check_by_name, startup_this_morning) |
+| D5 | `saved_flow_run` in chat: a saved flow asked for by name is planned first, then run on its own card with the right id; a No ends it | ADR-0017; ADR-0009 | covered | `flows` (t3-flows v1: run_drift_check_by_name); gate test `test_saved_flow_run_in_chat_is_planned_and_carded_and_the_flow_reads_never_ask` |
+| D6 | `saved_flow_status` read freely: how a flow's run went is answered from its steps and reason, with no plan and no card | ADR-0017; the automations skill | covered | `flows` (t3-flows v1: startup_this_morning) |
 
 ### E. Notes through Jesster
 
@@ -216,10 +219,10 @@ ExecPlan 0005, milestone by milestone.)_
 | N3 | An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
 | N4 | An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
 | N5 | Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
-| N6 | Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
+| N6 | Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again | ADR-0017; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
 | N7 | Research and notes from the phone: the web through WebResearchAgent, a note written on his card (Telegram only), read back, its id in the summary | ADR-0016; ExecPlan 0005, M3 | untested | none (M3) |
 | N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
-| N9 | Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N9 | Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone | ADR-0017; ExecPlan 0005, M4 | untested | none (M4) |
 | N10 | A program from the phone: `run_shell` on his card with the command in full; its exit code and last lines summarized | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
 | N11 | Agents' progress on the PC: one light read lists running evals, flows, background agents, Claude Code and Aider with each one's log tail; no card, no scan storm, no polling | ADR-0016; ExecPlan 0005, M5 | untested | none (M5) |
 | N12 | The Archive searched and read only through the read-only archive tools, with no card; its content is untrusted and stays in the reply | ADR-0016; ExecPlan 0005, M6 | untested | none (M6) |
@@ -237,7 +240,7 @@ ExecPlan 0005, milestone by milestone.)_
 | A. How a request runs | 18 | 9 | 5 | 4 |
 | B. Sources and time | 6 | 0 | 1 | 5 |
 | C. The Estate's tools | 10 | 0 | 2 | 8 |
-| D. Flows and automations | 3 | 0 | 0 | 3 |
+| D. Flows and automations | 6 | 3 | 0 | 3 |
 | E. Notes | 2 | 0 | 0 | 2 |
 | F. The door | 4 | 0 | 0 | 4 |
 | G. Skills | 15 | 0 | 1 | 14 |
@@ -248,7 +251,7 @@ ExecPlan 0005, milestone by milestone.)_
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
 | N. The brain of the PC | 18 | 0 | 0 | 18 |
-| **Total** | **98** | **11** | **14** | **73** |
+| **Total** | **101** | **14** | **14** | **73** |
 
 ## The proposed cases
 
