@@ -8668,6 +8668,30 @@ def test_after_a_no_on_any_card_his_tools_are_off_for_the_rest_of_the_request_an
     assert not steward.denied_in_this_request([request])
     assert not steward.denied_in_this_request([Message(role="tool", contents=[no]), request])
 
+def test_a_plan_that_only_asks_yes_or_no_to_go_ahead_is_asked_again_for_its_card_and_p36_passes() -> None:
+    """The P36 rerun of 2026-11-08: asked "Restart the AG-UI host.", he answered the plan call with a clarification,
+    "Do you want me to restart the steward-ag-ui host ...?" (Yes / No), and the run ended there with no card. Such a
+    reply is asked again once with PLAN_CARD_IS_THE_YES (the plan card is that question), and the approval that
+    follows reaches its card: the case passes. A clarification with real choices still ends the run on its question."""
+    import json
+
+    import evals
+    import steward_workflow as wf
+
+    yes_no = json.dumps({"type": "clarification", "questions": [{"message": "Do you want me to restart steward-ag-ui?", "choices": ["Yes", "No"]}], "steps": ["Ask"]})
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Restart the AG-UI host."}], "steps": ["Restart steward-ag-ui with service_control"]})
+    load = Content.from_function_call(call_id="l1", name="load_skill", arguments={"skill_name": "estate"})
+    restart = Content.from_function_call(call_id="r1", name="secondbrain_service_control", arguments={"service": "steward-ag-ui", "action": "restart"})
+    client = ScriptedChatClient([load, "steward-ag-ui is the AG-UI host.", restart, "Not restarted."], plans=[yes_no, plan])
+    code = asyncio.run(evals.standins_main(_bounds_case("p36_restart_ag_ui"), client=client, enable_shell=False))
+    run_line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+    assert code == 0 and run_line["passed"] == 1, run_line
+    assert len(client.plan_calls) == 2 and wf.PLAN_CARD_IS_THE_YES in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
+
+    which = wf.steward_plan_in(json.dumps({"type": "clarification", "questions": [{"message": "Which host?", "choices": ["steward-ag-ui", "door"]}], "steps": ["s"]}))
+    assert which is not None and not wf.asks_only_to_go_ahead(which)
+    assert wf.asks_only_to_go_ahead(wf.steward_plan_in(yes_no))
+
 
 def test_the_bounds_checks_fail_a_change_planned_while_his_sitting_is_open_and_a_shell_after_a_note() -> None:
     """P29 and P34's checks with no model: answered in words naming the sitting, no card, passes; a plan card raised
