@@ -85,7 +85,8 @@ door was restarted and that `estate_status` now shows it up.
 - Observation (2026-11-08, Lane B): Jesster's card wait is 10 minutes today, not the 60 the Decision Log below names:
   Telegram's `CARD_TIMEOUT_MS` (`telegram.cjs`, and its "No answer in 10 minutes: denied" line) and an automation's
   (`service.cjs`). The summary names the wait it was given; changing it to 60 is one constant in each file and was
-  not made here.
+  not made here. _(Settled 2026-11-08: the operator ruled 30 minutes, see the Decision Log; Jesster #105 makes it one
+  value, `electron/agent/cardwait.cjs`.)_
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
@@ -109,7 +110,7 @@ door was restarted and that `estate_status` now shows it up.
   already carries a Telegram request to its card. Date/Author: 2026-11-08, in the plan.
 - Decision: an unanswered card on an away run is a No after 60 minutes (the card wait), unless the request says
   otherwise. Rationale: the Charter, "an unanswered card is a No"; a run must not hold the host forever.
-  Date/Author: 2026-11-08, in the plan.
+  Date/Author: 2026-11-08, in the plan. _(Superseded 2026-11-08 by the operator's ruling below: 30 minutes.)_
 - Decision: every milestone is an operation: one harness profile, its tools, 3 to 5 cases naming it, a phone test;
   Steward picks the profile and shows plan and profile on one card. Rationale: the operator, 2026-11-08, "copy, here
   is a plan and the harness needed for this agent", "plan and harness looks good, proceed"; the bounds runs above.
@@ -137,6 +138,11 @@ door was restarted and that `estate_status` now shows it up.
 - Decision: no Steward code change for M1's Steward side: an unanswered card reaches him as the same No as a denied
   one (Jesster resumes with `approved: false`), so N2 and N4's card wait are one case (`telegram_denied`). Date/Author:
   2026-11-08, Lane B.
+- Decision: the card wait is 30 minutes. The operator, 2026-11-08: "30 minutes". It supersedes the 60 minutes
+  proposed above and Jesster's 10 minutes before it, and is one value in Jesster (`electron/agent/cardwait.cjs`
+  `CARD_WAIT_MS`) for Telegram's and Discord's cards, an automation's, a card raised from outside (`approval_ask`) and
+  the phone's summary ("no answer in 30 minutes (counted as No)"); the Agent tab's own cards wait for ever. Jesster
+  #105. Date/Author: 2026-11-08, Kyle.
 
 ## Outcomes & Retrospective
 
@@ -248,7 +254,8 @@ every case the current version passes, and more. Automatic variant search is not
 Scope: prove on a live host that a Telegram request's card is answered on the phone and the run continues, and that
 every unattended run ends with a summary on Telegram. Capabilities N1 (the loop), N2 (Deny and no answer end the run
 and say so), N3 (never silent: a what-happened report, failures included), N4 (the run's limits: MAF's 40 calls and
-1800 seconds per agent run, plus a whole-run wall clock and a 60-minute card wait). Tools: none new on Steward's
+1800 seconds per agent run, plus a whole-run wall clock and a 60-minute card wait; 30 minutes since the operator's
+ruling of 2026-11-08, see the Decision Log). Tools: none new on Steward's
 side; Jesster's Telegram bridge and AG-UI resume as they are; the summary is Steward's report, which Jesster sends to
 the chat the request came from. Gates: as today. Eval cases (deterministic, in a new T3 set `t3-away.yaml` on a live
 host): "Add a line 'away test' to harness/steward/working/sample-project-2/NOTES.md" with the Telegram source line,
