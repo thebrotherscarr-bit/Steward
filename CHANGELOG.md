@@ -50,6 +50,12 @@ was never merged and has no entry.
   an `eval_start` reads only that run's tag. A recipe's `eval_start` sends no transport unless it names one
   (SecondBrain picks AG-UI for asks sets only: bfcl over ag-ui exited 2). ADR-0003 carries a dated note; the
   `automations` skill's step table says so.
+- The Flows' eval examples could not start (2026-11-06: "Eval: bfcl", "Eval: steps" and "Eval: direct" failed at
+  once with "a host transport runs an asks set (small, heldout) only"): they were saved with `transport: ag-ui`
+  while it was the default. A recipe's `eval_start` now chooses the transport by set from the set files: AG-UI only
+  when every set is an asks set, else in-process; a stored host transport on any other set runs in-process, and one
+  line is logged ("stored transport ag-ui ignored for bfcl: runs in-process"). evals.py's refusal is unchanged for
+  the command line. (ADR-0003 dated note, ADR-0009.) Restart required (Steward's MCP host).
 
 ### Added
 

@@ -50,6 +50,12 @@ The operator's word, 2026-11-05: "use it" (recorded in Jesster #77).
   workflow's `eval_start` step now sends no transport unless it names one, and SecondBrain's `eval_start` picks AG-UI
   when every set is an asks set and in-process otherwise; a host transport named for another set is refused before
   anything starts. Jesster `estate.cjs`, Steward `recipe_workflow.py`; ADR-0009's flows are unchanged.)_
+  _(2026-11-08: the flows saved while AG-UI was the default kept `transport: ag-ui` in their `eval_start` step, so
+  on 2026-11-06 the Flows' "Eval: bfcl", "Eval: steps" and "Eval: direct" were refused at once. The step now
+  chooses the transport by set itself (`recipe_workflow.eval_transport`, from the set files' `runner:` lines): AG-UI
+  only when every set is an asks set, else in-process, and a stored host transport on any other set is stale: it
+  runs in-process with one logged line. Jesster removes such a stored transport from saved flows once. evals.py's
+  own refusal stands for the command line.)_
 - Exception (noted 2026-11-05): an improve conversation stays on Responses, because its review card has no AG-UI
   answer yet (Jesster `electron/agent/service.cjs`, the `!s.improve` test before the AG-UI path).
 
