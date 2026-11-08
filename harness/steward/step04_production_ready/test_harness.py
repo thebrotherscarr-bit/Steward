@@ -3512,7 +3512,9 @@ def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_cod
     assert (entry["transport"], timings["transport"]) == ("in-process", "in-process"), (entry, timings)
     transcript = Path(entry["cases"][0].pop("transcript"))  # each case's transcript (keep_case_transcript)
     assert transcript.name == "readme.jsonl" and transcript.is_file(), transcript
-    assert entry["cases"] == [{"input": evals.SMALL_ASK_README[:80], "passed": True, "failed_checks": []}], entry
+    assert entry["cases"] == [{  # spec 003: the profile the case names, and what its run picked
+        "input": evals.SMALL_ASK_README[:80], "passed": True, "failed_checks": [], "profile": "general", "profile_picked": ["general@1"],
+    }], entry
     assert (entry["git_head"], entry["model"]) == (head or None, "gpt-oss:20b") and entry["ts"], entry
 
     blocker = history.parent / "blocker"
@@ -9506,3 +9508,230 @@ def test_a_docs_change_ends_at_the_commit_card_though_no_test_runs() -> None:
     assert readme.read_bytes() == before, "the fixture was put back"
 
 # </judgment>
+
+
+# <profiles> ADR-0018, specs 002 and 003, ExecPlan 0005 (Lane A, step 2): the harness profile mechanism.
+
+
+def _narrow_profile(**fields: Any) -> Any:
+    """A narrow profile for the tests: two read tools, one instruction, a budget of one read, low reasoning."""
+    from profiles import Profile
+
+    values: dict[str, Any] = {
+        "name": "narrow", "version": 3, "task": "a test's narrow task", "capabilities": ("C6",),
+        "tools": ("secondbrain_eval_status", "load_skill"), "instructions": "Read eval_status once, then plan.",
+        "read_budget": 1, "reasoning": "low", "gates": {"bounds": ["keys"]}, "card": True,
+        "success": "plan_reached_directly", "summary": "<set>: started",
+    }
+    values.update(fields)
+    return Profile(**values)
+
+
+def test_the_profiles_load_and_validate_refuses_what_specs_002_and_003_refuse(tmp_path: Path) -> None:
+    """profiles/ holds general, today's whole harness (every tool his build has: his own and the MAF harness's own), and
+    validate (evals.profile_set_problems) is green on it. Each rule of spec 002 and 003 goes red on its own: a tool
+    withheld from his build (M9), a tool nobody has, a profile no case names, a `for` id no case of it covers, a success
+    check evals.py does not know, a case naming a profile that is not there, a route naming no profile, and a file that
+    is not spec 002's shape; a case with no profile key is refused, and naming one is not a new set version."""
+    import re
+    import shutil
+
+    import evals
+    import profiles
+    import steward_workflow as wf
+    import yaml
+
+    found = profiles.load_profiles()
+    general = found[profiles.GENERAL]
+    assert set(general.tools) == wf.steward_tool_names() | profiles.MAF_HARNESS_TOOLS, "general offers everything"
+    assert (general.read_budget, general.reasoning, general.instructions) == (wf.EXPLORE_READ_BUDGET, wf.MODEL_REASONING, "")
+    assert evals.steward_tool_names() == wf.steward_tool_names()
+    assert evals.profile_set_problems(evals.EVAL_SETS) == []
+    assert all(c.profile for s in evals.EVAL_SETS.values() if s.tier != "ext" for c in s.cases), "every case names one"
+
+    cases = [("t.yaml", "b", "narrow", ("C6",)), *(("t.yaml", f"g{n}", "general", (cid,)) for n, cid in enumerate(general.capabilities))]
+    capability_ids = {"C6", "N8", *general.capabilities}
+
+    def problems(profile: Any, case_list: Any = None, routes: Any = None) -> list[str]:
+        return profiles.profile_problems(
+            {"general": general, profile.name: profile}, cases if case_list is None else case_list,
+            wf.steward_tool_names(), {"atlas_git_push"}, capability_ids, evals.KNOWN_CHECKS, routes=routes or {},
+        )
+
+    assert problems(_narrow_profile()) == []
+    assert any("atlas_git_push is withheld" in p for p in problems(_narrow_profile(tools=("atlas_git_push",))))
+    assert any("names the tool no_such_tool" in p for p in problems(_narrow_profile(tools=("no_such_tool",))))
+    assert any("no eval case names it" in p for p in problems(_narrow_profile(name="lonely")))
+    assert any("for names N8, and no case naming this profile covers it" in p for p in problems(_narrow_profile(capabilities=("C6", "N8"))))
+    assert any("success check 'made_up'" in p for p in problems(_narrow_profile(success="made_up")))
+    assert any("names the profile 'nowhere'" in p for p in problems(_narrow_profile(), [*cases, ("t.yaml", "c", "nowhere", ("C6",))]))
+    assert any("a route names 'gone'" in p for p in problems(_narrow_profile(), routes={"gone": re.compile("x")}))
+
+    folder = tmp_path / "profiles"
+    shutil.copytree(profiles.PROFILES_DIR, folder)
+    text = (folder / "general.yaml").read_text(encoding="utf-8")
+    bad = text.replace("name: general", "name: bad")
+    for written, refusal in (
+        (bad + "experts: 4\n", "unknown key 'experts'"),
+        (bad.replace("reasoning: medium", "reasoning: max"), "reasoning 'max' is not one of"),
+        (bad.replace('instructions: ""', "instructions: |\n" + "".join(f"  line {n}\n" for n in range(9))), "more than 8 lines"),
+    ):
+        (folder / "bad.yaml").write_text(written, encoding="utf-8")
+        with pytest.raises(profiles.ProfileError, match=re.escape(refusal)):
+            profiles.load_profiles(folder)
+    (folder / "bad.yaml").unlink()
+    (folder / "general.yaml").unlink()
+    with pytest.raises(profiles.ProfileError, match="no general.yaml"):
+        profiles.load_profiles(folder)
+
+    sets = tmp_path / "evals"
+    shutil.copytree(evals.EVAL_SETS_DIR, sets, ignore=shutil.ignore_patterns("data"))
+    bounds = yaml.safe_load((sets / "t3-bounds.yaml").read_text(encoding="utf-8"))
+    del bounds["cases"][0]["profile"]
+    assert evals.cases_fingerprint(bounds["cases"]) == evals.EVAL_SETS["bounds"].fingerprint, "naming one is no new version"
+    (sets / "t3-bounds.yaml").write_text(yaml.safe_dump(bounds, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    assert any("p29_sitting_open" in p and "profile" in p for p in evals.validate_sets(sets)), "a case must name its profile"
+
+
+def test_general_cuts_no_tool_his_live_build_offers(monkeypatch: Any) -> None:
+    """ExecPlan 0005's Decision Log (2026-11-08): every case starts on `general`, today's harness unchanged. So general's
+    allow-list holds every tool his live build offers (his own and the MAF harness's), each a tool a profile governs: a
+    tool added to his build and not to general would be taken from every request, and goes red here."""
+    import profiles
+    import steward_workflow as wf
+    from mcp.server.mcpserver import MCPServer
+
+    monkeypatch.setenv("SECONDBRAIN_MCP_URL", "http://127.0.0.1:43110/mcp")
+    monkeypatch.setenv("SECONDBRAIN_MCP_KEY", "test-key")
+    server = _estate_server()
+    assert isinstance(server, MCPServer)
+    for name in ("search_notes", "list_notes", "write_note", "append_to_note", *steward._ATLAS_GIT_TOOLS):
+        def stand_in(project: str = "", id: str = "", query: str = "", text: str = "") -> str:  # noqa: A002
+            return ""
+
+        server.tool(name=name)(stand_in)
+    monkeypatch.setattr(steward, "streamable_http_client", lambda url, http_client=None: server)
+    client, _, _ = run_steward(["Hello."], "Hello", mode="execute")
+    offered = offered_tools(client.calls[0])
+    general = profiles.load_profiles()[profiles.GENERAL]
+    assert {"secondbrain_service_control", "atlas_git", "file_access_write", "todos_add"} <= offered
+    assert offered <= set(general.tools), sorted(offered - set(general.tools))
+    assert offered <= wf.harness_tool_names(), "every tool he is offered is one a profile governs"
+
+
+class _NamingClient(ScriptedChatClient):
+    """The scripted client, keeping each step call's offered tool names as they were at the call (``offered``): the run's
+    list is one list, cut in place for its later calls (step_tools_turn), so a call's recorded options change after it."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.offered: list[set[str]] = []
+
+    def _inner_get_response(self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any) -> Any:
+        import steward_workflow as wf
+
+        if options.get("response_format") is not wf.Route and options.get("tool_choice") != "none":
+            self.offered.append({getattr(t, "name", "") for t in options.get("tools") or []})
+        return super()._inner_get_response(messages=messages, stream=stream, options=options, **kwargs)
+
+
+def _profile_run(request: str, found: Any, replies: list[Any], plan: str) -> tuple[Any, list[Any]]:
+    """One request through the workflow on a scripted client with the eval tools; its card is left unanswered."""
+    import steward_workflow as wf
+
+    eval_status, eval_start = _eval_tools()
+    client = _NamingClient(replies, plans=[plan])
+
+    async def _go() -> list[Any]:
+        async with AsyncExitStack() as stack:
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=(eval_status, eval_start))
+            async with agent:
+                return [e async for e in wf.build_steward_workflow(agent, profiles=found).run(request, stream=True)]
+
+    return client, asyncio.run(_go())
+
+
+def test_a_profile_is_picked_shown_on_the_plan_card_and_applied_at_each_step(monkeypatch: Any) -> None:
+    """ADR-0018's validation: the router picks the profile the request names; the run is offered only its tools (each
+    EXPLORE call's list is within its allow-list), its instructions are in his, its read budget of one cuts EXPLORE's
+    tools after one read, its reasoning effort is sent as Ollama's think, and ONE card carries the plan and the profile
+    (name, version, tools, budget, reasoning, success), on its A2UI surface too; the pick is a workflow event with its
+    success check and the phone's summary. The same request without the name runs under general: offered the file reads
+    the narrow profile does not name, no think sent (medium is gpt-oss's own), no instructions added. With the allow-list
+    unplugged (profile_tools), the narrow run is offered file_access_read again: red."""
+    import json
+
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    narrow = _narrow_profile()
+    found = {"general": profile_files.load_profiles()["general"], "narrow": narrow}
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Start the bfcl set."}], "steps": ["Call secondbrain_eval_start with set bfcl"]})
+    status = Content.from_function_call(call_id="s1", name="secondbrain_eval_status", arguments={})
+    asked = "With the narrow profile: start the bfcl eval set."
+    client, events = _profile_run(asked, found, [status, "Nothing runs; I will plan it."], plan)
+
+    assert len(client.offered) == 2 and all(o <= set(narrow.tools) for o in client.offered), client.offered
+    assert client.offered[0] == {"secondbrain_eval_status", "load_skill"}, "its reads are offered, and nothing else"
+    assert client.offered[1] == set(), "its read budget of 1 is spent: no tool after it"
+    instructions = str(client.calls[0]["options"].get("instructions") or "")
+    assert "Your harness for this task: narrow@3" in instructions and narrow.instructions in instructions
+    assert client.calls[0]["options"].get("think") == "low" and client.plan_calls[0]["options"].get("think") == "low"
+    [picked] = [e.data for e in events if e.type == profile_files.PROFILE_EVENT]
+    assert picked == {"profile": "narrow@3", "name": "narrow", "version": 3, "picked_by": "named",
+                      "success": "plan_reached_directly", "summary": "<set>: started"}, picked
+    [card] = [e.data.function_call for e in events if e.type == "request_info"]
+    arguments = card.parse_arguments()
+    assert card.name == wf.APPROVE_PLAN and arguments["profile"] == narrow.card_view(), arguments
+    [surface] = [e.data for e in events if e.type == wf.A2UI]
+    shown = [str(c.get("text")) for m in surface["messages"] if "updateComponents" in m for c in m["updateComponents"]["components"]]
+    assert any(t.startswith("Harness: narrow@3; 2 tool(s)") and "success: plan_reached_directly" in t for t in shown), shown
+
+    client, events = _profile_run("Start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert [e.data["profile"] for e in events if e.type == profile_files.PROFILE_EVENT] == ["general@1"]
+    assert {"file_access_read", "search_code", "secondbrain_eval_status"} <= client.offered[0], "general cuts nothing the step offers"
+    assert "think" not in client.calls[0]["options"], "general sends the options it sent before profiles"
+    assert "Your harness for this task" not in str(client.calls[0]["options"].get("instructions") or ""), "general adds none"
+    [card] = [e.data.function_call for e in events if e.type == "request_info"]
+    assert card.parse_arguments()["profile"]["name"] == "general"
+
+    monkeypatch.setattr(wf, "profile_tools", lambda session: None)  # the allow-list unplugged
+    client, _ = _profile_run(asked, found, [status, "Nothing runs; I will plan it."], plan)
+    assert "file_access_read" in client.offered[0], "unplugged, the narrow run is offered what it does not name"
+
+
+def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -> None:
+    """spec 003: the run records the profile picked (the transcript's header and the history's case line), and a case
+    passes only when the profile picked is the profile it names: T0 direct on a scripted client passes under general,
+    and fails run_completed, naming both, when the router picks another profile for it."""
+    import json
+    import re
+
+    import evals
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    eval_status, eval_start = _eval_tools()
+    eval_set = evals.EVAL_SETS["direct"]
+    [case] = eval_set.cases
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Start bfcl with eval_start."}], "steps": ["Call secondbrain_eval_start with set bfcl"]})
+
+    def run() -> tuple[int, dict[str, Any], dict[str, Any]]:
+        client = ScriptedChatClient(["I will plan it."], plans=[plan])
+        code = asyncio.run(evals.plans_main(eval_set, client=client, enable_shell=False, extra_tools=(eval_status, eval_start)))
+        line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+        head = json.loads(evals.CASE_TRANSCRIPTS[case.ask].read_text(encoding="utf-8").splitlines()[0])
+        return code, line, head
+
+    code, line, head = run()
+    assert code == 0 and line["cases"][0]["profile"] == "general" and line["cases"][0]["profile_picked"] == ["general@1"], line
+    assert (head["profile"], head["profile_picked"]) == ("general", ["general@1"]), head
+
+    other = _narrow_profile(name="other", version=1, tools=("secondbrain_eval_status",))
+    general = profile_files.load_profiles()["general"]
+    monkeypatch.setattr(wf, "load_profiles", lambda: {"general": general, "other": other})
+    monkeypatch.setattr(profile_files, "PROFILE_ROUTES", {"other": re.compile("bfcl")})
+    code, line, _ = run()
+    assert code == 1 and line["cases"][0]["profile_picked"] == ["other@1"], line
+    reasons = [c["reason"] for c in line["cases"][0]["failed_checks"] if c["name"] == "run_completed"]
+    assert reasons == ["The router picked the profile other@1; the case names general."], line

@@ -98,7 +98,8 @@ _SET_KEYS = {"name", "tier", "version", "owner", "runner", "split", "bar", "chan
 # num_repetitions: opt-in, and only for a non-gating set (tier ext, e.g. a flakiness check); a gating tier runs each
 # case once.
 _SET_OPTIONAL = {"num_repetitions"}
-_CASE_KEYS = {"id", "capability", "ask", "fixture", "subject", "precondition", "checks"}
+# profile (spec 003, ADR-0018): the harness profile the case runs under; every non-ext case names one.
+_CASE_KEYS = {"id", "capability", "profile", "ask", "fixture", "subject", "precondition", "checks"}
 # Handed to MAF's evaluate_agent as they are: expected_output, and expected_tool_calls as ExpectedToolCall(name,
 # arguments) scored by MAF's tool_call_args_match.
 _CASE_OPTIONAL = {"expected_output", "expected_tool_calls"}
@@ -136,7 +137,7 @@ ASKS_PROCESS_CHECKS = (
 STEPS_CHECKS = ("plan_step", "execute_step", "steps_overall")
 # The plans runner (t0-direct.yaml): a case is {id, ask, subject, max_calls, checks}, scored on its plan card alone.
 PLANS_CHECKS = ("plan_reached_directly", "plan_card_surface")
-_PLANS_CASE_KEYS = {"id", "capability", "ask", "subject", "max_calls", "checks"}
+_PLANS_CASE_KEYS = {"id", "capability", "profile", "ask", "subject", "max_calls", "checks"}
 # A plans or standins case may name a precondition (2026-11-08): a RESULT check that must FAIL on the fixture, so
 # validate refuses an ask for what is already there (t2-cards v1 asked for a docstring convert_length had). A case
 # that asks for what is there on purpose (t2-judgment's already_there) names none.
@@ -151,7 +152,7 @@ STANDINS_OWN_CHECKS = (
     "no_env_touched", "no_archive_reached", "no_shell_after_untrusted", "reads_within_budget", "commit_card_raised",
 )
 STANDINS_MAF_CHECKS = {"keyword_check": "keywords", "tool_called_check": "tools_called", "tool_call_args_match": "expected_tool_calls"}
-_STANDINS_CASE_KEYS = {"id", "capability", "ask", "checks"}
+_STANDINS_CASE_KEYS = {"id", "capability", "profile", "ask", "checks"}
 _STANDINS_OPTIONAL = {"fixture", "stand_ins", "approve", "keywords", "tools_called", "expected_tool_calls", "precondition"}
 # The result checks the asks runner scores (steps_overall is the steps runner's).
 ASKS_RESULT_CHECKS = tuple(name for name in RESULT_CHECKS if name not in STEPS_CHECKS)
@@ -176,6 +177,7 @@ class EvalCase:
     expected_tool_calls: tuple[ExpectedToolCall, ...] = ()
     max_calls: int | None = None  # a plans case's: the tool calls allowed before its plan card
     capabilities: tuple[str, ...] = ()  # the capability map's ids the case covers (capabilities.yaml; ext: none)
+    profile: str = ""  # the harness profile it runs under (spec 003; ext: none)
     # A standins case's: its stand-in tools ((name, fixed result or None)), the tools whose cards it approves, and the
     # arguments of MAF's keyword_check and tool_called_check.
     stand_ins: tuple[tuple[str, str | None], ...] = ()
@@ -218,21 +220,27 @@ class EvalSet:
 def cases_fingerprint(cases: Any) -> str:
     """The sha256 of a set's cases as parsed (keys sorted): any change to a case or a check changes it. A case's
     ``capability`` ids are left out: they map the case to the capability map and change nothing it runs or scores, so
-    tagging a case is not a new set version (2026-11-05, ADR-0012's wire)."""
+    tagging a case is not a new set version (2026-11-05, ADR-0012's wire). Its ``profile`` is left out for the same
+    reason (spec 003: "one more key in the set files; nothing else in the case changes"): the harness it names is
+    versioned in its own file, and the run records name@version."""
     import hashlib  # noqa: PLC0415
 
     if isinstance(cases, list):
-        cases = [{k: v for k, v in c.items() if k != "capability"} if isinstance(c, dict) else c for c in cases]
+        cases = [{k: v for k, v in c.items() if k not in ("capability", "profile")} if isinstance(c, dict) else c for c in cases]
     return hashlib.sha256(json.dumps(cases, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _capability_key_problems(where: str, case: dict[str, Any]) -> list[str]:
-    """A case's ``capability``: a non-empty list of capability ids (whether each is in the map: capability_problems)."""
+    """A case's ``capability``: a non-empty list of capability ids (whether each is in the map: capability_problems);
+    and its ``profile``: a profile's name (whether profiles/ holds it: profile_set_problems)."""
     ids = case.get("capability")
     if not (isinstance(ids, list) and ids and all(isinstance(i, str) and re.fullmatch(r"[A-Z]\d+", i) for i in ids)):
         return [f"{where}: capability is not a list of capability ids (e.g. [L3]): {ids!r}"]
     if len(set(ids)) != len(ids):
         return [f"{where}: a capability id is named twice"]
+    profile = case.get("profile")
+    if not (isinstance(profile, str) and re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", profile)):
+        return [f"{where}: profile is not a profile's name (e.g. general): {profile!r}"]
     return []
 
 
@@ -532,6 +540,7 @@ def load_eval_set(path: Path) -> EvalSet:
             EvalCase(
                 id=c["id"], ask=" ".join(c["ask"].split()), project="", plant=None, subject=tuple(c["subject"]),
                 precondition=c.get("precondition", ""), checks=tuple(c["checks"]), max_calls=c["max_calls"], capabilities=tuple(c["capability"]),
+                profile=c["profile"],
             )
             for c in raw["cases"]
         )
@@ -546,7 +555,8 @@ def load_eval_set(path: Path) -> EvalSet:
                 id=c["id"], ask=c["ask"].strip(), project=(c.get("fixture") or {}).get("project", ""),
                 plant=(c.get("fixture") or {}).get("plant"), subject=(), precondition=c.get("precondition", ""), checks=tuple(c["checks"]),
                 expected_tool_calls=tuple(ExpectedToolCall(t["name"], t.get("arguments")) for t in c.get("expected_tool_calls", [])),
-                capabilities=tuple(c["capability"]), stand_ins=tuple((s["name"], s.get("result")) for s in c.get("stand_ins", [])),
+                capabilities=tuple(c["capability"]), profile=c["profile"],
+                stand_ins=tuple((s["name"], s.get("result")) for s in c.get("stand_ins", [])),
                 approve=tuple(c.get("approve", [])), keywords=tuple(c.get("keywords", [])), tools_called=tuple(c.get("tools_called", [])),
             )
             for c in raw["cases"]
@@ -562,7 +572,7 @@ def load_eval_set(path: Path) -> EvalSet:
             subject=tuple(c["subject"]), precondition=c["precondition"], checks=tuple(c["checks"]),
             expected_output=c.get("expected_output"),
             expected_tool_calls=tuple(ExpectedToolCall(t["name"], t.get("arguments")) for t in c.get("expected_tool_calls", [])),
-            capabilities=tuple(c["capability"]),
+            capabilities=tuple(c["capability"]), profile=c["profile"],
         )
         for c in raw["cases"]
     )
@@ -669,17 +679,9 @@ def steward_tool_names() -> set[str]:
     tools, file access, todos, modes, memory, skills and background agents, are MAF's and are not listed here). A tool
     added to one of these lists, or a new tool of his added here, fails validate until the capability map names it
     (capability_problems); test_harness proves this list holds every tool his live build offers beside MAF's own."""
-    import agent  # noqa: PLC0415
     import steward_workflow as wf  # noqa: PLC0415
 
-    return {
-        *(f"secondbrain_{name}" for name in (*agent.ESTATE_READS, *agent.ESTATE_ASKS, *agent.ESTATE_ACTIONS)),
-        *(f"secondbrain_{name}" for name in agent._SECONDBRAIN_NOTES_TOOLS),  # noqa: SLF001
-        *(f"atlas_{name}" for name in agent._ATLAS_GIT_TOOLS),  # noqa: SLF001
-        agent.PR_CHECKS_TOOL, wf.GIT_COMMIT, "run_shell", "get_repo_status", "search_code", wf.CODEACT_TOOL,
-        "hand_to_coder",  # the improvement round's (improvement_loop_workflow.py), his in an improve: round
-        agent.STOP_AND_REPORT,  # EXECUTE's stop (ADR-0015)
-    }
+    return wf.steward_tool_names()  # kept there, where a profile's allow-list is applied (step_tools_turn)
 
 
 def spec_capability_ids(spec: Path = CAPABILITY_SPEC) -> list[str]:
@@ -1106,6 +1108,46 @@ def exit_code(results: Iterable[EvalResults]) -> int:
 # gave up), the exception left the set through the workflow as an ExceptionGroup, and nothing was reported. A case
 # whose run raises is recorded here, by its query, and scored as failed by run_completed; the set goes on.
 CASE_ERRORS: dict[str, str] = {}
+# The harness profiles each case's run picked (spec 003: "The run records the picked profile and version"), by its ask,
+# as name@version in the order the router picked them (steward_workflow.PROFILE_PICKS, set for the case by case_picks).
+# A case passes only when the profile picked is the profile it names (run_completed, profile_mismatch).
+CASE_PROFILES: dict[str, list[str]] = {}
+
+
+@contextmanager
+def case_picks(ask: str) -> Any:
+    """The router's picks during one case's run, kept in CASE_PROFILES[ask] (a fresh list per run)."""
+    import steward_workflow as wf  # noqa: PLC0415
+
+    picks: list[str] = []
+    CASE_PROFILES[ask] = picks
+    token = wf.PROFILE_PICKS.set(picks)
+    try:
+        yield picks
+    finally:
+        wf.PROFILE_PICKS.reset(token)
+
+
+def profile_named(ask: str) -> str | None:
+    """The profile the set case whose ask this is names (spec 003), or None for an ask in no set (or an ext case)."""
+    plain = " ".join((ask or "").split())
+    for eval_set in EVAL_SETS.values():
+        for case in eval_set.cases:
+            if case.profile and (case.ask == ask or " ".join(case.ask.split()) == plain):
+                return case.profile
+    return None
+
+
+def profile_mismatch(ask: str) -> str | None:
+    """Why the case's run did not run under the profile it names, or None: the router picked another (its last pick).
+    A run that picked none (its workflow never reached the router: a raise is CASE_ERRORS' own) or that went over a
+    host transport (the host picks, unseen here) is not judged here."""
+    named = profile_named(ask)
+    picks = CASE_PROFILES.get(ask) or []
+    if named is None or TRANSPORT_IN_USE != "in-process" or not picks:
+        return None
+    picked = picks[-1].split("@", 1)[0]
+    return None if picked == named else f"The router picked the profile {picks[-1]}; the case names {named}."
 
 
 # Rounds of cards an eval answers in one run (each round answers every card then open). Live 2026-11-04 (evals.py
@@ -1172,7 +1214,7 @@ async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[A
     CASE_ERRORS.pop(query, None)
     _CLOCK = clock = eval_transports.CaseClock(transport=TRANSPORT_IN_USE)
     kept: list[Any] = []  # the case's messages, for its transcript
-    with case_logs() as logs:
+    with case_logs() as logs, case_picks(query):
         try:
             if TRANSPORT_IN_USE == "in-process":
                 ran, response = await run_steward(query, approve, **build)
@@ -1200,10 +1242,14 @@ async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[A
 
 @evaluator(name="run_completed")
 def run_completed(query: str) -> dict[str, object]:
-    """A case whose run raised fails with the exception; a case that ran is not this check's ("Not this case.")."""
-    if query not in CASE_ERRORS:
-        return {"passed": True, "reason": "Not this case."}
-    return {"passed": False, "reason": CASE_ERRORS[query]}
+    """A case whose run raised fails with the exception, and a case run under another harness profile than it names
+    fails with that (spec 003: a case passes only when the profile picked is the profile named); a case that ran under
+    its own profile is not this check's ("Not this case.")."""
+    if query in CASE_ERRORS:
+        return {"passed": False, "reason": CASE_ERRORS[query]}
+    if mismatch := profile_mismatch(query):
+        return {"passed": False, "reason": mismatch}
+    return {"passed": True, "reason": "Not this case."}
 
 
 # Results history (2026-11-04, for SecondBrain's evals shelf): every set run appends one JSON line to
@@ -1263,6 +1309,9 @@ def history_entry(name: str, results: dict[str, Any], code: int, progress: list[
                 ],
                 **({"timings": CASE_TIMINGS[item.input_text]} if item.input_text in CASE_TIMINGS else {}),
                 **({"transcript": _shown(CASE_TRANSCRIPTS[item.input_text])} if item.input_text in CASE_TRANSCRIPTS else {}),
+                # spec 003: the profile the case names, and the one(s) its run picked (name@version)
+                **({"profile": profile_named(item.input_text or "")} if profile_named(item.input_text or "") else {}),
+                **({"profile_picked": list(CASE_PROFILES[item.input_text])} if item.input_text in CASE_PROFILES else {}),
             }
             for step, item in items
         ],
@@ -1465,6 +1514,8 @@ def keep_case_transcript(
             "kind": "case", "set": set_name, "case": case, "ask": ask,
             "git_head": GIT_HEAD_AT_START or _git_head(), "transport": TRANSPORT_IN_USE,
             "model": os.environ.get("OLLAMA_MODEL") or None, "ts": datetime.now(timezone.utc).isoformat(),
+            # spec 003: the harness profile the case names, and what its run picked (name@version, in order)
+            "profile": profile_named(ask), "profile_picked": CASE_PROFILES.get(ask),
         }
         logged = list(logs.records) if logs is not None else []
         end = {
@@ -1793,7 +1844,7 @@ async def steps_main() -> int:
             untracked_before = untracked_files()
             RUN_EVENTS.clear()
             _CARD_ANSWERS.clear()
-            with case_logs() as logs, contextlib.ExitStack() as fixtures:
+            with case_logs() as logs, case_picks(STEPS_QUERY), contextlib.ExitStack() as fixtures:
                 fixtures.callback(  # the case's transcript, after everything else is put back
                     lambda: keep_case_transcript("steps", STEPS_QUERY, event_records(list(RUN_EVENTS)), logs=logs, case_id=STEPS_SET.cases[0].id)
                 )
@@ -1979,7 +2030,7 @@ async def plans_main(eval_set: EvalSet, **build: Any) -> int:
         events: list[Any] = []
         RUN_EVENTS.clear()
         _CARD_ANSWERS.clear()
-        with case_logs() as logs:
+        with case_logs() as logs, case_picks(case.ask):
             try:
                 async with AsyncExitStack() as stack:
                     agent, workflow = await wf.build_steward(
@@ -2273,7 +2324,7 @@ async def standins_case_run(case: EvalCase, set_name: str | None = None, **build
     RUN_EVENTS.clear()
     _CARD_ANSWERS.clear()
     try:
-        with case_logs() as logs, contextlib.ExitStack() as fixtures:
+        with case_logs() as logs, case_picks(case.ask), contextlib.ExitStack() as fixtures:
             fixtures.callback(  # last out: after the fixture is put back, so its warnings are the case's too
                 lambda: keep_case_transcript(set_name, case.ask, event_records(list(RUN_EVENTS)), logs=logs, case_id=case.id)
             )
@@ -3013,7 +3064,7 @@ async def set_main(name: str) -> int:
 
 def validate_sets(
     folder: Path = EVAL_SETS_DIR, baselines: Path | None = None, skills_dir: Path | None = None,
-    tools: Iterable[str] | None = None,
+    tools: Iterable[str] | None = None, profiles_dir: Path | None = None,
 ) -> list[str]:
     """Every set file in ``folder`` checked with no model; the problems, one per line (none: every set is valid).
 
@@ -3026,7 +3077,11 @@ def validate_sets(
 
     And the capability map (capability_problems, ADR-0012 amended 2026-11-05): every case names capability ids the map
     in ``folder`` (capabilities.yaml) lists, every required capability has a case, the map's ids are spec 001's, and
-    every skill folder (``skills_dir``) and every tool of Steward's (``tools``, steward_tool_names) is in the map."""
+    every skill folder (``skills_dir``) and every tool of Steward's (``tools``, steward_tool_names) is in the map.
+
+    And the harness profiles (ADR-0018, specs 002 and 003; profile_set_problems): every profile in ``profiles_dir``
+    (harness/steward/profiles) can be read, names only tools that exist and are not withheld, has a case, and its
+    capability ids are covered by its cases; every non-ext case names a profile that exists."""
     baselines = baselines or folder / "baselines.json"
     problems: list[str] = []
     missing = [n for n in ASKS_PROCESS_CHECKS + ASKS_RESULT_CHECKS if n not in {e.__name__ for e in SMALL_ASK_EVALUATORS}]
@@ -3085,7 +3140,41 @@ def validate_sets(
                     f"unmodified fixture ({reason}), so the ask asks for what is there"
                 )
     problems += capability_problems(sets, folder / CAPABILITIES_FILE.name, skills_dir, tools)[0]
+    problems += profile_set_problems(sets, folder / CAPABILITIES_FILE.name, tools, profiles_dir)
     return problems
+
+
+# Every check name evals.py scores (a profile's success check must be one: spec 002).
+KNOWN_CHECKS = frozenset({
+    *STANDINS_OWN_CHECKS, *STANDINS_MAF_CHECKS, *RESULT_CHECKS, *PLANS_CHECKS, *ASKS_PROCESS_CHECKS, *STEPS_CHECKS,
+    "run_completed",
+})
+
+
+def profile_set_problems(
+    sets: dict[str, EvalSet], capabilities_path: Path = CAPABILITIES_FILE, tools: Iterable[str] | None = None,
+    profiles_dir: Path | None = None,
+) -> list[str]:
+    """The harness profiles against the sets and Steward's tools (profiles.profile_problems), or the profiles' own
+    problems when one cannot be read."""
+    import profiles as profile_files  # noqa: PLC0415
+
+    try:
+        found = profile_files.load_profiles(profiles_dir or profile_files.PROFILES_DIR)
+    except profile_files.ProfileError as error:
+        return str(error).splitlines()
+    try:
+        capabilities = load_capabilities(capabilities_path)
+    except EvalSetError:
+        capabilities = {}  # capability_problems names it
+    cases = [
+        (s.path.name, case.id, case.profile, case.capabilities)
+        for s in sets.values() if s.tier != "ext" for case in s.cases
+    ]
+    return profile_files.profile_problems(
+        found, cases, steward_tool_names() if tools is None else tools,
+        {t for c in capabilities.values() if c.withheld for t in c.tools}, capabilities, KNOWN_CHECKS,
+    )
 
 
 def validate_main() -> int:
@@ -3095,6 +3184,10 @@ def validate_main() -> int:
         print("\n".join(problems))
         return 1
     print(f"Eval sets valid: {', '.join(f'{s.tier} {s.name} v{s.version}' for s in EVAL_SETS.values())}")
+    import profiles as profile_files  # noqa: PLC0415
+
+    named = [case.profile for s in EVAL_SETS.values() if s.tier != "ext" for case in s.cases]
+    print(f"Profiles: {', '.join(f'{p.ref} ({named.count(p.name)} cases)' for p in profile_files.load_profiles().values())}")
     untested = capability_problems(EVAL_SETS)[1]
     total = len(load_capabilities())
     print(

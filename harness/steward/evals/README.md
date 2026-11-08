@@ -77,6 +77,8 @@ changes:                   # what each version changed; the current version must
   1: Five asks on sample-project-2.
 cases:
   - id: add_function
+    capability: [A1]       # the capability map's ids the case covers (capabilities.yaml)
+    profile: general       # the harness profile it runs under (spec 003; harness/steward/profiles/<name>.yaml)
     ask: Add a function ... to harness/steward/working/sample-project-2/units.py ...
     fixture: {project: harness/steward/working/sample-project-2, plant: null}   # plant: a name in evals.PLANTS
     subject: [fahrenheit_to_celsius]   # lower-case terms an on-topic answer (and a commit message) names
@@ -108,6 +110,16 @@ the whole set runs N times, each pass scored and recorded on its own. A gating t
   Steward's (`evals.steward_tool_names`: the Estate's, the notes', the door's, `pr_checks`, `git_commit`, the shell,
   CodeAct, code search, `hand_to_coder`), that no entry names; and a map whose ids are not spec 001's, in order.
   The capabilities no case names yet are counted on validate's last line (untested, a warning until required).
+- The harness profiles (2026-11-08, [ADR-0018](../../../docs/decisions/0018-harness-profiles-per-task-tuned-by-evals.md),
+  specs 002 and 003; `profiles.profile_problems`): a non-ext case with no `profile`, or one naming a profile
+  `harness/steward/profiles/` does not hold; a profile file not in spec 002's shape (its fields and only those, at most
+  8 lines of instructions, reasoning low, medium or high); a profile tool that is withheld (M9), or that neither Steward
+  (`evals.steward_tool_names`) nor the MAF harness (`profiles.MAF_HARNESS_TOOLS`) has; a profile no case names; a
+  capability id in a profile's `for` that no case naming it covers; a success check evals.py does not know
+  (`evals.KNOWN_CHECKS`); and a route (`profiles.PROFILE_ROUTES`) naming no profile. A case's `profile` is left out of
+  its set's fingerprint, as `capability` is: the profile is versioned in its own file, and the run records
+  `name@version`. A case passes only when the profile its run picked is the one it names (`run_completed` says which
+  was picked); the transcript's header and the history's case line carry `profile` and `profile_picked`.
 
 ## Adding a case or a set (Steward's eval-author work)
 

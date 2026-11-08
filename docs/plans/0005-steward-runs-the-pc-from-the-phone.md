@@ -34,12 +34,23 @@ door was restarted and that `estate_status` now shows it up.
 - [x] (2026-11-08) ADR-0018 (harness profiles), specs 002 to 004 (profile, case, operation) written; this plan
   rewritten in their terms and frozen. Profile ids named in `capabilities.yaml` comments only, until the mechanism
   lands (validate refuses unknown keys).
-- [ ] M9a now (Lane A): Steward's GitHub write tools (`atlas_git_branch`, `atlas_git_commit`, `atlas_git_push`,
+- [x] (2026-11-08) M9a (Lane A, Steward #188): Steward's GitHub write tools (`atlas_git_branch`, `atlas_git_commit`, `atlas_git_push`,
   `atlas_git_pr`) taken out of his build, the Charter's Door lines changed in the same step (the operator's ruling,
   ADR-0016: writes withheld until his word).
 - [ ] M0 the trust bar, through profiles: the bounds profile set and the router picking the profile; T3 `bounds` 10
   of 10 twice in a row.
-- [ ] MP the profile mechanism complete, with `eval-runner` as profile 1 (the operator's example).
+  - [x] (2026-11-08) Lane A, the profile mechanism (specs 002, 003): `harness/steward/profiles/` and `profiles.py`
+    (loader, validator, the router's pick, the instructions provider); the router picks one profile per request
+    (a name the request gives, a profile's pattern, the model only when two patterns match, `general` otherwise); the
+    run is offered only its tools at each step (within the step's own), its instructions, its read budget and its
+    reasoning effort; the plan card carries plan and profile (name, version, tools, budget, reasoning, success) and its
+    A2UI surface a "Harness:" line; a `steward_profile` workflow event names the pick, its success check and its phone
+    summary; every non-ext case names `profile: general`, validate checks the profiles, and a case passes only when its
+    run picked the profile it names (transcript header and history line: `profile`, `profile_picked`). `general` is
+    the whole harness unchanged. Remaining: the bounds profiles (`refuse`, `code-fix`, `away-end`, `program`,
+    `estate-keeper`, `github-review`) and the bounds run.
+- [ ] MP the profile mechanism complete, with `eval-runner` as profile 1 (the operator's example). (2026-11-08: the
+  card, `name@version` recorded and validate reading `profile:` landed with M0's mechanism, above.)
 - [ ] M1 the away loop and phone summaries (N1 to N4), profile `away-loop`.
   - [x] (2026-11-08) Lane B, Jesster: the summary to the phone when a phone or automation run ends (done, No, no
     answer, refused, /stop, failed; `electron/agent/summary.cjs`), and `away.test.cjs`, the loop with no phone (a fake
@@ -87,11 +98,45 @@ door was restarted and that `estate_status` now shows it up.
   (`service.cjs`). The summary names the wait it was given; changing it to 60 is one constant in each file and was
   not made here. _(Settled 2026-11-08: the operator ruled 30 minutes, see the Decision Log; Jesster #105 makes it one
   value, `electron/agent/cardwait.cjs`.)_
+- Observation (2026-11-08, Lane A): a run's tool list is one list, cut in place by `step_tools_turn` for each later
+  call (as MAF's own progressive tool exposure cuts it), so a list recorded at a call (a test's scripted client keeps
+  `options` by reference) changes when a later call's read budget empties it. Evidence: the profile test's first
+  EXPLORE call read as offered nothing until the client kept the names at the call (`_NamingClient` in
+  `test_harness.py`).
+- Observation (2026-11-08, Lane A): MAF's `WorkflowAgent` forwards only output and request-info events, so the asks
+  runner (which runs the workflow as an agent) cannot see the `steward_profile` event; the router also appends its pick
+  to a context variable (`steward_workflow.PROFILE_PICKS`) that the eval runner sets per case. Evidence:
+  `agent_framework/_workflows/_agent.py`, `AGENT_FORWARDED_EVENT_TYPES`.
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
 
 ## Decision Log
+
+- Decision: every existing non-ext case starts on one `general` profile, today's whole harness unchanged (its tools are
+  every tool the build offers, its read budget EXPLORE's 8, its reasoning gpt-oss's own medium, no instructions); the
+  narrow profiles replace `general` family by family in the frozen order, and `general`'s `for` loses their ids as they
+  go. Rationale: spec 003 needs a profile on every case, and the frozen plan's "simplest first, fill in the blanks";
+  nothing he does changes until a narrow profile lands with its cases. Date/Author: 2026-11-08, the lead (Lane A).
+- Decision: the router's deterministic patterns live in code (`profiles.PROFILE_ROUTES`), not in the profile files,
+  because spec 002 lists a profile's fields "and only these"; validate refuses a pattern naming no profile, and a
+  profile's cases (which must pick it) prove its pattern. The model is asked only when two patterns match.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: a profile's tools may name the MAF harness's own tools (`profiles.MAF_HARNESS_TOOLS`: file access, todos,
+  modes, file memory, memory, skills, background agents) besides Steward's own in `capabilities.yaml`; the map names
+  only his own (`evals.steward_tool_names`), and a code fix needs file access. The allow-list governs every tool of
+  those two sets; a tool outside both is no tool of his build (the gate's live-build test is red if his build offers
+  one). Date/Author: 2026-11-08, Lane A.
+- Decision: a profile's reasoning is sent as Ollama's `think` on the four AgentExecutor steps (ANSWER, EXPLORE, PLAN,
+  EXECUTE), except at gpt-oss's own effort, medium, which sends nothing, so a run under `general` sends exactly the
+  options it sent before; an eval's `STEWARD_<STEP>_THINK` still wins. Verified through MAF: `OllamaChatOptions`
+  documents `think` (typed bool), `_prepare_options` passes a key outside `OLLAMA_MODEL_OPTIONS` to ollama's
+  `AsyncClient.chat` top-level, and that takes `"low" | "medium" | "high"`; the knob is live, not inert.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: a profile's success check is scored where evals.py scores checks (a profile's cases name it; validate
+  refuses a success check evals.py does not know), and the live run names it on the card and in the `steward_profile`
+  event with the phone summary; Jesster's summary may read that event (Lane B). A pick's mismatch fails the case's
+  `run_completed`, so no set's check count changes. Date/Author: 2026-11-08, Lane A.
 
 - Decision: tools first, screen later; "as if at the keyboard" is met first by the host shell on a card.
   Rationale: every tool call can be gated, carded and scored; a click cannot. ADR-0016.

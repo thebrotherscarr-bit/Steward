@@ -99,7 +99,7 @@ from agent_framework import (
 )
 from agent_framework._workflows._message_utils import normalize_messages_input
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, create_model, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # harness/, for the console's planning models
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -107,6 +107,8 @@ from console.observers.planning_models import PlanningQuestion, PlanningResponse
 from hosted import IN_WORDS_KEY, planning_response_in, plan_mode_turns  # noqa: E402
 # write_happened is agent.py's (his write recorder's), named here as the evals and tests have read it.
 import agent as _agent  # noqa: E402 - hyperlight_sandbox_on, read at call time (offered_in_step)
+import profiles as _profiles  # noqa: E402 - the harness profiles (ADR-0018, spec 002)
+from profiles import PROFILE_EVENT, PROFILE_KEY, Profile, ProfileInstructions, card_line, load_profiles, pick_profile  # noqa: E402
 from agent import _CHANGES_THINGS, ESTATE_READS, READS_FIRST_KEY, REQUEST_KEY, STOP_AND_REPORT, STOPPED_KEY, UNTRUSTED_READ_KEY, WRITTEN_FILES_KEY, invoke_through_middleware, stopped_reason, write_happened, written_files  # noqa: E402, F401
 
 logger = logging.getLogger(__name__)
@@ -316,6 +318,27 @@ GITHUB_WRITE_REFUSAL = (
 )
 
 
+# The harness profile (ADR-0018, spec 002): the router picks one per request (profiles.pick_profile: a name the request
+# gives, a profile's pattern, the model only when two patterns match, `general` otherwise). The pick's card view is kept
+# in the workflow's state (so in its checkpoint) for the plan card, and its state on each step's session (PROFILE_KEY),
+# where step_tools_turn, profile_options_turn and the ProfileInstructions provider read it. ProfilePicked names the pick
+# to every caller (over AG-UI a CUSTOM event named PROFILE_EVENT): its name@version, success check and phone summary.
+_PROFILE_STATE_KEY = "steward_profile_picked"
+# The picks of the runs made in this context (an eval sets a list here before a case, and reads its pick after).
+PROFILE_PICKS: ContextVar[list[str] | None] = ContextVar("steward_profile_picks", default=None)
+# The model's choice when two profiles' patterns match the request (pick_profile's "unclear").
+PROFILE_PROMPT = "Which harness profile is this request for? Answer with one of the names offered."
+
+
+class ProfilePicked(WorkflowEvent[dict[str, Any]]):
+    """The router's pick, a custom event of type PROFILE_EVENT: {profile: name@version, name, version, picked_by,
+    success, summary}. MAF's AG-UI host passes it on as CUSTOM {name: PROFILE_EVENT, value: <that>}; the phone's
+    summary reads its summary line when it is there."""
+
+    def __init__(self, data: dict[str, Any], *, executor_id: str) -> None:
+        super().__init__(PROFILE_EVENT, data, executor_id=executor_id)  # type: ignore[arg-type]  # a custom type
+
+
 def asks_for_a_github_write(request: str) -> bool:
     """Whether the request (its body, past a source line) asks for a GitHub write (_GITHUB_WRITE)."""
     return bool(_GITHUB_WRITE.search(request_body(request or "")))
@@ -429,11 +452,15 @@ class Router(Executor):
     def __init__(
         self, client: Any, options: dict[str, Any], id: str = ROUTE_STEP,
         sitting: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
+        profiles: Mapping[str, Profile] | None = None,
+        on_pick: Callable[[Profile], None] | None = None,
     ) -> None:
         super().__init__(id=id)
         self._client = client
         self._options = options
         self._sitting = sitting  # the open sitting, read when a task names the ground (open_sitting_now)
+        self._profiles = profiles or {}  # the harness profiles (ADR-0018); none: no profile is picked
+        self._on_pick = on_pick  # puts the pick on each step's session (build_steward_workflow)
 
     @handler
     async def from_str(self, text: str, ctx: WorkflowContext[RoutedRequest]) -> None:
@@ -451,6 +478,7 @@ class Router(Executor):
         request = next((m.text for m in reversed(messages) if m.role == "user" and (m.text or "").strip()), "")
         # The request, for the plan card and the commit message, whatever later turns of PLAN start from.
         ctx.set_state(_REQUEST_STATE_KEY, request)
+        await self._pick(request, ctx)
         reply = await self._client.get_response(
             [Message(role="system", contents=[Content.from_text(ROUTE_PROMPT)]), Message(role="user", contents=[Content.from_text(request)])],
             options={**self._options, "response_format": Route},
@@ -472,6 +500,33 @@ class Router(Executor):
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
+
+    async def _pick(self, request: str, ctx: WorkflowContext[Any]) -> Profile | None:
+        """The request's harness profile (ADR-0018 item 2): pick_profile's deterministic pick on the request's body; when
+        two profiles' patterns match, one structured call on his own client chooses between them (an unparsed reply
+        falls back to `general`). The pick is kept in the workflow's state, put on each step's session (on_pick), and
+        named to the caller (ProfilePicked)."""
+        if not self._profiles:
+            return None
+        profile, how, candidates = pick_profile(request_body(request), self._profiles)
+        if profile is None:
+            choice = create_model("ProfilePick", profile=(Literal[tuple(candidates)], ...))  # type: ignore[valid-type]
+            reply = await self._client.get_response(
+                [Message(role="system", contents=[Content.from_text(PROFILE_PROMPT)]), Message(role="user", contents=[Content.from_text(request)])],
+                options={**self._options, "response_format": choice},
+            )
+            try:
+                profile, how = self._profiles[choice.model_validate_json((reply.text or "").strip()).profile], "model"
+            except ValueError:
+                profile, how = self._profiles[_profiles.GENERAL], "default"
+        ctx.set_state(_PROFILE_STATE_KEY, profile.card_view())
+        if self._on_pick is not None:
+            self._on_pick(profile)
+        if (picks := PROFILE_PICKS.get()) is not None:
+            picks.append(profile.ref)
+        logger.info("Steward profile: %s (%s)", profile.ref, how)
+        await ctx.add_event(ProfilePicked(profile.event(how), executor_id=self.id))
+        return profile
 
     async def _refusal(self, request: str, kind: str | None, direct: bool) -> str | None:
         """The bounds' refusal of the request (ADR-0014, part 2), or None: the Archive named, a key file's content asked
@@ -961,11 +1016,77 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         closed = _agent.sandbox_shell_closed(session)
         direct = bool(session.state.get(_agent.DIRECT_ACTION_KEY))
         names = [getattr(t, "name", "") or "" for t in tools]
-        spent = step == EXPLORE_STEP and calls_made(session) >= EXPLORE_READ_BUDGET
-        cut = {n for n in names if spent or not offered_in_step(n, step, closed, direct)}
+        # ADR-0018: the picked profile's allow-list, intersected with the step's own (nothing it does not name is offered).
+        allowed = profile_tools(session)
+        governed = harness_tool_names() if allowed is not None else frozenset()
+        spent = step == EXPLORE_STEP and calls_made(session) >= read_budget(session)
+        cut = {n for n in names if spent or not offered_in_step(n, step, closed, direct) or (allowed is not None and n in governed and n not in allowed)}
         tools[:] = [t for t, n in zip(tools, names) if n not in cut]
         kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
         session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
+    await call_next()
+
+
+def steward_tool_names() -> set[str]:
+    """The tools of Steward's own, by the names his code gives them (agent.py's lists and tools; the MAF harness's own
+    are profiles.MAF_HARNESS_TOOLS). evals.steward_tool_names is this list, which validate maps (capabilities.yaml)."""
+    return {
+        *(f"secondbrain_{name}" for name in (*_agent.ESTATE_READS, *_agent.ESTATE_ASKS, *_agent.ESTATE_ACTIONS)),
+        *(f"secondbrain_{name}" for name in _agent._SECONDBRAIN_NOTES_TOOLS),  # noqa: SLF001
+        *(f"atlas_{name}" for name in _agent._ATLAS_GIT_TOOLS),  # noqa: SLF001
+        _agent.PR_CHECKS_TOOL, GIT_COMMIT, "run_shell", "get_repo_status", "search_code", CODEACT_TOOL,
+        "hand_to_coder",  # the improvement round's (improvement_loop_workflow.py), his in an improve: round
+        _agent.STOP_AND_REPORT,  # EXECUTE's stop (ADR-0015)
+    }
+
+
+def harness_tool_names() -> frozenset[str]:
+    """Every tool name a profile's allow-list governs: Steward's own and the MAF harness's own. A tool outside both is
+    no tool of his build (a test's scripted tool), and a profile does not cut it; his live build offering one is red in
+    the gate (test_his_live_build_offers_no_tool_of_his_own_that_the_capability_map_does_not_know)."""
+    return frozenset({*steward_tool_names(), *_profiles.MAF_HARNESS_TOOLS})
+
+
+def session_profile(session: Any) -> dict[str, Any] | None:
+    """The profile picked for this session's run (PROFILE_KEY, set by the router's pick), or None."""
+    profile = (getattr(session, "state", None) or {}).get(PROFILE_KEY) if session is not None else None
+    return profile if isinstance(profile, dict) else None
+
+
+def profile_tools(session: Any) -> frozenset[str] | None:
+    """The picked profile's tool allow-list, or None when the session has no profile (offered as before)."""
+    profile = session_profile(session)
+    return frozenset(profile.get("tools") or []) if profile is not None else None
+
+
+def read_budget(session: Any) -> int:
+    """EXPLORE's reading budget: the picked profile's read_budget, else EXPLORE_READ_BUDGET (ADR-0015)."""
+    profile = session_profile(session)
+    budget = profile.get("read_budget") if profile is not None else None
+    return budget if isinstance(budget, int) and not isinstance(budget, bool) else EXPLORE_READ_BUDGET
+
+
+# The steps a profile's reasoning effort is sent on: the AgentExecutors' model calls (ROUTE and COMMIT keep theirs).
+_REASONING_STEPS = frozenset({ANSWER_STEP, EXPLORE_STEP, PLAN_STEP, EXECUTE_STEP})
+# gpt-oss's own effort when none is sent (Ollama's gpt-oss template reasons at medium unless `think` names another), so a
+# profile at it sends no `think`, and a run under it sends exactly the options it sent before profiles (general).
+MODEL_REASONING = "medium"
+
+
+@agent_middleware
+async def profile_options_turn(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Agent middleware: the picked profile's reasoning effort as Ollama's `think` on this run's options (ADR-0018:
+    gpt-oss's reasoning effort, the one model setting a profile may change). MAF's OllamaChatClient passes `think` to
+    ollama's AsyncClient.chat as a top-level argument (agent_framework_ollama/_chat_client.py _prepare_options: a key
+    not in OLLAMA_MODEL_OPTIONS goes top-level; OllamaChatOptions documents `think`), and ollama's chat takes "low",
+    "medium" or "high" (ollama/_client.py). A profile at MODEL_REASONING sends none. Before step_options_turn, so an
+    eval's STEWARD_<STEP>_THINK still wins."""
+    session = context.session
+    profile = session_profile(session)
+    step = session.state.get(STEP_KEY) if session is not None else None
+    effort = profile.get("reasoning") if profile is not None else None
+    if step in _REASONING_STEPS and effort in _profiles.REASONING and effort != MODEL_REASONING:
+        context.options = {**(context.options or {}), "think": effort}
     await call_next()
 
 
@@ -1218,6 +1339,9 @@ class ReadPlan(Executor):
             # ADR-0014: whether EXPLORE read untrusted content, kept for EXECUTE (in the checkpoint, beside the request).
             ctx.set_state(UNTRUSTED_READ_KEY, untrusted_read_in(response.full_conversation or response.agent_response.messages))
             plan_data = {"request": request, "plan": plan.questions[0].message, "steps": plan.steps}
+            # ADR-0018 item 2: one card for the plan and the harness (Approve approves both).
+            if (profile := ctx.get_state(_PROFILE_STATE_KEY, None)) is not None:
+                plan_data["profile"] = profile
             await ctx.send_message(plan_data, target_id=ASK_APPROVAL_STEP)
 
 
@@ -1238,11 +1362,16 @@ def plan_card_surface(plan: dict[str, Any], request_id: str) -> list[dict[str, A
     surface = f"plan-{request_id}"
     steps = [str(step) for step in plan.get("steps") or []]
     context = {"requestId": request_id}
+    # ADR-0018 item 2: the harness the plan runs under, on the same card (card_line), when a profile was picked.
+    harness = [{"id": "harness", "component": "Text", "text": card_line(plan["profile"])}] if isinstance(plan.get("profile"), dict) else []
     components: list[dict[str, Any]] = [
-        {"id": "root", "component": "Column", "children": ["heading", "plan", *(f"step-{i}" for i in range(len(steps))), "answers"]},
+        {"id": "root", "component": "Column", "children": [
+            "heading", "plan", *(f"step-{i}" for i in range(len(steps))), *(c["id"] for c in harness), "answers",
+        ]},
         {"id": "heading", "component": "Text", "text": "Steward's plan", "variant": "h4"},
         {"id": "plan", "component": "Text", "text": str(plan.get("plan") or "")},
         *({"id": f"step-{i}", "component": "Text", "text": f"{i + 1}. {step}"} for i, step in enumerate(steps)),
+        *harness,
         {"id": "answers", "component": "Row", "children": [A2UI_APPROVE, A2UI_DENY]},
         {"id": f"{A2UI_APPROVE}-label", "component": "Text", "text": "Approve"},
         {"id": f"{A2UI_DENY}-label", "component": "Text", "text": "Deny"},
@@ -1560,21 +1689,28 @@ def executor_session(executor: AgentExecutor) -> Any:
 
 
 def build_steward_workflow(
-    agent: Agent[Any], checks: Checks = python_tests_for_changes, changes: Callable[[], list[str]] | None = None
+    agent: Agent[Any], checks: Checks = python_tests_for_changes, changes: Callable[[], list[str]] | None = None,
+    profiles: Mapping[str, Profile] | None = None,
 ) -> Workflow:
     """The graph over one build_steward_agent Steward: route, then answer, or plan, read_plan, ask_approval, execute,
     check, repair, then ask_commit and commit when the checks passed on changed code, else report. ``changes`` lists
     the files the commit message is written from: by default the files EXECUTE's run wrote, which are the ones his
-    git_commit commits (agent.written_files)."""
+    git_commit commits (agent.written_files). ``profiles`` are the harness profiles the router picks from (ADR-0018),
+    by default harness/steward/profiles/ (profiles.load_profiles: a profile that cannot be used stops the build here)."""
     from agent import OLLAMA_OPTIONS  # noqa: PLC0415
 
     modes = next(p for p in agent.context_providers if isinstance(p, AgentModeProvider))
     todos = next(p for p in agent.context_providers if isinstance(p, TodoProvider))
     step_options = step_options_from_env()  # a bad value stops the build here, before any call
+    profiles = load_profiles() if profiles is None else profiles
+    # The picked profile's instructions, added for the task by MAF's own context-provider seam (ProfileInstructions).
+    if not any(isinstance(p, ProfileInstructions) for p in agent.context_providers):
+        agent.context_providers.append(ProfileInstructions())
     agent.middleware = [
         approved_plan_turn(modes, todos),
         plan_mode_turns(modes, response_format=StewardPlan),
         plan_phases_turn,  # after plan_mode_turns: EXPLORE drops its response_format, PLAN turns its tools off
+        profile_options_turn,  # ADR-0018: the profile's reasoning effort; before step_options_turn, which wins
         # Only when a step has overrides: unset, every call's options are what they were before.
         *([step_options_turn(step_options)] if step_options else []),
         # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
@@ -1590,7 +1726,13 @@ def build_steward_workflow(
     async def sitting() -> dict[str, Any] | None:
         return await open_sitting_now(agent)
 
-    route = Router(agent.client, {**base, **step_options.get(ROUTE_STEP, {})}, sitting=sitting)
+    step_executors: list[AgentExecutor] = []
+
+    def picked(profile: Profile) -> None:  # the pick on each step's session, where its middleware reads it
+        for executor in step_executors:
+            executor_session(executor).state[PROFILE_KEY] = profile.state()
+
+    route = Router(agent.client, {**base, **step_options.get(ROUTE_STEP, {})}, sitting=sitting, profiles=profiles, on_pick=picked)
     refuse = Refuse()
     # The answer step's own session says it answers in words: plan_mode_turns asks it for no StewardPlan. The session,
     # with its state, is in the workflow's checkpoint (AgentExecutor.on_checkpoint_save).
@@ -1608,6 +1750,7 @@ def build_steward_workflow(
     read_plan = ReadPlan(sitting=sitting)
     ask_approval = AskApproval()
     execute = AgentExecutor(agent, session=step_session(agent, EXECUTE_STEP), id=EXECUTE_STEP)
+    step_executors.extend([answer, explore, plan, execute])
     check = Check(
         checks, written=lambda: written_files(executor_session(execute)), stopped=lambda: stopped_reason(executor_session(execute))
     )

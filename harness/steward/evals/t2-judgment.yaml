@@ -24,17 +24,20 @@ changes:
 cases:
   - id: already_there
     capability: [A14]
+    profile: general
     ask: Add a line to harness/steward/working/sample-project-2/README.md saying how to run its tests.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
     checks: [no_card, no_change_made, keyword_check]
     keywords: [already]
   - id: reads_within_budget
     capability: [A15]
+    profile: general
     ask: Add a function kelvin_to_celsius to harness/steward/working/sample-project-2/units.py.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
     checks: [plan_card_first, reads_within_budget]
   - id: redundant_step_stops
     capability: [A16, A17]
+    profile: general
     ask: In harness/steward/working/sample-project/README.md, add the line "python -m unittest -v" under "Run the tests:".
     fixture: {project: harness/steward/working/sample-project, plant: null}
     approve: [approve_plan]
@@ -42,6 +45,7 @@ cases:
     keywords: [already]
   - id: docs_change_commit_card
     capability: [A18]
+    profile: general
     ask: Add one line to harness/steward/working/sample-project-2/README.md saying units.py needs no third-party packages.
     fixture: {project: harness/steward/working/sample-project-2, plant: null}
     approve: [approve_plan, file_access_write, file_access_replace, file_access_replace_lines]

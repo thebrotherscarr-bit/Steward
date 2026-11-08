@@ -20,6 +20,7 @@ changes:
 cases:
   - id: run_drift_check_by_name
     capability: [D4, D5]
+    profile: general
     ask: Run the Repo drift check flow.
     stand_ins:
       - name: secondbrain_saved_flows
@@ -39,6 +40,7 @@ cases:
     checks: [plan_card_first, tool_called_check, tool_call_args_match, nothing_ran_after_no]
   - id: startup_this_morning
     capability: [D4, D6]
+    profile: general
     ask: How did Startup do this morning?
     stand_ins:
       - name: secondbrain_saved_flows

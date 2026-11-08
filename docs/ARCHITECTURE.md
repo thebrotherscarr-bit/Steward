@@ -60,6 +60,15 @@ flowchart LR
   every host. A change always ends at the `git_commit` card, a docs change with no test to run too; EXECUTE stops and
   reports back (`stop_and_report`) when a step would make the result wrong or redundant against the request
   ([ADR-0015](decisions/0015-his-judgment-in-the-workflow.md)).
+- **The harness profiles:** `harness/steward/profiles/<name>.yaml`, read by `profiles.py`
+  ([ADR-0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md), [spec 002](specs/002-harness-profile.md)).
+  The workflow's router picks one per request (a name the request gives, a profile's pattern, the model only when two
+  patterns match, `general` otherwise); the run is offered only its tools at each step (within the step's own), its
+  instructions are added through a MAF context provider, its read budget is EXPLORE's, its reasoning effort is
+  Ollama's `think`; the plan card carries it (name, version, tools, budget, reasoning, success), and a
+  `steward_profile` workflow event names it with its success check and phone summary. `general` is the whole harness
+  as before (every tool, budget 8, gpt-oss's own medium effort); every case names its profile and passes only when its
+  run picked it ([spec 003](specs/003-eval-case-names-its-profile.md)). Since 2026-11-08 every case is on `general`.
 - **The hosts:** `hosted.py` (Responses, 43120), `ag_ui_app.py` (AG-UI, 43122), `mcp_app.py` (MCP, 43121, with
   `run_recipe` and `recipe_status`, and the Flows shelf's read-only `recipe_graph` and `recipe_runs`), `devui_app.py`
   (DevUI, for development only).
@@ -161,6 +170,8 @@ sequenceDiagram
   done is answered so, with what showed it, and no card; his reading before a plan is at most eight tool calls
   ([ADR-0015](decisions/0015-his-judgment-in-the-workflow.md)).
 - A No on any card ends the run.
+- Each request runs under one harness profile, picked by the router before anything else and shown on the plan card
+  beside the plan; Approve approves both ([ADR-0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md)).
 - Starting an eval in chat (`secondbrain_eval_start`) is an action like any other: it goes on the plan, and after
   the plan is approved it raises its own card ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - A direct ask names one of his Estate actions by its tool name ("Run the bfcl eval set with eval_start, tag X"). It

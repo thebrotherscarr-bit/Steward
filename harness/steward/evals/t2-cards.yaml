@@ -21,6 +21,7 @@ changes:
 cases:
   - id: plan_card_a2ui
     capability: [A13]
+    profile: general
     ask: Add a function celsius_to_kelvin to harness/steward/working/sample-project-2/units.py.
     subject: [celsius_to_kelvin]
     precondition: celsius_to_kelvin_works
