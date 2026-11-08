@@ -27,6 +27,11 @@ was never merged and has no entry.
   (the ground, else inferred as before; the recipes' repositories under it) and `STEWARD_MCP_PORT` (43121). The door's
   description of the ground no longer names its folder. A test scans his code's strings for the operator's user folder,
   his ground's folder and his name outside the install's defaults. Restart required.
+- ExecPlan 0006 P1, audit D9 and E2 (ADR-0020): Steward reads SecondBrain's MCP as `SECONDBRAIN_MCP_URL` and
+  `SECONDBRAIN_MCP_KEY`, each else `SECONDBRAIN_SHARE_URL` and `SECONDBRAIN_SHARE_KEY`, which SecondBrain puts in its
+  children's environment while sharing is on (Jesster PR #108); the `.env` names win. Read in one place,
+  `install.secondbrain_mcp()` (agent.py, mcp_app.py; step01 inline), so the key need not be pasted into `.env`.
+  Restart required.
 - ExecPlan 0006 P2 (ADR-0019 migration step 5, ADR-0020 decision 3): the model is a binding. `binding.us` (a STEW
   `kind: binding` declaration; `STEWARD_BINDING` names another) holds the model, endpoint and options; `install.py`
   reads it once and puts its model and endpoint in `OLLAMA_MODEL` and `OLLAMA_HOST`, so the binding wins over
