@@ -64,7 +64,7 @@ skill).
    "eval_start", "sets": ["aider-py"], "runs": 1}, {"step": "eval_wait", "hours": 8}], "deliver": ["note",
    "telegram"]}`. An optional second for `bfcl` has the same shape. No `summarize`: the progress lines are the result.
 
-### Running a saved flow, and how it went (ADR-0016)
+### Running a saved flow, and how it went (ADR-0017)
 
 The Flows shelf's own actions are your tools on SecondBrain's MCP, each on the shelf's own path:
 

@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-08 (ADRs 0001 to 0016, spec 001, ExecPlans 0001 to 0004). _(Was 2026-11-06.)_
+- **As of:** 2026-11-08 (ADRs 0001 to 0017, spec 001, ExecPlans 0001 to 0005).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -88,7 +88,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | 43120 | Steward `hosted.py` | OpenAI Responses (MAF `ResponsesHostServer`) | Jesster, as the fallback transport; evals `--transport responses` |
 | 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status`, and the Flows shelf's `recipe_graph` / `recipe_runs` (read-only) |
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
-| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`, and the Flows shelf's own actions: `saved_flows`, `saved_flow_run` (Run now) and `saved_flow_status`, [ADR-0016](decisions/0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md); and `approval_ask`). The door's `flow_*` (Manjuel's engine flows) are on the same MCP and are another system, and other MCP clients with a share key |
+| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`, and the Flows shelf's own actions: `saved_flows`, `saved_flow_run` (Run now) and `saved_flow_status`, [ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md); and `approval_ask`). The door's `flow_*` (Manjuel's engine flows) are on the same MCP and are another system, and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
 | stdio | the notes kernel's notes-only adapter, `cli.py --vault worlds/notes mcp --only notes` (Jesster #90) | MCP | Claude Code in the ground (its `.mcp.json`, Manjuel #101) and IDEs in the Jesster repository (Jesster #91): notes, `index.search`, `context.for` and `context.now` only (11 tools), on the same vault; no other kernel method group is served anywhere ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
 | 8091 | Aurora glass (`atlas-webapp.exe`, run by Jesster) | HTTP | Kyle's browser; parked |
@@ -169,7 +169,7 @@ sequenceDiagram
 - A saved flow asked for by name ("Run the Repo drift check flow") is found with `secondbrain_saved_flows` and run
   with `secondbrain_saved_flow_run`, planned first and then on its own card, as `eval_start` is; how a flow's run
   went is a read (`secondbrain_saved_flow_status`), answered with no plan
-  ([ADR-0016](decisions/0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). The T3 `flows` set checks it.
+  ([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). The T3 `flows` set checks it.
 
 ### A flow and an automation
 
@@ -201,7 +201,7 @@ never by a conversation with Steward (ADR-0009, dated note 2026-11-08). There is
 schedules saved before 2026-11-05 keep running and are shown as legacy. Startup (weekdays 06:00) is the baseline.
 
 Every action on the shelf has its tool on Jesster's MCP, on the shelf's own path
-([ADR-0016](decisions/0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)): the list is `saved_flows`, Run
+([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)): the list is `saved_flows`, Run
 now is `saved_flow_run` (start-verified: Steward's state read back once, or `started: false` with the reason), and a
 run's steps and reason are `saved_flow_status`. Jesster's `estate.SHELF_ACTIONS` maps each `schedules:*` handler to
 its tool or says why it has none (the saves wait on `automation_save`); a test goes red on a handler without an
@@ -249,12 +249,16 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   Every file tool refuses `.env*`.
 - **The Archive never goes on GitHub.** Not a file, a path, a fixture or a log that carries it. `worlds/` stays out of
   the core's remote.
+  Steward reads it only through read-only archive tools, with no card, and never writes, copies or publishes from it
+  ([ADR-0016](decisions/0016-steward-is-the-brain-of-the-pc.md), 2026-11-08, amending ADR-0014 for him; the hand's own
+  access stays under RULE 1).
 - **The bounds are gates in code** ([ADR-0014](decisions/0014-the-bounds-are-gates-in-code.md), 2026-11-06). At the
   call, before any card (`bounds_gate` and its auto-approval rule): any tool's path naming `.env*` or a key file, or a
-  path under `Desktop\Archive`, is refused; the host shell is refused once untrusted content (a note, an Estate read,
+  path under `Desktop\Archive` (on every tool but the read-only archive tools, ADR-0016), is refused; the host shell is refused once untrusted content (a note, an Estate read,
   the web) is in the session, whatever the FIDES and sandbox switches say; a write to the ground is refused while a
   sitting is open. At the request and the plan (the workflow's `refuse` step and its plan reader): a change asked from
-  WhatsApp, a change to the ground while a sitting is open, or an Archive path named, is refused with no plan card.
+  WhatsApp, a change to the ground while a sitting is open, or a write, copy or publish of anything in the Archive, is
+  refused with no plan card.
 - **The gate is Kyle's.** For Steward, every write, shell command, commit, push and Estate change is his card. No
   force-push, tag, release or history rewrite without his word for that act. No agent puts its own name on his work.
   The hand's exception (the ground's CLAUDE.md RULE 12, 2026-11-03 and 11-04): until Steward runs it reliably, the
@@ -270,7 +274,7 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
   bigger model.
 - **Name the wire.** Every piece has a test that goes red when it is unplugged.
 - **The card rule.** In chat, everything that changes something is planned and carded, `eval_start` and
-  `saved_flow_run` included ([ADR-0016](decisions/0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). A
+  `saved_flow_run` included ([ADR-0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md)). A
   saved flow runs unattended by design: the flow is the approval
   ([ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md)).
 - **His system, his hours.** Evals and flows run whenever the operator says, day or night (ADR-0009; this replaced
@@ -284,46 +288,47 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 
 ## 6. The build plan ahead
 
-_Now, 2026-11-08:_ built since the list below was written: ADR-0014's bounds as gates in code (Steward #174, #175,
-#180), ADR-0015's judgment in the workflow (Steward #176, #177, #181, #182), the per-case eval transcripts
-(Steward #178), the A2UI pilot's three milestones (Steward #170, Jesster #96, #97; its live acceptance remains), and
-Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Next, in order: the bounds bar (P36 failed
-alone at `bd1bb13`, fixed again in Steward #183, not rerun; then `bounds` 10/10 twice), the first run of each never-run set (`direct`, `cards`, `judgment`, then
-`aider-py`), then item 2 below from Milestone 3.
+**The goal** (the operator, 2026-11-08): "We are building a harness for agents to get them to properly conduct my PC
+operations while I am away from my PC." Steward is the brain of the PC, running from the phone everything Kyle would
+do at the keyboard, every change on his card, every run ending with a summary on Telegram
+([ADR-0016](decisions/0016-steward-is-the-brain-of-the-pc.md)). The plan of record is
+[ExecPlan 0005](plans/0005-steward-runs-the-pc-from-the-phone.md); its milestones, in order of value and dependency,
+are the build plan. Each is one piece and one pull request at a time, with its wire and its eval cases (ADR-0012);
+its capabilities are N1 to N18 in [spec 001](specs/001-capability-evals.md). _(Rewritten 2026-11-08; the list of
+2026-11-05 evening is in this file's history. Built from it by 2026-11-08: ADR-0014's bounds as gates in code (Steward #174, #175, #180), ADR-0015's judgment in the workflow (Steward #176, #177, #181, #182), the per-case eval transcripts (Steward #178), the A2UI pilot's three milestones (Steward #170, Jesster #96, #97; its live acceptance remains), and Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Its items 1 and 2, the capability evals, are M0 and the cases of each
+milestone below; item 3, ExecPlan 0002 (Steward's flow card and `automation_save`), stays open and is taken up where M4 needs it; item 5 is M9's rule; items 4 and 7 are under "Not now".)_
 
-In order, as of 2026-11-05 evening. Each item is one piece and one pull request at a time, with its wire and, from
-ADR-0012, its eval case. A multi-step item has an ExecPlan in [`plans/`](plans/README.md), which is where its
-progress is kept. _(Rewritten 2026-11-05 evening; the earlier list is in this file's history. Built from it on
-2026-11-05: the Flows shelf's run history and its canvas drawn from the MAF graph (Steward #158, Jesster #89); flows
-and automations per ADR-0009, Set up as automations, the prompt type removed, BFCL and Aider as eval flows (Steward
-#156, Jesster #88, #92; Steward #161).)_
+0. **M0, the trust bar:** T3 `bounds` 10 of 10 twice in a row ([ExecPlan 0001](plans/0001-capability-evals-build.md),
+   Milestone 2; in progress: 2026-11-08, run twice, 4/10 at `7b25232` and 7/10 at `2703bcc`; P36 failed alone at
+   `bd1bb13`, fixed again in Steward #183, not rerun). Then the first run of each never-run set (`direct`, `cards`,
+   `judgment`, then `aider-py`), and the rest of spec 001's cases by risk (ExecPlan 0001, Milestones 3 to 6).
+1. **M1, the away loop and phone summaries** (N1 to N4): a Telegram card answered on the phone continues the run and
+   the result comes back to the phone, Deny and no answer included; no run ends silently; per-run limits. Proved on a
+   live host.
+2. **M2, keep the Estate running** (N5, N6): a health flow on schedule (`estate_status`, notify the phone; a restart
+   asked from the phone on his card); host-crash recovery with durable checkpoints on the AG-UI host.
+3. **M3, research and notes from the phone** (N7): WebResearchAgent, then `write_note` on his card, read back.
+4. **M4, evals, flows and programs from the phone** (N8 to N10): `eval_start`, the Jesster flow tools, a program by
+   `run_shell` on his card; each summarized to the phone.
+5. **M5, agents' progress on the PC** (N11): one light read of running evals, flows, agents, Claude Code and Aider and
+   their logs.
+6. **M6, Archive search and read** (N12, N13): read-only archive tools, no card; every write, copy or publish refused.
+7. **M7, install apps** (N14): winget search; install and upgrade on his card.
+8. **M8, cleanup and tidiness** (N15): a read-only survey, proposals with reasons, each removal on its card.
+9. **M9, GitHub review** (N16, N17): reads and T4 read cases; GitHub writes withheld until the operator's word after
+   he passes reliably (until then the hand does them, the ground's CLAUDE.md RULE 12 exception).
+10. **M10, anything at the keyboard** (N18): the host shell on his card; screen control deferred.
 
-1. **The capability-eval wire and the first ten T3 cases:** _built 2026-11-05 (Steward #164)_: the map as data
-   (`harness/steward/evals/capabilities.yaml`), every case naming its capability ids, `evals.py validate` failing an
-   unknown id, a case with none, a required capability with no case, or a skill or tool the map does not name; and
-   T3 `bounds` (`t3-bounds.yaml` v1: P29, P30, P56, P1, P31, P32, P33, P58, P34, P36) on the `standins` runner. Next:
-   its bar, run twice on the operator's word ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md),
-   [spec 001](specs/001-capability-evals.md), [ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 1
-   and 2). _(2026-11-08: run twice, 4/10 at `7b25232` and 7/10 at `2703bcc`; P32 and P58 fixed and passing alone,
-   P36 failing alone at `bd1bb13` and fixed again in #183; the bar, 10/10 twice in a row, is not met.)_
-2. **The remaining cases by risk:** the rest of T3, then T2, then T4 (the rest of spec 001's P1 to P60), and each tier's bar met
-   twice in a row on the operator's word ([ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 3 to 6).
-   Then the `eval-author` skill; T5 restated now that Neiro is retired; T6 and T7 grow with his reach.
-3. **Flows: Steward's card and `automation_save`** on Kyle's card, then evals in flow (`evaluate_workflow` on a
-   recipe run) ([ADR-0008](decisions/0008-the-flows-shelf.md),
-   [ADR-0009](decisions/0009-flows-are-ordered-tool-chains-automations-schedule-flows.md),
-   [ExecPlan 0002](plans/0002-flows-steward-card-and-automation-save.md)).
-4. **AG-UI step 3:** the console and the Phone view show the workflow's steps from AG-UI's STEP events (built
-   2026-11-05, Jesster #93 to #95); then the A2UI pilot for the plan's card
-   ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md), [ExecPlan 0003](plans/0003-ag-ui-step-3.md);
-   [ADR-0013](decisions/0013-a2ui-pilot-plan-card.md), [ExecPlan 0004](plans/0004-a2ui-pilot-plan-card.md)).
-   _(2026-11-08: the A2UI pilot is built, milestones 1 to 3; its live acceptance on the operator's builds remains.)_
-5. **Reach widens on each tier's bar:** GitHub for his own repository passes from the hand to Steward after T2; then
-   Jesster, Manjuel and Aurora one at a time.
-6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks
-   ([ADR-0001](decisions/0001-steward-is-a-maf-harness-agent.md), items 8 and 9); checked against each MAF release.
-7. **Aurora:** visible computer control for Steward, when the operator says so
-   ([ADR-0004](decisions/0004-jesster-is-the-center.md)).
+Standing, beside the milestones: **held on MAF defects**, FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and
+Agent Hooks ([ADR-0001](decisions/0001-steward-is-a-maf-harness-agent.md), items 8 and 9), checked against each MAF
+release.
+
+**Not now** (deferred until the milestones above work, ADR-0016): Aurora visible control (screen control,
+`computer_task`; [ADR-0004](decisions/0004-jesster-is-the-center.md)); A2UI beyond the plan card
+([ADR-0013](decisions/0013-a2ui-pilot-plan-card.md); [ExecPlan 0003](plans/0003-ag-ui-step-3.md) and
+[ExecPlan 0004](plans/0004-a2ui-pilot-plan-card.md) keep their open live acceptances); outside benchmarks; Manjuel as
+the ledger; the River, A2A and worker agents; the product; porting the 62 forwarded door tools; the creative server;
+Flows UI extras.
 
 The SecondBrain notes below hold discussion and status, and each says at its top that this folder is the design of
 record (2026-11-05 evening):

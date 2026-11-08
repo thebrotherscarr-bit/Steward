@@ -8,7 +8,7 @@ description: Start one of your eval sets in its own window with SecondBrain's ev
 **A saved eval flow first.** When the user names a saved flow ("run the bfcl eval flow", "Eval: bfcl"), or the set he
 names is what one saved flow runs, that flow is the plan: find it with `secondbrain_saved_flows` and run it with
 `secondbrain_saved_flow_run` by its `id` (planned, then its own card), and read it with `secondbrain_saved_flow_status`
-(the `automations` skill, ADR-0016). Use `secondbrain_eval_start` below only for sets no saved flow holds, or a run he
+(the `automations` skill, ADR-0017). Use `secondbrain_eval_start` below only for sets no saved flow holds, or a run he
 asks for with its own sets, runs or tag.
 
 Your eval sets run through `harness/steward/evals/run-bar.ps1`, each set as its own process in its own minimized

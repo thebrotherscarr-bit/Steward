@@ -4110,7 +4110,7 @@ def _estate_server() -> Any:
     def eval_status(tag: str = "") -> str:
         return '{"done": false, "lines": []}'
 
-    # the Flows shelf's tools (ADR-0016)
+    # the Flows shelf's tools (ADR-0017)
     @server.tool()
     def saved_flows() -> str:
         return '[{"id": "f-drift", "name": "Repo drift check", "steps": ["versions", "repo_log"], "running": false}]'
@@ -4230,7 +4230,7 @@ def test_eval_start_in_chat_is_planned_and_carded_and_eval_status_is_a_read(monk
 
 
 def test_saved_flow_run_in_chat_is_planned_and_carded_and_the_flow_reads_never_ask(monkeypatch: Any) -> None:
-    """ADR-0016: the Flows shelf's actions are his tools on SecondBrain's MCP. saved_flow_run (the shelf's Run now) is
+    """ADR-0017: the Flows shelf's actions are his tools on SecondBrain's MCP. saved_flow_run (the shelf's Run now) is
     an action in chat like eval_start (ADR-0009): refused in plan mode, so it goes on the plan, and its own card once
     the plan is approved; saved_flows and saved_flow_status are reads with no card. The automations and bar-runner
     skills send a saved eval flow to saved_flow_run, not eval_start, and the names never shadow the door's flow_*.
@@ -8674,7 +8674,7 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 83  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; D4 to D6: ADR-0016
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 101  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; N1 to N18: ADR-0016; D4 to D6: ADR-0017
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}

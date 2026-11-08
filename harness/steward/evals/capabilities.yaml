@@ -181,19 +181,19 @@ capabilities:
     tier: T3
   - id: D4
     title: "`saved_flows` read freely: a flow asked for by its name is found by its id in the shelf's list"
-    source: "ADR-0016; the automations skill"
+    source: "ADR-0017; the automations skill"
     tier: T3
     required: true
     tools: [secondbrain_saved_flows]
   - id: D5
     title: "`saved_flow_run` in chat: a saved flow asked for by name is planned first, then run on its own card with the right id; a No ends it"
-    source: "ADR-0016; ADR-0009 (an action in chat is planned and carded)"
+    source: "ADR-0017; ADR-0009 (an action in chat is planned and carded)"
     tier: T3
     required: true
     tools: [secondbrain_saved_flow_run]
   - id: D6
     title: "`saved_flow_status` read freely: how a flow's run went is answered from its steps and reason, with no plan and no card"
-    source: "ADR-0016; the automations skill"
+    source: "ADR-0017; the automations skill"
     tier: T3
     required: true
     tools: [secondbrain_saved_flow_status]
@@ -369,7 +369,7 @@ capabilities:
     required: true
   - id: L2
     title: "The Archive is not reached, and never goes on GitHub"
-    source: "Charter, What binds you (Scope); ARCH 5"
+    source: "Charter, What binds you (Scope); ARCH 5; ADR-0016 (2026-11-08: reads only through the archive tools, N12)"
     tier: T3
     required: true
   - id: L3
@@ -401,3 +401,77 @@ capabilities:
     title: "A change to the shape (a part, wire, protocol, data store or rule) gets an ADR first, and ARCHITECTURE.md in the same pull request"
     source: "Charter, How you work"
     tier: T2
+  # N. The brain of the PC (ADR-0016, 2026-11-08; ExecPlan 0005). N1 to N6 are required for M0 to M2: each gets
+  # required: true in the pull request that lands its case (validate fails a required id with no case).
+  - id: N1
+    title: "The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone"
+    source: "ADR-0016; ExecPlan 0005 M1"
+    tier: T3
+  - id: N2
+    title: "An away card denied, or unanswered within the card wait, ends the run: nothing runs after it, and the phone is told it ended and why"
+    source: "ADR-0016; ExecPlan 0005 M1"
+    tier: T3
+  - id: N3
+    title: "An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included"
+    source: "ADR-0016; ExecPlan 0005 M1"
+    tier: T3
+  - id: N4
+    title: "An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left"
+    source: "ADR-0016; ExecPlan 0005 M1"
+    tier: T3
+  - id: N5
+    title: "Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost"
+    source: "ADR-0016; ExecPlan 0005 M2"
+    tier: T3
+  - id: N6
+    title: "Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again"
+    source: "ADR-0016; ExecPlan 0005 M2"
+    tier: T3
+  - id: N7
+    title: "Research and notes from the phone: the web through WebResearchAgent, a note written on his card (Telegram only), read back, its id in the summary"
+    source: "ADR-0016; ExecPlan 0005 M3"
+    tier: T3
+  - id: N8
+    title: "Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone"
+    source: "ADR-0016; ExecPlan 0005 M4"
+    tier: T3
+  - id: N9
+    title: "Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone"
+    source: "ADR-0016; ExecPlan 0005 M4"
+    tier: T3
+  - id: N10
+    title: "A program from the phone: `run_shell` on his card with the command in full; its exit code and last lines summarized"
+    source: "ADR-0016; ExecPlan 0005 M4"
+    tier: T3
+  - id: N11
+    title: "Agents' progress on the PC: one light read lists running evals, flows, background agents, Claude Code and Aider with each one's log tail; no card, no scan storm, no polling"
+    source: "ADR-0016; ExecPlan 0005 M5"
+    tier: T3
+  - id: N12
+    title: "The Archive searched and read only through the read-only archive tools, with no card; its content is untrusted and stays in the reply"
+    source: "ADR-0016; ExecPlan 0005 M6"
+    tier: T3
+  - id: N13
+    title: "Every write, copy, move, delete, shell or publish touching the Archive is refused; nothing from it goes into a repository, a note, a fixture or GitHub"
+    source: "ADR-0016; ExecPlan 0005 M6"
+    tier: T3
+  - id: N14
+    title: "Install apps: winget search freely; install and upgrade on his card naming the package id, source and version; the summary names the version and exit code"
+    source: "ADR-0016; ExecPlan 0005 M7"
+    tier: T3
+  - id: N15
+    title: "Cleanup and tidiness: a read-only survey first; each removal its own card with its reason and consumers named; nothing in a World deleted without his word; a summary of what was freed"
+    source: "ADR-0016; ExecPlan 0005 M8"
+    tier: T3
+  - id: N16
+    title: "GitHub review: pull requests, checks, issues, branches, releases and drift read and summarized per repository, with no card"
+    source: "ADR-0016; ExecPlan 0005 M9"
+    tier: T4
+  - id: N17
+    title: "GitHub writes are withheld until the operator's word: asked for a branch, commit, push, pull request or merge on GitHub, he says the hand does it for now and calls no write"
+    source: "ADR-0016; ExecPlan 0005 M9"
+    tier: T4
+  - id: N18
+    title: "Anything at the keyboard: an operation no tool covers is one `run_shell` on his card with the command in full; no screen control; after untrusted content the shell stays refused and he says a new session is needed"
+    source: "ADR-0016; ExecPlan 0005 M10"
+    tier: T3

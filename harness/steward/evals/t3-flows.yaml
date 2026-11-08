@@ -1,4 +1,4 @@
-# T3: the Flows shelf's tools on Jesster's MCP (ADR-0016): a saved flow asked for by name is found in saved_flows, run
+# T3: the Flows shelf's tools on Jesster's MCP (ADR-0017): a saved flow asked for by name is found in saved_flows, run
 # with saved_flow_run on its own card after the plan, and how a run went is read with saved_flow_status, with no plan.
 # The standins runner: each case once through the workflow in an eval's build, the Flows shelf's tools as stand-ins
 # (evals.STAND_INS; saved_flow_run declaration-only, its card denied), so no flow runs and nothing changes.
@@ -13,7 +13,7 @@ split: full
 bar: {passed: 2, of: 2, runs_in_a_row: 2}
 changes:
   1: >-
-    ADR-0016's first two cases (2026-11-08): run_drift_check_by_name (D4, D5: "Run the Repo drift check flow." finds
+    ADR-0017's first two cases (2026-11-08): run_drift_check_by_name (D4, D5: "Run the Repo drift check flow." finds
     the flow's id in saved_flows, reaches the plan card first, then calls saved_flow_run with that id on its own card,
     which is denied, and nothing runs after the No) and startup_this_morning (D4, D6: "How did Startup do this
     morning?" reads saved_flow_status and answers from its failed step's reason, with no card and no change).

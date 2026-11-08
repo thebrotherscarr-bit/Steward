@@ -393,7 +393,7 @@ STAND_INS: dict[str, dict[str, Any]] = {
         "Start, stop or restart one server SecondBrain runs (a name from estate_status), as the Servers shelf's buttons "
         "do. A write: it waits on the operator's card. Never SecondBrain itself, and never the door while a Manjuel "
         "sitting is open.")},
-    # The Flows shelf's tools (ADR-0016), as Jesster's estate.cjs declares them. saved_flow_run is carded in chat, so
+    # The Flows shelf's tools (ADR-0017), as Jesster's estate.cjs declares them. saved_flow_run is carded in chat, so
     # here it is declaration-only like a write: its card is denied and nothing runs.
     "secondbrain_saved_flows": {"write": False, "parameters": {"type": "object", "properties": {}}, "description": (
         "The Flows shelf's saved flows: each one's id, name, steps, when, whether it is running or waiting on its run "

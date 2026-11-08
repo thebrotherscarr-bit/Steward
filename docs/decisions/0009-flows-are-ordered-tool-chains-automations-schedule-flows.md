@@ -124,4 +124,4 @@ is a flow plus when, one create button for flows, no daytime prompt on an eval f
   `schedules.cjs runNow`), so a flow can be started and read to its end without the window.
 - Open: `automation_save`.
 - 2026-11-08: Run now as Steward's tool, and the card it asks in chat (by this ADR's rule for chat), is
-  [ADR-0016](0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md).
+  [ADR-0017](0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md).
