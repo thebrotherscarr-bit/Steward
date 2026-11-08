@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- ADR-0016, "Steward is the brain of the PC: what he runs while Kyle is away" (accepted 2026-11-08): the operator's
+  operations as capability families, each with its tools, gate, phone path and summary rule; the trust bar and the
+  away loop first; the Archive read-only for Steward with no card (superseding ADR-0014 in part); GitHub review now,
+  writes withheld until his word; a "Not now" list. ExecPlan 0005, "Steward runs the PC from the phone", carries it
+  out in milestones M0 to M10, and is the build plan in `docs/ARCHITECTURE.md` section 6. Capabilities N1 to N18 are
+  in the map and spec 001, untested until their cases land.
 - A plans or standins case may name a `precondition` (a RESULT check that must fail on its fixture), and `evals.py
   validate` measures it as it does an asks case's; new result check `celsius_to_kelvin_works`. `t2-cards.yaml` v2:
   v1 asked for a docstring `convert_length` already had (`units.py` line 8); v2 asks for `celsius_to_kelvin` and names
