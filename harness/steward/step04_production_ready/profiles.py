@@ -1,10 +1,12 @@
-"""Harness profiles (ADR-0018, spec 002): one small YAML file per task family, read when Steward's workflow is built.
+"""Harness profiles (ADR-0018, spec 002): one small STEW `.us` file per task family, read when Steward's workflow is built.
 
 A profile names what a task is offered: its tools (an allow-list of exact names; nothing else is offered), up to 8 lines
 of instructions added to the Charter for the task, its reading budget before the plan card, the model's reasoning effort,
 the bounds it touches and any extra refusal (the bounds stay on whatever it says, ADR-0014), whether it raises a plan
 card, the deterministic check that says done, and the one-line summary for the phone. The files are
-harness/steward/profiles/<name>.yaml; their fields are spec 002's, and only those.
+harness/steward/profiles/<name>.us: STEW `kind: profile` declarations (STEW spec/profile.md; ADR-0019 migration step 2,
+ExecPlan 0006 P8), Markdown with one ```json block, and only the members Steward enforces (STEW_PROFILE_KEYS). There is
+no other form: the YAML files are gone and nothing here reads one.
 
 The router (steward_workflow.Router) picks one profile per request (pick_profile): an explicit name in the request
 first, then the patterns below (PROFILE_ROUTES), the model only when two profiles' patterns both match, and `general`
@@ -24,6 +26,7 @@ one evals.py knows; and every route names a profile.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -38,11 +41,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import install as _install  # noqa: E402 - a profile's requires, checked against the binding (ExecPlan 0006 P2)
 
 PROFILES_DIR = Path(__file__).resolve().parents[1] / "profiles"
+PROFILE_SUFFIX = ".us"
 GENERAL = "general"
-PROFILE_KEYS = (
-    "name", "version", "for", "tools", "instructions", "read_budget", "reasoning", "requires", "gates", "card", "success",
-    "summary",
+# The STEW version Steward implements (ADR-0019 decision 1), and the profile's members, each one Steward reads. STEW
+# leaves instructions, budgets and reasoning optional; Steward's run uses each, so a profile of his states them. An
+# `x-` member is ignored (STEW spec/declarations.md), except `x-min_context` below.
+STEW_VERSION = "2026-11-08-draft"
+STEW_PROFILE_KEYS = (
+    "stew", "kind", "name", "version", "for", "tools", "requires", "instructions", "budgets", "reasoning", "gates", "card",
+    "success", "summary",
 )
+# STEW's card values Steward runs: `plan` (one plan card; spec 002's yes) and `none` (a read or a refusal; spec 002's
+# no). `every-write` is refused by name until Steward raises a card on each write.
+CARDS = {"plan": True, "none": False}
+# STEW requires min_context as a number of tokens. Steward's is to be measured (ExecPlan 0006 P2: the smallest window
+# a profile's cases pass with, never guessed), so a profile says so in `x-min_context` and holds 1, which every binding
+# meets; the loader reads that pair as None, and nothing is checked for it until it is measured.
+MIN_CONTEXT_UNMEASURED = "to be measured"
 REASONING = ("low", "medium", "high")
 MAX_INSTRUCTION_LINES = 8
 _NAME = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
@@ -189,26 +204,48 @@ def card_line(view: Mapping[str, Any]) -> str:
     )
 
 
-def _problems(raw: Any, path: Path) -> list[str]:
-    """What is wrong with one profile file's shape (spec 002's fields, and only those)."""
+def _core(value: Any) -> Any:
+    """A STEW object without its `x-` members (STEW spec/declarations.md: a processor ignores one it does not know)."""
+    return {k: v for k, v in value.items() if not str(k).startswith("x-")} if isinstance(value, dict) else value
+
+
+def _requires(raw: Any) -> Any:
+    """STEW's requires as Steward's runtime holds it (install.REQUIRES_KEYS): {tool_calling, min_context (None: to be
+    measured, the `x-min_context` pair), reasoning_effort (false when not said)}; the raw value when it is not a
+    mapping, for requires_problems to name."""
     if not isinstance(raw, dict):
-        return ["not a mapping"]
-    problems = [f"unknown key {key!r}" for key in sorted(set(raw) - set(PROFILE_KEYS))]
-    problems += [f"missing key {key!r}" for key in PROFILE_KEYS if key not in raw]
+        return raw
+    core = _core(raw)
+    window = core.get("min_context")
+    if raw.get("x-min_context") == MIN_CONTEXT_UNMEASURED and window == 1:
+        window = None
+    return {**core, "min_context": window, "reasoning_effort": core.get("reasoning_effort", False)}
+
+
+def _problems(raw: Any, path: Path) -> list[str]:
+    """What is wrong with one profile declaration's shape: STEW's profile members, each one Steward reads
+    (STEW_PROFILE_KEYS), and the values Steward runs."""
+    if not isinstance(raw, dict):
+        return ["the json block is not an object"]
+    raw = _core(raw)
+    problems = [f"unknown member {key!r}" for key in sorted(set(raw) - set(STEW_PROFILE_KEYS))]
+    problems += [f"missing member {key!r}" for key in STEW_PROFILE_KEYS if key not in raw]
     if problems:
         return problems
+    if raw["stew"] != STEW_VERSION or raw["kind"] != "profile":
+        problems.append(f"not a STEW {STEW_VERSION} profile (stew: {raw['stew']!r}, kind: {raw['kind']!r})")
     name, version = raw["name"], raw["version"]
     if not (isinstance(name, str) and _NAME.fullmatch(name)):
         problems.append(f"name {name!r} is not lowercase words joined by dashes")
-    elif path.name != f"{name}.yaml":
-        problems.append(f"the file is named {path.name}, not {name}.yaml")
+    elif path.name != f"{name}{PROFILE_SUFFIX}":
+        problems.append(f"the file is named {path.name}, not {name}{PROFILE_SUFFIX}")
     if not (isinstance(version, int) and not isinstance(version, bool) and version >= 1):
         problems.append(f"version {version!r} is not a whole number from 1")
-    purpose = raw["for"]
-    if not (isinstance(purpose, dict) and set(purpose) == {"task", "capability"} and isinstance(purpose["task"], str)
-            and purpose["task"].strip() and isinstance(purpose["capability"], list)
-            and all(isinstance(c, str) and _CAPABILITY_ID.fullmatch(c) for c in purpose["capability"])):
-        problems.append("for is not {task: <words>, capability: [<capability ids>]}")
+    purpose = _core(raw["for"])
+    if not (isinstance(purpose, dict) and set(purpose) == {"task", "capabilities"} and isinstance(purpose["task"], str)
+            and purpose["task"].strip() and isinstance(purpose["capabilities"], list)
+            and all(isinstance(c, str) and _CAPABILITY_ID.fullmatch(c) for c in purpose["capabilities"])):
+        problems.append("for is not {task: <words>, capabilities: [<capability ids>]}")
     tools = raw["tools"]
     if not (isinstance(tools, list) and all(isinstance(t, str) and t.strip() for t in tools)):
         problems.append("tools is not a list of tool names ([] for a refusal)")
@@ -219,50 +256,72 @@ def _problems(raw: Any, path: Path) -> list[str]:
         problems.append("instructions is not text ('' for none)")
     elif len([line for line in instructions.splitlines() if line.strip()]) > MAX_INSTRUCTION_LINES:
         problems.append(f"instructions has more than {MAX_INSTRUCTION_LINES} lines")
-    budget = raw["read_budget"]
-    if not (isinstance(budget, int) and not isinstance(budget, bool) and budget >= 0):
-        problems.append(f"read_budget {budget!r} is not a whole number from 0")
+    budgets = _core(raw["budgets"])
+    if not (isinstance(budgets, dict) and set(budgets) == {"reads"}):
+        problems.append("budgets is not {reads: <reads before the plan card>}: Steward enforces reads, and no other yet")
+    elif not (isinstance(budgets["reads"], int) and not isinstance(budgets["reads"], bool) and budgets["reads"] >= 0):
+        problems.append(f"budgets.reads {budgets['reads']!r} is not a whole number from 0")
     if raw["reasoning"] not in REASONING:
         problems.append(f"reasoning {raw['reasoning']!r} is not one of {list(REASONING)}")
-    problems += _install.requires_problems(raw["requires"])
-    if isinstance(raw["requires"], dict) and isinstance(tools, list) and tools and raw["requires"].get("tool_calling") is not True:
+    requires = raw["requires"]
+    if isinstance(requires, dict):
+        marker = requires.get("x-min_context")
+        if marker is not None and not (marker == MIN_CONTEXT_UNMEASURED and requires.get("min_context") == 1):
+            problems.append(f"x-min_context is {MIN_CONTEXT_UNMEASURED!r} with min_context 1, or absent (min_context measured)")
+        if "structured_output" in requires:
+            problems.append("requires.structured_output is not checked by Steward yet")
+    problems += _install.requires_problems(_requires(requires))
+    if isinstance(requires, dict) and isinstance(tools, list) and tools and requires.get("tool_calling") is not True:
         problems.append("it offers tools, so requires.tool_calling is true (STEW spec/profile.md 7a)")
-    gates = raw["gates"]
+    gates = _core(raw["gates"])
     if not (isinstance(gates, dict) and set(gates) <= {"bounds", "extra"}
             and all(isinstance(v, list) and all(isinstance(i, str) and i.strip() for i in v) for v in gates.values())):
         problems.append("gates is not {bounds: [<gate>], extra: [<refusal in words>]}")
-    if not isinstance(raw["card"], bool):
-        problems.append("card is not yes or no")
-    for key in ("success", "summary"):
-        if not (isinstance(raw[key], str) and raw[key].strip()):
-            problems.append(f"{key} is empty")
+    if raw["card"] not in CARDS:
+        problems.append(f"card {raw['card']!r} is not one of {list(CARDS)} (every-write is not raised by Steward yet)")
+    success = _core(raw["success"])
+    if not (isinstance(success, dict) and set(success) == {"check"} and isinstance(success["check"], str)
+            and success["check"].strip()):
+        problems.append("success is not {check: <a check name>} (Steward's checks take no args)")
+    if not (isinstance(raw["summary"], str) and raw["summary"].strip()):
+        problems.append("summary is empty")
     return problems
 
 
 def load_profile(path: Path) -> Profile:
-    """One profile file read and its shape checked; ProfileError names every problem."""
-    import yaml  # noqa: PLC0415
-
+    """One profile declaration read (a STEW .us file: Markdown with exactly one ```json block) and its shape checked;
+    ProfileError names every problem."""
+    where = f"profiles/{path.name}"
+    if path.suffix != PROFILE_SUFFIX:
+        raise ProfileError(f"{where}: a profile is a STEW {PROFILE_SUFFIX} file")
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise ProfileError(f"profiles/{path.name}: {error}") from error
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ProfileError(f"{where}: {error}") from error
+    blocks = _install._JSON_BLOCK.findall(text.replace("\r\n", "\n"))  # noqa: SLF001 - the one .us block pattern
+    if len(blocks) != 1:
+        raise ProfileError(f"{where}: a .us file holds exactly one ```json block; found {len(blocks)}")
+    try:
+        raw = json.loads(blocks[0])
+    except ValueError as error:
+        raise ProfileError(f"{where}: its json block does not parse: {error}") from error
     if problems := _problems(raw, path):
-        raise ProfileError("\n".join(f"profiles/{path.name}: {problem}" for problem in problems))
+        raise ProfileError("\n".join(f"{where}: {problem}" for problem in problems))
     return Profile(
         name=raw["name"], version=raw["version"], task=" ".join(raw["for"]["task"].split()),
-        capabilities=tuple(raw["for"]["capability"]), tools=tuple(raw["tools"]), instructions=raw["instructions"].strip(),
-        read_budget=raw["read_budget"], reasoning=raw["reasoning"], requires=dict(raw["requires"]),
-        gates=dict(raw["gates"]), card=raw["card"],
-        success=raw["success"].strip(), summary=" ".join(raw["summary"].split()), path=path,
+        capabilities=tuple(raw["for"]["capabilities"]), tools=tuple(raw["tools"]), instructions=raw["instructions"].strip(),
+        read_budget=raw["budgets"]["reads"], reasoning=raw["reasoning"], requires=_requires(raw["requires"]),
+        gates=_core(raw["gates"]), card=CARDS[raw["card"]],
+        success=raw["success"]["check"].strip(), summary=" ".join(raw["summary"].split()), path=path,
     )
 
 
 def load_profiles(folder: Path = PROFILES_DIR) -> dict[str, Profile]:
-    """Every profile in the folder, by name; ProfileError on the first that cannot be used, or with no `general`."""
-    profiles = {p.name: p for p in (load_profile(path) for path in sorted(folder.glob("*.yaml")))}
+    """Every profile in the folder (its .us files, and nothing else), by name; ProfileError on the first that cannot
+    be used, or with no `general`."""
+    profiles = {p.name: p for p in (load_profile(path) for path in sorted(folder.glob(f"*{PROFILE_SUFFIX}")))}
     if GENERAL not in profiles:
-        raise ProfileError(f"profiles/: no {GENERAL}.yaml, the profile every request falls back to")
+        raise ProfileError(f"profiles/: no {GENERAL}{PROFILE_SUFFIX}, the profile every request falls back to")
     return profiles
 
 
@@ -349,7 +408,7 @@ def profile_problems(
     cases = list(cases)
     problems: list[str] = []
     for name, profile in profiles.items():
-        where = f"profiles/{name}.yaml"
+        where = f"profiles/{name}{PROFILE_SUFFIX}"
         problems += [f"{where}: the tool {t} is withheld from Steward's build" for t in profile.tools if t in withheld]
         problems += [f"{where}: names the tool {t}, which neither Steward nor the MAF harness has" for t in profile.tools if t not in known and t not in withheld]
         if profile.success not in checks:

@@ -1,0 +1,44 @@
+# Profile: away-end
+
+M0 (ADR-0018; ExecPlan 0005): an automation's turn asking for a change to the Estate or the PC. Nobody is there to
+answer a card and an automation never approves its own, so the change is not made: it is answered in words, with no
+tool (B4, B5; P31).
+
+`requires` is what a model must offer to wear it (STEW spec/profile.md 7a; ExecPlan 0006 P2): tool calling when it
+offers tools. Its smallest context window is to be measured (the smallest window its cases pass with), not guessed:
+until it is, `x-min_context` says so and `min_context` holds 1, which every binding meets, so nothing is checked for
+it. Its reasoning effort is sent only when the binding offers the knob, so it does not require it.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "profile",
+  "name": "away-end",
+  "version": 1,
+  "for": {
+    "task": "an automation's turn that asks for a change: nobody is there for its card, so it is answered in words",
+    "capabilities": ["B4", "B5"]
+  },
+  "tools": [],
+  "requires": {
+    "tool_calling": false,
+    "min_context": 1,
+    "x-min_context": "to be measured",
+    "reasoning_effort": false
+  },
+  "instructions": "This turn is an automation's: nobody is here to approve a card, so the change it asks for is not made.\nSay in one sentence that it was not done and why, and that the operator can ask for it from Telegram or the PC.",
+  "budgets": {
+    "reads": 0
+  },
+  "reasoning": "low",
+  "gates": {
+    "bounds": ["keys", "archive", "sitting"],
+    "extra": ["no change from an automation's turn"]
+  },
+  "card": "plan",
+  "success": {
+    "check": "refused_in_words"
+  },
+  "summary": "<automation>: not done, <the change> needs the operator's card"
+}
+```

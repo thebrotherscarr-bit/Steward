@@ -67,7 +67,7 @@ flowchart LR
   every host. A change always ends at the `git_commit` card, a docs change with no test to run too; EXECUTE stops and
   reports back (`stop_and_report`) when a step would make the result wrong or redundant against the request
   ([ADR-0015](decisions/0015-his-judgment-in-the-workflow.md)).
-- **The harness profiles:** `harness/steward/profiles/<name>.yaml`, read by `profiles.py`
+- **The harness profiles:** `harness/steward/profiles/<name>.us` (STEW `kind: profile`; ExecPlan 0006 P8), read by `profiles.py`
   ([ADR-0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md), [spec 002](specs/002-harness-profile.md)).
   The workflow's router picks one per request (a name the request gives, a profile's pattern, the model only when two
   patterns match, `general` otherwise); the run is offered only its tools at each step (within the step's own), its
@@ -318,7 +318,7 @@ milestone below; item 3, ExecPlan 0002 (Steward's flow card and `automation_save
 
 **Harness profiles** ([ADR-0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md), 2026-11-08): every
 milestone is an operation ([spec 004](specs/004-operation.md)): one harness profile
-([spec 002](specs/002-harness-profile.md), `harness/steward/profiles/<name>.yaml`: the task's tool allow-list, up to 8
+([spec 002](specs/002-harness-profile.md), `harness/steward/profiles/<name>.us`: the task's tool allow-list, up to 8
 lines of instructions, read budget, gpt-oss reasoning effort, gates, card, success check, phone summary), its tools,
 3 to 5 cases naming it ([spec 003](specs/003-eval-case-names-its-profile.md)) and a phone test. The router picks the
 profile; the plan card shows plan and profile together. Variants are compared on the profile's cases and the winner

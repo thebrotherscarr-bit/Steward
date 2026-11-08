@@ -78,6 +78,12 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   - [x] (2026-11-08, Steward PR p8-stew-validator-ci) Step 1: the gate's `stew` step validates every tracked `.us`
     file with STEW's `tools/validate.py`, STEW checked out at `aec5527ebe25c366057674b558e31e6a5e284881`. Wire: a
     throwaway pull request adding an invalid `.us` file turned the gate red, and was closed unmerged.
+  - [x] (2026-11-08, Steward PR p8-profiles-us) Step 2: the eight profiles are STEW `kind: profile` `.us` files,
+    `profiles.py` reads only those, and the YAML files are gone (the loader was their only consumer: a search of the
+    repository found no other reader). The gate's `stew` step takes them through `git ls-files "*.us"` with no
+    change (STEW's validator passes all ten tracked `.us` files locally). Wire:
+    `test_the_profiles_are_stew_us_declarations_and_no_yaml_is_read` goes red when a profile's `.us` fails STEW's
+    validator, a YAML profile comes back, or the loader reads one. Each `min_context` is still to be measured.
 
 ## Surprises & Discoveries
 
@@ -156,6 +162,30 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   Rationale: `gate` is the check main's protection already requires, so a step in it gates the merge with no change
   to the protection; a full sha cannot move under the gate; `git ls-files` takes each new `.us` file with no list to
   keep.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: P8 step 2 carries every profile's version over unchanged (all eight stay `@1`), so their histories
+  (`name@version` in the eval history and on the cards) continue. The members map one to one as ADR-0019's table
+  says (`read_budget` to `budgets.reads`, `card: yes`/`no` to `plan`/`none`, `success` to `{check}`,
+  `for.capability` to `for.capabilities`), and the loader turns each back into the same values the run used before; a
+  check at the change compared every loaded profile with the YAML at main and found them equal, field by field, but
+  for `away-end`'s two wording changes. In `away-end`'s instructions and summary, the operator's name became "the
+  operator" (no person's name in a declaration); the meaning is unchanged, so it is not a new version.
+  Rationale: spec 002's "any change is a new version" is for a change to what a profile does; a file format and a
+  wording that says the same thing do neither, and a new version would split a profile's history at no change.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: an unmeasured `min_context` is written `"min_context": 1, "x-min_context": "to be measured"`. STEW's
+  schema requires `min_context` as a number of tokens from 1; P2's rule is that no window is guessed. 1 is met by
+  every binding, so nothing is checked for it, and the `x-` member says why; the loader reads the pair as none, as P2's
+  null, and refuses an `x-min_context` with any other value or beside any other number. When a profile's window is
+  measured, the number replaces 1 and the `x-` member goes. Allowing null in STEW is a candidate enhancement proposal.
+  Rationale: STEW's own validator must pass every profile (step 1's gate), and an `x-` member is STEW's place for what
+  the spec does not say yet (spec/declarations.md); it narrows nothing and widens nothing.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: the loader takes only the STEW members Steward enforces. `budgets` holds `reads` only (STEW's
+  `tool_calls`, `wall_seconds` and `output_tokens` are refused by name until Steward enforces them, since STEW says a
+  runtime MUST); `card: every-write`, `success.args` and `requires.structured_output` are refused likewise; STEW's
+  optional `instructions`, `budgets` and `reasoning` are required, because the run uses each.
+  Rationale: a member Steward would accept and not enforce is a promise the run does not keep.
   Date/Author: 2026-11-08, Lane A.
 
 ## Outcomes & Retrospective

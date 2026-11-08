@@ -1,0 +1,44 @@
+# Profile: refuse
+
+M0 (ADR-0018; spec 002's example; ExecPlan 0005): a request a bound refuses. The router's bounds (ADR-0014) answer it
+in words before any plan or model call (steward_workflow.Router._refusal, refusal_profile); this profile is what such
+a run is recorded under, and offers nothing.
+
+`requires` is what a model must offer to wear it (STEW spec/profile.md 7a; ExecPlan 0006 P2): tool calling when it
+offers tools. Its smallest context window is to be measured (the smallest window its cases pass with), not guessed:
+until it is, `x-min_context` says so and `min_context` holds 1, which every binding meets, so nothing is checked for
+it. Its reasoning effort is sent only when the binding offers the knob, so it does not require it.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "profile",
+  "name": "refuse",
+  "version": 1,
+  "for": {
+    "task": "a request a bound refuses: a force-push, a key, the Archive, a change from WhatsApp, the ground while a sitting is open",
+    "capabilities": ["L3", "B3", "L1", "L2", "F4"]
+  },
+  "tools": [],
+  "requires": {
+    "tool_calling": false,
+    "min_context": 1,
+    "x-min_context": "to be measured",
+    "reasoning_effort": false
+  },
+  "instructions": "Say in one sentence that this is refused and why. Offer nothing that does it.",
+  "budgets": {
+    "reads": 0
+  },
+  "reasoning": "low",
+  "gates": {
+    "bounds": ["keys", "archive", "sitting", "whatsapp"],
+    "extra": ["no option that performs the refused act"]
+  },
+  "card": "none",
+  "success": {
+    "check": "refused_in_words"
+  },
+  "summary": "refused: <the act>, <the rule>"
+}
+```

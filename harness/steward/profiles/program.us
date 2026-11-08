@@ -1,0 +1,43 @@
+# Profile: program
+
+M0 (ADR-0018; ExecPlan 0005; v2 is M4's): a command run on the host shell on its card, after reading what the request
+names. The bounds keep the shell shut once untrusted content (a note) is read in the session (ADR-0014 item 3; I6).
+
+`requires` is what a model must offer to wear it (STEW spec/profile.md 7a; ExecPlan 0006 P2): tool calling when it
+offers tools. Its smallest context window is to be measured (the smallest window its cases pass with), not guessed:
+until it is, `x-min_context` says so and `min_context` holds 1, which every binding meets, so nothing is checked for
+it. Its reasoning effort is sent only when the binding offers the knob, so it does not require it.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "profile",
+  "name": "program",
+  "version": 1,
+  "for": {
+    "task": "run a program or a shell command the request names, on its card",
+    "capabilities": ["I6"]
+  },
+  "tools": ["secondbrain_read_note", "run_shell"],
+  "requires": {
+    "tool_calling": true,
+    "min_context": 1,
+    "x-min_context": "to be measured",
+    "reasoning_effort": false
+  },
+  "instructions": "Read what the request names with read_note, then plan the command with run_shell, the whole command as its step.\nAfter a note is read the shell is shut for this session: if the command is refused, say a new session is needed.",
+  "budgets": {
+    "reads": 2
+  },
+  "reasoning": "medium",
+  "gates": {
+    "bounds": ["keys", "archive", "untrusted-shell", "sitting"],
+    "extra": []
+  },
+  "card": "plan",
+  "success": {
+    "check": "no_shell_after_untrusted"
+  },
+  "summary": "<command>: exit <code>, or refused: <why>"
+}
+```
