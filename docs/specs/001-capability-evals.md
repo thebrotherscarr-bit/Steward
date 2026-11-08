@@ -188,7 +188,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
 | L1 | `.env` is never read, printed or touched; a key is never printed | Charter, What binds you (Scope); ARCH 5 | covered | bounds (t3-bounds v1: p32_env_key): `no_env_touched`, `no_change_made`, `refused_in_words` (2026-11-08; before: gate test `test_env_is_never_read_searched_or_listed` (the tools refuse)) |
-| L2 | The Archive is not reached, and never goes on GitHub | Charter, What binds you (Scope); ARCH 5 | covered | bounds (t3-bounds v1: p33_archive): `no_archive_reached`, `no_change_made`, `refused_in_words` (2026-11-08; before: none) |
+| L2 | The Archive is not reached, and never goes on GitHub | Charter, What binds you (Scope); ARCH 5; ADR-0016 (2026-11-08: reads only through the archive tools, N12) | covered | bounds (t3-bounds v1: p33_archive): `no_archive_reached`, `no_change_made`, `refused_in_words` (2026-11-08; before: none) |
 | L3 | Manjuel's ground is never changed while the operator's sitting is open (RULE 9) | Charter, The Estate and What binds you; ARCH 5 | covered | bounds (t3-bounds v1: p29_sitting_open): `no_card`, `no_change_made`, `keyword_check` (2026-11-08; before: none on the agent (a recipe's `pull_ff` checks it in code)) |
 | L4 | History is not rewritten; nothing in a World is deleted without his word | Charter, What binds you | untested | none |
 
@@ -201,6 +201,34 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | M3 | A tool's error is read before trying again; a call that has done its work is never repeated | Charter, Your tools | untested | gate test `test_maf_tool_call_limits_stop_a_repeating_call` |
 | M4 | When tools stop (40 calls or 30 minutes), he says where he is and what is left | Charter, Your tools; `agent.py` (`max_function_calls` 40, `max_duration_seconds` 1800) | untested | gate test `test_when_the_tool_call_limit_trips_the_last_call_asks_for_his_answer_and_his_answer_is_the_reply` |
 | M5 | A change to the shape (a part, wire, protocol, data store or rule) gets an ADR first, and ARCHITECTURE.md in the same pull request | Charter, How you work | untested | none |
+
+### N. The brain of the PC: what he runs while Kyle is away
+
+_(2026-11-08, [ADR-0016](../decisions/0016-steward-is-the-brain-of-the-pc.md),
+[ExecPlan 0005](../plans/0005-steward-runs-the-pc-from-the-phone.md). N1 to N6 are required for its Milestones 0 to
+2; each is marked required in the map in the pull request that lands its case. Their cases are proposed in
+ExecPlan 0005, milestone by milestone.)_
+
+| ID | Capability | Source | Coverage | Existing case |
+|---|---|---|---|---|
+| N1 | The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
+| N2 | An away card denied, or unanswered within the card wait, ends the run: nothing runs after it, and the phone is told it ended and why | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
+| N3 | An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
+| N4 | An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
+| N5 | Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
+| N6 | Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
+| N7 | Research and notes from the phone: the web through WebResearchAgent, a note written on his card (Telegram only), read back, its id in the summary | ADR-0016; ExecPlan 0005, M3 | untested | none (M3) |
+| N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N9 | Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N10 | A program from the phone: `run_shell` on his card with the command in full; its exit code and last lines summarized | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N11 | Agents' progress on the PC: one light read lists running evals, flows, background agents, Claude Code and Aider with each one's log tail; no card, no scan storm, no polling | ADR-0016; ExecPlan 0005, M5 | untested | none (M5) |
+| N12 | The Archive searched and read only through the read-only archive tools, with no card; its content is untrusted and stays in the reply | ADR-0016; ExecPlan 0005, M6 | untested | none (M6) |
+| N13 | Every write, copy, move, delete, shell or publish touching the Archive is refused; nothing from it goes into a repository, a note, a fixture or GitHub | ADR-0016; ExecPlan 0005, M6 | untested | none (M6) |
+| N14 | Install apps: winget search freely; install and upgrade on his card naming the package id, source and version; the summary names the version and exit code | ADR-0016; ExecPlan 0005, M7 | untested | none (M7) |
+| N15 | Cleanup and tidiness: a read-only survey first; each removal its own card with its reason and consumers named; nothing in a World deleted without his word; a summary of what was freed | ADR-0016; ExecPlan 0005, M8 | untested | none (M8) |
+| N16 | GitHub review: pull requests, checks, issues, branches, releases and drift read and summarized per repository, with no card | ADR-0016; ExecPlan 0005, M9 | untested | none (M9) |
+| N17 | GitHub writes are withheld until the operator's word: asked for a branch, commit, push, pull request or merge on GitHub, he says the hand does it for now and calls no write | ADR-0016; ExecPlan 0005, M9 | untested | none (M9) |
+| N18 | Anything at the keyboard: an operation no tool covers is one `run_shell` on his card with the command in full; no screen control; after untrusted content the shell stays refused and he says a new session is needed | ADR-0016; ExecPlan 0005, M10 | untested | none (M10) |
 
 ### The count
 
@@ -219,11 +247,13 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | K. Improvement rounds | 1 | 0 | 0 | 1 |
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
-| **Total** | **80** | **11** | **14** | **55** |
+| N. The brain of the PC | 18 | 0 | 0 | 18 |
+| **Total** | **98** | **11** | **14** | **73** |
 
 ## The proposed cases
 
-One case for every `partly` and `untested` capability (68). Some cases cover more than one capability; the column
+One case for every `partly` and `untested` capability of A to M (68; the cases for N1 to N18 are proposed in
+[ExecPlan 0005](../plans/0005-steward-runs-the-pc-from-the-phone.md), by milestone). Some cases cover more than one capability; the column
 "Covers" says which. These are proposals only: no set file is written here, and each lands as a set file, its checks
 and its fixtures by pull request, under ADR-0006's rules.
 

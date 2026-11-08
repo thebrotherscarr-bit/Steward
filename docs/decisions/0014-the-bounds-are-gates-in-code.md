@@ -1,11 +1,17 @@
 ---
-status: accepted
+status: accepted; superseded in part by [ADR-0016](0016-steward-is-the-brain-of-the-pc.md)
 contact: Kyle
 date: 2026-11-06
 deciders: Kyle
 ---
 
 # The bounds are gates in code: refused at the call, and at the plan
+
+2026-11-08: superseded in part by [ADR-0016](0016-steward-is-the-brain-of-the-pc.md), on the operator's card choice
+"Read-only, no card": for Steward, the Archive is read through dedicated read-only archive tools with no card, so
+item 2 still refuses an Archive path on every other tool, and item 7 refuses a request or plan that writes, copies,
+moves, deletes or publishes anything to or from the Archive, not one that only finds or reads. Everything else here
+stands; the Archive never goes on GitHub.
 
 Accepted on the operator's word of 2026-11-06 ("go" on the safety guards drawn from the T3 bounds baseline). Part 1
 (the calls) landed with this record (Steward #174); part 2 (the request and the plan) in the pull request after it.

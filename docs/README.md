@@ -41,8 +41,9 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0011](decisions/0011-harness-parity-set.md) | The harness parity set: τ-bench retail and airline, Aider Python second | rejected; superseded by 0012 |
 | [0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md) | Steward's bar is our own capability evals (amended 2026-11-05: everything he does lands with its eval case; `evals.py validate` enforces it) | accepted |
 | [0013](decisions/0013-a2ui-pilot-plan-card.md) | A2UI pilot: the plan's approval card as an A2UI surface, sent beside its AG-UI interrupt | accepted (pilot scope) |
-| [0014](decisions/0014-the-bounds-are-gates-in-code.md) | The bounds are gates in code: refused at the call, and at the plan | accepted |
+| [0014](decisions/0014-the-bounds-are-gates-in-code.md) | The bounds are gates in code: refused at the call, and at the plan | accepted; superseded in part by 0016 (the Archive, for Steward) |
 | [0015](decisions/0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
+| [0016](decisions/0016-steward-is-the-brain-of-the-pc.md) | Steward is the brain of the PC: what he runs while Kyle is away | accepted |
 
 ## Specs
 
@@ -62,6 +63,7 @@ ExecPlan here, kept living to [`.agent/PLANS.md`](../.agent/PLANS.md). The index
 | [0002](plans/0002-flows-steward-card-and-automation-save.md) | Let Steward build flows and automations from the Flows shelf, on the operator's card | ADR-0008, ADR-0009 |
 | [0003](plans/0003-ag-ui-step-3.md) | AG-UI step 3: show Steward's workflow steps live in the Agent tab's console and the Phone view | ADR-0003 |
 | [0004](plans/0004-a2ui-pilot-plan-card.md) | A2UI pilot: draw Steward's plan card from an A2UI surface he sends | ADR-0013 |
+| [0005](plans/0005-steward-runs-the-pc-from-the-phone.md) | Steward runs the PC from the phone | ADR-0016 |
 
 Steward's own guides stay beside his code: `harness/steward/README.md` (the harness, step by step) and
 `harness/steward/evals/README.md` (the eval sets).
