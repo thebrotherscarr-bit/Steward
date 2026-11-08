@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-06 (ADRs 0001 to 0015, spec 001, ExecPlans 0001 to 0004).
+- **As of:** 2026-11-08 (ADRs 0001 to 0015, spec 001, ExecPlans 0001 to 0004). _(Was 2026-11-06.)_
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -203,8 +203,10 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
   deterministic case per capability Steward must use, scored by `evaluate_agent` with `LocalEvaluator` (MAF's checks
   and our `@evaluator` functions: a tool called, a card raised and honoured, a rule kept, a file's state); no model
   judge, no long runs. The capabilities, from the Charter, this file and the ADRs, are listed with their coverage in
-  [spec 001](specs/001-capability-evals.md) (75 on 2026-11-05: 6 covered, 14 partly, 55 untested). They are grouped
-  into the dev-path tiers (T0 and T1 met; T2 his own work, T3 Estate operations, T4 GitHub, then T5 to T7), and a
+  [spec 001](specs/001-capability-evals.md) (75 on 2026-11-05: 6 covered, 14 partly, 55 untested; _80 on 2026-11-08:
+  22 covered, 14 partly, 44 untested_). They are grouped
+  into the dev-path tiers (T0 and T1 met, _2026-11-08: T0's small and steps; `direct` never run yet_; T2 his own work,
+  T3 Estate operations, T4 GitHub, then T5 to T7), and a
   tier's bar is all of its cases, twice in a row. Outside sets (BFCL, Aider Python) stay tier `ext`, calibration
   only; the parity set of [ADR-0011](decisions/0011-harness-parity-set.md) was rejected.
 - **Everything he does has an eval** (ADR-0012, amended 2026-11-05: "all modules and skills, any capabilities always
@@ -267,6 +269,13 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 
 ## 6. The build plan ahead
 
+_Now, 2026-11-08:_ built since the list below was written: ADR-0014's bounds as gates in code (Steward #174, #175,
+#180), ADR-0015's judgment in the workflow (Steward #176, #177, #181, #182), the per-case eval transcripts
+(Steward #178), the A2UI pilot's three milestones (Steward #170, Jesster #96, #97; its live acceptance remains), and
+Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Next, in order: the bounds bar (P36 still
+fails alone; then `bounds` 10/10 twice), the first run of each never-run set (`direct`, `cards`, `judgment`, then
+`aider-py`), then item 2 below from Milestone 3.
+
 In order, as of 2026-11-05 evening. Each item is one piece and one pull request at a time, with its wire and, from
 ADR-0012, its eval case. A multi-step item has an ExecPlan in [`plans/`](plans/README.md), which is where its
 progress is kept. _(Rewritten 2026-11-05 evening; the earlier list is in this file's history. Built from it on
@@ -280,7 +289,8 @@ and automations per ADR-0009, Set up as automations, the prompt type removed, BF
    T3 `bounds` (`t3-bounds.yaml` v1: P29, P30, P56, P1, P31, P32, P33, P58, P34, P36) on the `standins` runner. Next:
    its bar, run twice on the operator's word ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md),
    [spec 001](specs/001-capability-evals.md), [ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 1
-   and 2).
+   and 2). _(2026-11-08: run twice, 4/10 at `7b25232` and 7/10 at `2703bcc`; P32 and P58 fixed and passing alone,
+   P36 still failing; the bar, 10/10 twice in a row, is not met.)_
 2. **The remaining cases by risk:** the rest of T3, then T2, then T4 (the rest of spec 001's P1 to P60), and each tier's bar met
    twice in a row on the operator's word ([ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 3 to 6).
    Then the `eval-author` skill; T5 restated now that Neiro is retired; T6 and T7 grow with his reach.
@@ -292,6 +302,7 @@ and automations per ADR-0009, Set up as automations, the prompt type removed, BF
    2026-11-05, Jesster #93 to #95); then the A2UI pilot for the plan's card
    ([ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md), [ExecPlan 0003](plans/0003-ag-ui-step-3.md);
    [ADR-0013](decisions/0013-a2ui-pilot-plan-card.md), [ExecPlan 0004](plans/0004-a2ui-pilot-plan-card.md)).
+   _(2026-11-08: the A2UI pilot is built, milestones 1 to 3; its live acceptance on the operator's builds remains.)_
 5. **Reach widens on each tier's bar:** GitHub for his own repository passes from the hand to Steward after T2; then
    Jesster, Manjuel and Aurora one at a time.
 6. **Held on MAF defects:** FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and Agent Hooks

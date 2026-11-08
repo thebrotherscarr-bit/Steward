@@ -96,7 +96,9 @@ the whole set runs N times, each pass scored and recorded on its own. A gating t
   exactly `plan_step`, `execute_step` and `steps_overall`), or a plant not in `evals.PLANTS`.
 - A case with no RESULT check (only process checks such as plan_is_approval): every case checks the work itself.
 - A case whose `precondition` already passes on its fixture (the plant entered, nothing run): the ask asks for what
-  is there, as the old README ask did before its how-to was taken out of the working copy.
+  is there, as the old README ask did before its how-to was taken out of the working copy. A plans or standins case
+  may name a `precondition` too (2026-11-08), and it is measured the same way; a case that asks for what is there on
+  purpose (t2-judgment's `already_there`) names none.
 - The same set name twice, or one ask in two asks sets.
 - Cases that differ from the fingerprint recorded for the set's version in `baselines.json`.
 - The capability map (`capabilities.yaml`): a case with no `capability`, or one naming an id the map does not list;
@@ -175,9 +177,10 @@ run is one case, about a minute:
 
 ## T2 cards: the plan card's A2UI surface (the plans runner)
 
-`t2-cards.yaml` v1 (ADR-0013, the A2UI pilot; capability A13) holds one case, the operator's acceptance ask "Add a
-docstring to convert_length in harness/steward/working/sample-project-2/units.py.", run by the `plans` runner to its
-plan card, every card denied. `plan_card_surface` checks, with no model, that the workflow sent the card's A2UI v0.9
+`t2-cards.yaml` v2 (ADR-0013, the A2UI pilot; capability A13) holds one case, "Add a function celsius_to_kelvin to
+harness/steward/working/sample-project-2/units.py.", run by the `plans` runner to its plan card, every card denied.
+_(2026-11-08: v1's ask, "Add a docstring to convert_length ...", asked for what `units.py` already had at line 8. v2
+asks for a function it lacks and names its precondition, `celsius_to_kelvin_works`, which validate measures.)_ `plan_card_surface` checks, with no model, that the workflow sent the card's A2UI v0.9
 surface beside it (`plan_card_surface` in `steward_workflow.py`, a custom workflow event of type `a2ui`): on the basic
 catalog, an `approve` and a `deny` Button carrying the card's id, and a Text for every step of the plan. The gate test
 `test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_eval` runs it on a scripted client. A model

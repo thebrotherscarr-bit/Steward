@@ -12,7 +12,18 @@
       "checks": 10,
       "of": 17,
       "from": "v1's baseline, carried",
-      "note": "2026-11-05: v2 widens two subjects only (no check added or removed), so v1's bar of 10 of 17 is kept until a live run re-measures it."
+      "note": "2026-11-05: v2 widens two subjects only (no check added or removed), so v1's bar of 10 of 17 is kept until a live run re-measures it.",
+      "measured": {
+        "checks": 17,
+        "of": 17,
+        "cases": "3 of 3",
+        "runs": [
+          "2026-11-05T15:58:52Z, head 6401b56, in-process",
+          "2026-11-05T16:20:42Z, head a8627e2, ag-ui",
+          "2026-11-07T12:22:16Z, head 2703bcc, in-process"
+        ],
+        "note": "2026-11-08: v2 re-measured live, 17 of 17 checks and 3 of 3 cases on each of its three runs (storage/evals/history.jsonl, steward:1). Recorded here; the gate's bar (checks) stays 10 until the operator raises it."
+      }
     }
   },
   "steps": {
@@ -57,6 +68,9 @@
   "cards": {
     "1": {
       "cases": "0d81306d929d34373df53b9ec5a1b360fd885b7b351f0a198b65df463623d301"
+    },
+    "2": {
+      "cases": "775889a898a386e3b91085e32069ef8129b1317ac1a7cc546e86ed56a8b41ba5"
     }
   },
   "judgment": {

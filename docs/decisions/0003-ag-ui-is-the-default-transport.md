@@ -37,6 +37,13 @@ interrupts. Which transport should every caller (the Agent tab, the phone, autom
 
 Chosen option: "AG-UI by default, Responses as the fallback", because AG-UI passed small 3/3 at `6401b56` and was
 faster on every case, and the fallback keeps a turn working while the AG-UI host is down.
+_(Corrected 2026-11-08 from `storage/evals/history.jsonl`: the AG-UI run that passed small v2 3/3, 17/17 checks, is at
+`a8627e2` (2026-11-05 16:20Z); at `6401b56` small ran in-process (3/3) and over Responses (2/3). AG-UI's run before it,
+at `2681f88` (15:26Z), was 0/3, 3/20. The comparison rule at the time (`evals.py compare-transports`, the README's
+rule: AG-UI matches or beats Responses on every case, with no stream error) printed "Decision: keep AG-UI off by
+default": per case AG-UI was 1/2 against Responses' 1/1, with one stream error a case. Read again 2026-11-08 on the
+same history (no AG-UI run since), it prints the same. The decision above is the operator's word ("use it"), taken
+over that reading; the measured verdict stands at "keep off" until AG-UI runs again.)_
 
 The operator's word, 2026-11-05: "use it" (recorded in Jesster #77).
 

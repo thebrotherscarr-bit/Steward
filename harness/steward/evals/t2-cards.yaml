@@ -4,7 +4,7 @@
 # The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
 name: cards
 tier: T2
-version: 1
+version: 2
 owner: operator
 runner: plans
 split: full
@@ -14,10 +14,15 @@ changes:
     The A2UI pilot's case (ADR-0013, 2026-11-05): the operator's acceptance ask from ExecPlan 0003 and 0004. Its plan
     card must come with the card's A2UI v0.9 surface on the basic catalog, an approve and a deny Button carrying the
     card's id, and a Text for every step of the plan (plan_card_surface, no model).
+  2: >-
+    2026-11-08: v1 asked for a docstring convert_length already has (units.py line 8), so the ask asked for what was
+    there. It now asks for a function units.py lacks, celsius_to_kelvin, and names its precondition
+    (celsius_to_kelvin_works must fail on the fixture), which validate measures. The check is unchanged.
 cases:
   - id: plan_card_a2ui
     capability: [A13]
-    ask: Add a docstring to convert_length in harness/steward/working/sample-project-2/units.py.
-    subject: [convert_length]
+    ask: Add a function celsius_to_kelvin to harness/steward/working/sample-project-2/units.py.
+    subject: [celsius_to_kelvin]
+    precondition: celsius_to_kelvin_works
     max_calls: 8
     checks: [plan_card_surface]
