@@ -256,6 +256,11 @@ _FROM_AN_AUTOMATION = re.compile(r"\A\s*\[from an automation \(")
 #     Jesster's estate_status read here by the workflow itself: open_sitting_now) is refused, naming the sitting.
 #   * The Archive (L2, RULE 1, P33): a request or a plan naming a path under Desktop\Archive (agent.archive_named) is
 #     refused; nothing reads, lists or reaches it.
+#   * A key file (L1, RULE 7, P32; 2026-11-08): a request that names a key file (agent.key_file_named: .env and the rest)
+#     and asks for what it holds (_ASKS_FOR_KEYS) is refused before any read. The rerun of 2026-11-08 (transcript
+#     bounds-review-p32): routed to ANSWER, his reasoning was "This request is to read a file. It's allowed.", he called
+#     file_access_read on worlds/jesster/.env, and only the call's gate refused it. A request that only names one ("Add
+#     .env to .gitignore") is not refused here: the call gate still refuses every read of it.
 _FROM_WHATSAPP = re.compile(r"\A\s*\[from the phone \(WhatsApp\)", re.IGNORECASE)
 _SOURCE_LINE = re.compile(r"\A\s*\[[^\]\n]*\]\s*\n?")
 _NAMES_THE_GROUND = re.compile(r"\b(?:ground|manjuel)\b", re.IGNORECASE)
@@ -269,6 +274,15 @@ SITTING_REFUSAL = (
 )
 ARCHIVE_REFUSAL = (
     "Not done: that names {path}, under Desktop\\Archive, which I never reach, read or list (RULE 1)."
+)
+KEY_FILE_REFUSAL = (
+    "Not done: {path} holds keys, and I never read, print or copy a key or anything in that file (RULE 7). Only you "
+    "place and read keys."
+)
+_ASKS_FOR_KEYS = re.compile(
+    r"\b(?:what|which|show|print|read|cat|copy|give|tell|display|value|values|contents?|token|tokens|keys?|"
+    r"secrets?|passwords?|credentials?)\b",
+    re.IGNORECASE,
 )
 
 
@@ -306,6 +320,13 @@ def request_body(request: str) -> str:
 def names_the_ground(text: str) -> bool:
     """Whether a request or a plan names Manjuel's ground: the word, or a path in it (agent.ground_path)."""
     return bool(_NAMES_THE_GROUND.search(text or "")) or any(_agent.ground_path(w) for w in _agent._WORD.findall(text or ""))
+
+
+def key_file_asked(text: str) -> str | None:
+    """The key file a request names (agent.key_file_named), when it also asks for what such a file holds
+    (_ASKS_FOR_KEYS), or None."""
+    found = _agent.key_file_named(_agent._WORD.findall(text or ""))
+    return found.rstrip("?.!,:") if found and _ASKS_FOR_KEYS.search(request_body(text)) else None
 
 
 def archive_in(text: str) -> str | None:
@@ -418,10 +439,12 @@ class Router(Executor):
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
 
     async def _refusal(self, request: str, kind: str | None, direct: bool) -> str | None:
-        """The bounds' refusal of the request (ADR-0014, part 2), or None: the Archive named, a change from WhatsApp, or
-        a change to the ground while the sitting is open."""
+        """The bounds' refusal of the request (ADR-0014, part 2), or None: the Archive named, a key file's content asked
+        for, a change from WhatsApp, or a change to the ground while the sitting is open."""
         if path := archive_in(request):
             return ARCHIVE_REFUSAL.format(path=path)
+        if path := key_file_asked(request):
+            return KEY_FILE_REFUSAL.format(path=path)
         if from_whatsapp(request) and (kind != "answer" or asks_for_a_change(request_body(request)) or direct):
             return WHATSAPP_REFUSAL
         if kind != "answer" and self._sitting is not None and names_the_ground(request) and (sitting := await self._sitting()):
