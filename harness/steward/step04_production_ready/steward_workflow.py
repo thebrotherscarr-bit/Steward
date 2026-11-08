@@ -85,6 +85,7 @@ from agent_framework import (
     Executor,
     FileAccessProvider,
     FunctionInvocationContext,
+    FunctionTool,
     Message,
     ResponseStream,
     TodoItem,
@@ -1052,7 +1053,7 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         # call to one and later_step_calls answers it in words. The run's list stays the one MAF merges a provider's
         # tools into (a copy of it lost write_memory after the first call); the next call cuts them again.
         later = later_offers(session, step)
-        back = [t for t, n in zip(tools, names) if n in cut and n in later and runs_without_its_card(t, n)]
+        back = [after_approval_answerer(t) for t, n in zip(tools, names) if n in cut and n in later]
         tools[:] = [t for t, n in zip(tools, names) if n not in cut]
         kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
         session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
@@ -1085,7 +1086,7 @@ AFTER_APPROVAL = "That tool runs after your plan is approved: put it in your pla
 
 
 def back_for_the_loop(result: Any, tools: list[Any], back: Sequence[Any]) -> Any:
-    """The model's answer, with the later tools put back in the run's list once it is in (a stream's, when it has been
+    """The model's answer, with the later tools' answerers (after_approval_answerer) put back in the run's list once it is in (a stream's, when it has been
     read: its cleanup hook, which runs before its finalizer and so before MAF's function loop sees the calls)."""
 
     def put_back() -> None:
@@ -1113,11 +1114,18 @@ def later_offers(session: Any, step: str | None) -> frozenset[str]:
     return frozenset(offered(EXECUTE_STEP) - offered(EXPLORE_STEP) - _MECHANICS_TOOLS)
 
 
-def runs_without_its_card(tool: Any, name: str) -> bool:
-    """Whether a call to this tool in plan mode reaches the function middleware with no card: it asks no approval, or
-    it changes things (agent._CHANGES_THINGS), which plan mode passes the card to refuse (agent.plan_mode_gate). A tool
-    that asks its own card otherwise (a skill's script) is not kept in the plan phase's list."""
-    return getattr(tool, "approval_mode", None) != "always_require" or name in _CHANGES_THINGS
+def after_approval_answerer(tool: Any) -> FunctionTool:
+    """A later step's tool as the function loop finds it in EXPLORE: its name and its arguments' schema, no card, and
+    AFTER_APPROVAL for an answer. Not the tool itself: MAF asks the user (a card, or a user-input pause for a
+    declaration-only tool, an eval's stand-in) before any function middleware runs (_tools.py
+    _try_execute_function_calls), so the call must meet a tool that asks nothing and can run nothing (check-later-p36,
+    3119aad: the stand-in's pause ended the run with a ContentError)."""
+    parameters = tool.parameters() if callable(getattr(tool, "parameters", None)) else None
+    return FunctionTool(
+        name=tool.name, description="Runs after the plan is approved.", approval_mode="never_require",
+        input_model=parameters if isinstance(parameters, dict) else {"type": "object", "properties": {}},
+        func=lambda **_: AFTER_APPROVAL,
+    )
 
 
 async def later_step_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
