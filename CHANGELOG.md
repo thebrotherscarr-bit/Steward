@@ -38,6 +38,16 @@ was never merged and has no entry.
 
 ### Added
 
+- ADR-0020, "Portable by design: one installer, one config, the model as a binding, a doctor, and a clean-machine
+  test" (accepted 2026-11-08, on ADR-0019): SecondBrain's release carries Steward and a uv lock, a local model runtime
+  the one outside dependency; one STEW `.us` config written at first run, paths relative to the install folder; the
+  model a binding, suggested by the hardware, `steward:1` the reference binding and ADR-0002's one model per install;
+  a first-run setup and a doctor, each failure one line with its fix, ending in one eval case as proof; optional pieces
+  off by default; the friend test on a clean Windows runner gating the release; STEW samples 01 to 05 after MAF's
+  `python/samples/01-get-started/`. ExecPlan 0006, "Portable install and samples": P1 (the audit's fixes, a placeholder
+  until the audit exists) to P8 (Steward's declarations as STEW `.us`), ordered in `docs/ARCHITECTURE.md` section 6
+  after ExecPlan 0005's M0 and MP, before the rest of M1 to M10. Capabilities O1 to O6 in the map and spec 001
+  (untested, not required).
 - The harness profile mechanism (ADR-0018, specs 002 and 003; ExecPlan 0005, M0's mechanism): profiles as YAML in
   `harness/steward/profiles/`, read and checked by `harness/steward/step04_production_ready/profiles.py`. The workflow's
   router picks one per request (a name the request gives, a profile's pattern, the model only when two patterns match,
