@@ -339,6 +339,21 @@ class ProfilePicked(WorkflowEvent[dict[str, Any]]):
         super().__init__(PROFILE_EVENT, data, executor_id=executor_id)  # type: ignore[arg-type]  # a custom type
 
 
+# The profiles a bounds' refusal runs under (ExecPlan 0005, M0): a GitHub write other than a force-push is the
+# github-review family's (N17: the writes withheld, the reads his); every other refusal (a force-push, a key, the Archive,
+# the sitting, WhatsApp) is the refuse profile's.
+REFUSE_PROFILE = "refuse"
+GITHUB_REVIEW_PROFILE = "github-review"
+_FORCE_PUSH = re.compile(r"\bforce[- ]?push", re.IGNORECASE)
+
+
+def refusal_profile(refusal: str, request: str) -> str:
+    """The profile a refused request runs under: github-review for a withheld GitHub write, refuse for the rest."""
+    if refusal == GITHUB_WRITE_REFUSAL and not _FORCE_PUSH.search(request or ""):
+        return GITHUB_REVIEW_PROFILE
+    return REFUSE_PROFILE
+
+
 def asks_for_a_github_write(request: str) -> bool:
     """Whether the request (its body, past a source line) asks for a GitHub write (_GITHUB_WRITE)."""
     return bool(_GITHUB_WRITE.search(request_body(request or "")))
@@ -478,7 +493,6 @@ class Router(Executor):
         request = next((m.text for m in reversed(messages) if m.role == "user" and (m.text or "").strip()), "")
         # The request, for the plan card and the commit message, whatever later turns of PLAN start from.
         ctx.set_state(_REQUEST_STATE_KEY, request)
-        await self._pick(request, ctx)
         reply = await self._client.get_response(
             [Message(role="system", contents=[Content.from_text(ROUTE_PROMPT)]), Message(role="user", contents=[Content.from_text(request)])],
             options={**self._options, "response_format": Route},
@@ -494,21 +508,32 @@ class Router(Executor):
             kind = "answer"
         elif asks_for_a_change(request) or direct:
             kind = "task"
-        if (refusal := await self._refusal(request, kind, direct)) is not None:
+        refusal = await self._refusal(request, kind, direct)
+        # ADR-0018: the harness profile, picked once the bounds have spoken (a refused request runs under the profile
+        # its refusal belongs to: refusal_profile), and a profile's own extra refusal (profiles.PROFILE_REFUSALS).
+        profile = await self._pick(request, ctx, refusal)
+        if refusal is None and profile is not None:
+            refusal = _profiles.profile_refusal(profile.name, request_body(request))
+        if refusal is not None:
             await ctx.send_message(RoutedRequest(messages=messages, kind=REFUSE_STEP, reason=refusal))
             return
         if kind == "answer":
             messages = [Message(role="system", contents=[Content.from_text(ANSWER_IN_WORDS)]), *messages]
         await ctx.send_message(RoutedRequest(messages=messages, kind=kind))
 
-    async def _pick(self, request: str, ctx: WorkflowContext[Any]) -> Profile | None:
-        """The request's harness profile (ADR-0018 item 2): pick_profile's deterministic pick on the request's body; when
-        two profiles' patterns match, one structured call on his own client chooses between them (an unparsed reply
-        falls back to `general`). The pick is kept in the workflow's state, put on each step's session (on_pick), and
-        named to the caller (ProfilePicked)."""
+    async def _pick(self, request: str, ctx: WorkflowContext[Any], refusal: str | None = None) -> Profile | None:
+        """The request's harness profile (ADR-0018 item 2): a request the bounds refused runs under its refusal's profile
+        (refusal_profile, when profiles/ holds it); otherwise pick_profile's deterministic pick on the request (its
+        source line included, so an automation's turn can be told apart); when two profiles' patterns match, one
+        structured call on his own client chooses between them (an unparsed reply falls back to `general`). The pick is
+        kept in the workflow's state, put on each step's session (on_pick), and named to the caller (ProfilePicked)."""
         if not self._profiles:
             return None
-        profile, how, candidates = pick_profile(request_body(request), self._profiles)
+        if refusal is not None:
+            name = refusal_profile(refusal, request)
+            profile, how, candidates = self._profiles.get(name) or self._profiles[_profiles.GENERAL], "refusal", [name]
+        else:
+            profile, how, candidates = pick_profile(request, self._profiles)
         if profile is None:
             choice = create_model("ProfilePick", profile=(Literal[tuple(candidates)], ...))  # type: ignore[valid-type]
             reply = await self._client.get_response(

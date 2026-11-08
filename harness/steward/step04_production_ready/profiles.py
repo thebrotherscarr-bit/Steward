@@ -46,6 +46,11 @@ _CAPABILITY_ID = re.compile(r"[A-Z]\d+")
 PROFILE_KEY = "steward_profile"
 PROFILE_EVENT = "steward_profile"
 
+# MAF's MemoryContextProvider's tools (_harness/_memory.py before_run), all six.
+MEMORY_TOOLS = frozenset({
+    "list_memory_topics", "read_memory_topic", "write_memory", "delete_memory_topic", "search_memory_transcripts",
+    "consolidate_memories",
+})
 # The MAF harness's own tools, by the names MAF gives them (agent_framework/_harness: FileAccessProvider's constants,
 # _todo.py, _mode.py, _file_memory.py, _background_agents.py; SkillsProvider's load_skill, read_skill_resource and
 # run_skill_script; MemoryContextProvider's four). They are not Steward's own, so capabilities.yaml does not map them
@@ -59,13 +64,32 @@ MAF_HARNESS_TOOLS = frozenset({
     "background_agents_start_task", "background_agents_wait_for_first_completion", "background_agents_get_task_results",
     "background_agents_get_all_tasks", "background_agents_continue_task", "background_agents_clear_completed_task",
     "load_skill", "read_skill_resource", "run_skill_script",
-    "list_memory_topics", "read_memory_topic", "search_memory_transcripts", "write_memory",
+    *MEMORY_TOOLS,
 })
 
 # The router's deterministic patterns, by profile name: a request whose body (past Jesster's source line) matches a
 # profile's pattern picks it. A profile with no pattern is picked only by name (or, for `general`, by default). Each
 # narrow profile adds its pattern here in the pull request that lands it (validate refuses a pattern naming no profile).
-PROFILE_ROUTES: dict[str, re.Pattern[str]] = {}
+PROFILE_ROUTES: dict[str, re.Pattern[str]] = {
+    # MP (N8): a request naming an eval, the evals or an eval tool, or a set with its tag ("Run the bounds set, tag
+    # phone-1", the operator's own example).
+    "eval-runner": re.compile(r"\beval(?:s|_start|_status)?\b|\bset,?\s+tag\s+[\w.-]+", re.IGNORECASE),
+}
+# A profile's extra refusals in code (spec 002's `gates.extra`, held as ADR-0014 holds the bounds): by profile name, a
+# pattern on the request's body and the reply, in words, with no plan and no card.
+PROFILE_REFUSALS: dict[str, tuple[re.Pattern[str], str]] = {
+    "eval-runner": (
+        re.compile(r"\b(?:every|all|each)\b(?:\W+\w+){0,3}?\W+(?:eval|evals|eval sets?|sets)\b|\b(?:evals|sets)\b\W+(?:at once|together)\b", re.IGNORECASE),
+        "Not done: one eval set per request, so I start no run that takes every set. Name the set (and a tag), and I "
+        "will plan that one; the full sets run overnight when you start them.",
+    ),
+}
+
+
+def profile_refusal(name: str, body: str) -> str | None:
+    """The profile's own refusal of a request (PROFILE_REFUSALS), or None."""
+    refusal = PROFILE_REFUSALS.get(name)
+    return refusal[1] if refusal is not None and refusal[0].search(body or "") else None
 
 
 class ProfileError(ValueError):
@@ -111,6 +135,21 @@ class Profile:
         """The PROFILE_EVENT's data: the pick, how it was made, and its success check and summary for the phone."""
         return {"profile": self.ref, "name": self.name, "version": self.version, "picked_by": how,
                 "success": self.success, "summary": self.summary}
+
+
+def allowed_tools(session: Any) -> frozenset[str] | None:
+    """The picked profile's allow-list on a session (PROFILE_KEY), or None when it has no profile."""
+    profile = (getattr(session, "state", None) or {}).get(PROFILE_KEY) if session is not None else None
+    return frozenset(profile.get("tools") or []) if isinstance(profile, dict) else None
+
+
+def without_lines_naming(text: str, names: Iterable[str]) -> str:
+    """The text without its lines naming any of these tools (each by its whole name)."""
+    names = list(names)
+    if not names:
+        return text
+    named = re.compile("|".join(rf"(?<![\w]){re.escape(n)}(?![\w])" for n in names))
+    return "\n".join(line for line in text.split("\n") if not named.search(line))
 
 
 def card_line(view: Mapping[str, Any]) -> str:
@@ -261,6 +300,7 @@ def profile_problems(
     capability_ids: Iterable[str],
     checks: Iterable[str],
     routes: Mapping[str, re.Pattern[str]] | None = None,
+    refusals: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """The profiles against the eval cases and Steward's tools (spec 002, spec 003): the problems, one per line.
 
@@ -274,6 +314,7 @@ def profile_problems(
     capability_ids = set(capability_ids)
     checks = set(checks)
     routes = PROFILE_ROUTES if routes is None else routes
+    refusals = PROFILE_REFUSALS if refusals is None else refusals
     cases = list(cases)
     problems: list[str] = []
     for name, profile in profiles.items():
@@ -298,4 +339,5 @@ def profile_problems(
         elif profile_name not in profiles:
             problems.append(f"{set_file}: case {case_id!r} names the profile {profile_name!r}, which profiles/ does not hold")
     problems += [f"profiles.PROFILE_ROUTES: a route names {name!r}, which profiles/ does not hold" for name in routes if name not in profiles]
+    problems += [f"profiles.PROFILE_REFUSALS: a refusal names {name!r}, which profiles/ does not hold" for name in refusals if name not in profiles]
     return problems

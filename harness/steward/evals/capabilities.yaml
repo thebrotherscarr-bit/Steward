@@ -445,6 +445,7 @@ capabilities:
     title: "Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone"
     source: "ADR-0016; ExecPlan 0005 MP (ADR-0018)"
     tier: T3
+    required: true
   - id: N9  # profile: flow-runner (ADR-0018)
     title: "Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone"
     source: "ADR-0016; ExecPlan 0005 M4"

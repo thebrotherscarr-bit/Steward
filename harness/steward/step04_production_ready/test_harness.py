@@ -8688,7 +8688,7 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6", "N1", "N2", "N3", "N4"}, sorted(required)  # N1 to N4: t3-away v1
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6", "N1", "N2", "N3", "N4", "N8"}, sorted(required)  # N1 to N4: t3-away v1; N8: t3-eval-runner v1
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() if not c.withheld for t in c.tools} == evals.steward_tool_names()
@@ -9555,7 +9555,7 @@ def test_the_profiles_load_and_validate_refuses_what_specs_002_and_003_refuse(tm
     def problems(profile: Any, case_list: Any = None, routes: Any = None) -> list[str]:
         return profiles.profile_problems(
             {"general": general, profile.name: profile}, cases if case_list is None else case_list,
-            wf.steward_tool_names(), {"atlas_git_push"}, capability_ids, evals.KNOWN_CHECKS, routes=routes or {},
+            wf.steward_tool_names(), {"atlas_git_push"}, capability_ids, evals.KNOWN_CHECKS, routes=routes or {}, refusals={},
         )
 
     assert problems(_narrow_profile()) == []
@@ -9704,7 +9704,7 @@ def test_a_profile_is_picked_shown_on_the_plan_card_and_applied_at_each_step(mon
 
 def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -> None:
     """spec 003: the run records the profile picked (the transcript's header and the history's case line), and a case
-    passes only when the profile picked is the profile it names: T0 direct on a scripted client passes under general,
+    passes only when the profile picked is the profile it names: T0 direct on a scripted client passes under eval-runner,
     and fails run_completed, naming both, when the router picks another profile for it."""
     import json
     import re
@@ -9726,8 +9726,8 @@ def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -
         return code, line, head
 
     code, line, head = run()
-    assert code == 0 and line["cases"][0]["profile"] == "general" and line["cases"][0]["profile_picked"] == ["general@1"], line
-    assert (head["profile"], head["profile_picked"]) == ("general", ["general@1"]), head
+    assert code == 0 and line["cases"][0]["profile"] == "eval-runner" and line["cases"][0]["profile_picked"] == ["eval-runner@1"], line
+    assert (head["profile"], head["profile_picked"]) == ("eval-runner", ["eval-runner@1"]), head
 
     other = _narrow_profile(name="other", version=1, tools=("secondbrain_eval_status",))
     general = profile_files.load_profiles()["general"]
@@ -9736,7 +9736,7 @@ def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -
     code, line, _ = run()
     assert code == 1 and line["cases"][0]["profile_picked"] == ["other@1"], line
     reasons = [c["reason"] for c in line["cases"][0]["failed_checks"] if c["name"] == "run_completed"]
-    assert reasons == ["The router picked the profile other@1; the case names general."], line
+    assert reasons == ["The router picked the profile other@1; the case names eval-runner."], line
 
 
 def test_a_steps_instructions_name_no_tool_it_does_not_offer(monkeypatch: Any) -> None:
@@ -9799,6 +9799,40 @@ def test_a_steps_instructions_name_no_tool_it_does_not_offer(monkeypatch: Any) -
     narrow = _narrow_profile(instructions="Call eval_start, then read eval_status once.")
     problems = profile_files.profile_problems(
         {"general": found["general"], "narrow": narrow}, [("t.yaml", "n", "narrow", ("C6",)), *(("t.yaml", f"g{n}", "general", (c,)) for n, c in enumerate(found["general"].capabilities))],
-        wf.steward_tool_names(), set(), {"C6", *found["general"].capabilities}, ["plan_reached_directly", "run_completed"], routes={},
+        wf.steward_tool_names(), set(), {"C6", *found["general"].capabilities}, ["plan_reached_directly", "run_completed"], routes={}, refusals={},
     )
     assert problems == ["profiles/narrow.yaml: its instructions name secondbrain_eval_start, which it does not offer (tools)"], problems
+
+
+def test_the_eval_runner_profile_is_picked_for_eval_asks_and_its_set_passes_on_a_scripted_client() -> None:
+    """ExecPlan 0005, Operation MP (N8): the router picks eval-runner for an eval ask (T0 direct's, and the operator's
+    own "Run the bounds set, tag phone-1") and general for a code fix; its extra refusal (one set per request) is in
+    code. T3 eval-runner on a scripted client: "What does eval_status say for phone-1?" is answered from one
+    eval_status read, offered only the profile's tools, at low reasoning, with no card; "Run every eval set now." is
+    refused in words before any plan, nothing started. With the route unplugged, the asks run under general and the
+    cases fail run_completed (the profile picked is not the one they name)."""
+    import json
+
+    import evals
+    import profiles as profile_files
+
+    found = profile_files.load_profiles()
+    for ask in (evals.EVAL_SETS["direct"].cases[0].ask, "Run the bounds set, tag phone-1", "How did the evals do?"):
+        assert profile_files.pick_profile(ask, found)[:2] == (found["eval-runner"], "pattern"), ask
+    assert profile_files.pick_profile(evals.EVAL_SETS["small"].case("readme").ask, found)[0].name == "general"
+    assert profile_files.profile_refusal("eval-runner", "Run every eval set now.")
+    assert profile_files.profile_refusal("eval-runner", "Run the bounds set, tag phone-1") is None
+
+    eval_set = evals.EVAL_SETS["eval-runner"]
+    status = Content.from_function_call(call_id="e1", name="secondbrain_eval_status", arguments={"tag": "phone-1"})
+    said = "bounds phone-1: 7/10 passed; failed: p31_automation_unanswered, p34_untrusted_shell, p58_door_writes_withheld."
+    client = _NamingClient([status, said])
+    code = asyncio.run(evals.standins_main(eval_set, client=client, enable_shell=False))
+    line = json.loads(evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()[-1])
+    assert code == 0 and (line["passed"], line["total"]) == (2, 2), line
+    assert [c["profile_picked"] for c in line["cases"]] == [["eval-runner@1"], ["eval-runner@1"]], line
+    allowed = set(found["eval-runner"].tools)
+    assert client.offered and all(o <= allowed for o in client.offered), client.offered
+    assert "secondbrain_eval_status" in client.offered[0]
+    assert client.calls[0]["options"].get("think") == "low", "eval-runner's reasoning, low"
+    assert len(client.calls) == 2, "one read and its answer; the refusal makes no model call of his"
