@@ -298,26 +298,48 @@ its capabilities are N1 to N18 in [spec 001](specs/001-capability-evals.md). _(R
 2026-11-05 evening is in this file's history. Built from it by 2026-11-08: ADR-0014's bounds as gates in code (Steward #174, #175, #180), ADR-0015's judgment in the workflow (Steward #176, #177, #181, #182), the per-case eval transcripts (Steward #178), the A2UI pilot's three milestones (Steward #170, Jesster #96, #97; its live acceptance remains), and Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Its items 1 and 2, the capability evals, are M0 and the cases of each
 milestone below; item 3, ExecPlan 0002 (Steward's flow card and `automation_save`), stays open and is taken up where M4 needs it; item 5 is M9's rule; items 4 and 7 are under "Not now".)_
 
-0. **M0, the trust bar:** T3 `bounds` 10 of 10 twice in a row ([ExecPlan 0001](plans/0001-capability-evals-build.md),
-   Milestone 2; in progress: 2026-11-08, run twice, 4/10 at `7b25232` and 7/10 at `2703bcc`; P36 failed alone at
-   `bd1bb13`, fixed again in Steward #183, not rerun). Then the first run of each never-run set (`direct`, `cards`,
-   `judgment`, then `aider-py`), and the rest of spec 001's cases by risk (ExecPlan 0001, Milestones 3 to 6).
+**Harness profiles** ([ADR-0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md), 2026-11-08): every
+milestone is an operation ([spec 004](specs/004-operation.md)): one harness profile
+([spec 002](specs/002-harness-profile.md), `harness/steward/profiles/<name>.yaml`: the task's tool allow-list, up to 8
+lines of instructions, read budget, gpt-oss reasoning effort, gates, card, success check, phone summary), its tools,
+3 to 5 cases naming it ([spec 003](specs/003-eval-case-names-its-profile.md)) and a phone test. The router picks the
+profile; the plan card shows plan and profile together. Variants are compared on the profile's cases and the winner
+promoted; automatic variant search comes last. The plan is frozen: changed only on a run's evidence. Lanes: A,
+Steward's harness core (in order); B, Jesster's tools and the phone loop; C, the plan keeper; the lead reviews,
+installs and runs one eval at a time. The order: M9a, M0, MP, then M1 to M10.
+
+- **M9a, GitHub write tools out of his build (now):** `atlas_git_branch`, `_commit`, `_push`, `_pr` removed; the
+  Charter's Door lines changed in the same step; `t3-bounds.yaml` v2 (P58 a refusal, N17). Lane A.
+
+0. **M0, the trust bar, through profiles:** the bounds profile set (`refuse`, `code-fix`, `away-end`, `program`,
+   `estate-keeper`, `github-review`) and the router's pick; T3 `bounds` 10 of 10 twice in a row
+   ([ExecPlan 0001](plans/0001-capability-evals-build.md), Milestone 2; run three times by 2026-11-08: 4/10 at
+   `7b25232`, 7/10 at `2703bcc`, 6/10 at `f773d67`, each fix holding its case while he wandered elsewhere). Then the
+   first run of each never-run set (`direct`, `cards`, `judgment`, then `aider-py`), and the rest of spec 001's cases
+   by risk (ExecPlan 0001, Milestones 3 to 6).
+- **MP, the profile mechanism, with `eval-runner` as profile 1** (N8): plan and profile on one card, `name@version`
+   recorded, validate reading `profile:`, variants compared and promoted.
 1. **M1, the away loop and phone summaries** (N1 to N4): a Telegram card answered on the phone continues the run and
    the result comes back to the phone, Deny and no answer included; no run ends silently; per-run limits. Proved on a
-   live host.
+   live host. Profile `away-loop`.
 2. **M2, keep the Estate running** (N5, N6): a health flow on schedule (`estate_status`, notify the phone; a restart
    asked from the phone on his card); host-crash recovery with durable checkpoints on the AG-UI host.
+   Profile `estate-keeper` v2.
 3. **M3, research and notes from the phone** (N7): WebResearchAgent, then `write_note` on his card, read back.
-4. **M4, evals, flows and programs from the phone** (N8 to N10): `eval_start`, the Jesster flow tools, a program by
-   `run_shell` on his card; each summarized to the phone.
+   Profile `research-note`.
+4. **M4, flows and programs from the phone** (N9, N10; N8 is MP's): the Jesster flow tools, a program by `run_shell`
+   on his card; each summarized to the phone. Profiles `flow-runner`, `program` v2.
 5. **M5, agents' progress on the PC** (N11): one light read of running evals, flows, agents, Claude Code and Aider and
-   their logs.
+   their logs. Profile `pc-progress`.
 6. **M6, Archive search and read** (N12, N13): read-only archive tools, no card; every write, copy or publish refused.
-7. **M7, install apps** (N14): winget search; install and upgrade on his card.
+   Profile `archive-reader`.
+7. **M7, install apps** (N14): winget search; install and upgrade on his card. Profile `app-installer`.
 8. **M8, cleanup and tidiness** (N15): a read-only survey, proposals with reasons, each removal on its card.
+   Profile `tidy`.
 9. **M9, GitHub review** (N16, N17): reads and T4 read cases; GitHub writes withheld until the operator's word after
-   he passes reliably (until then the hand does them, the ground's CLAUDE.md RULE 12 exception).
-10. **M10, anything at the keyboard** (N18): the host shell on his card; screen control deferred.
+   he passes reliably (until then the hand does them, the ground's CLAUDE.md RULE 12 exception); his write tools are out of his build from M9a.
+   Profile `github-review` v2.
+10. **M10, anything at the keyboard** (N18): the host shell on his card; screen control deferred. Profile `keyboard`.
 
 Standing, beside the milestones: **held on MAF defects**, FIDES enforcement (behind `STEWARD_FIDES_ENFORCE`, off) and
 Agent Hooks ([ADR-0001](decisions/0001-steward-is-a-maf-harness-agent.md), items 8 and 9), checked against each MAF
