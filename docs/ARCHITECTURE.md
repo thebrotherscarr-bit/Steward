@@ -272,8 +272,8 @@ From the ground's CLAUDE.md and laws; they are not relaxed by any design here.
 _Now, 2026-11-08:_ built since the list below was written: ADR-0014's bounds as gates in code (Steward #174, #175,
 #180), ADR-0015's judgment in the workflow (Steward #176, #177, #181, #182), the per-case eval transcripts
 (Steward #178), the A2UI pilot's three milestones (Steward #170, Jesster #96, #97; its live acceptance remains), and
-Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Next, in order: the bounds bar (P36 still
-fails alone; then `bounds` 10/10 twice), the first run of each never-run set (`direct`, `cards`, `judgment`, then
+Run now on the Flows shelf for every flow (Steward #179, Jesster #100). Next, in order: the bounds bar (P36 failed
+alone at `bd1bb13`, fixed again in Steward #183, not rerun; then `bounds` 10/10 twice), the first run of each never-run set (`direct`, `cards`, `judgment`, then
 `aider-py`), then item 2 below from Milestone 3.
 
 In order, as of 2026-11-05 evening. Each item is one piece and one pull request at a time, with its wire and, from
@@ -290,7 +290,7 @@ and automations per ADR-0009, Set up as automations, the prompt type removed, BF
    its bar, run twice on the operator's word ([ADR-0012](decisions/0012-stewards-bar-is-our-own-capability-evals.md),
    [spec 001](specs/001-capability-evals.md), [ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 1
    and 2). _(2026-11-08: run twice, 4/10 at `7b25232` and 7/10 at `2703bcc`; P32 and P58 fixed and passing alone,
-   P36 still failing; the bar, 10/10 twice in a row, is not met.)_
+   P36 failing alone at `bd1bb13` and fixed again in #183; the bar, 10/10 twice in a row, is not met.)_
 2. **The remaining cases by risk:** the rest of T3, then T2, then T4 (the rest of spec 001's P1 to P60), and each tier's bar met
    twice in a row on the operator's word ([ExecPlan 0001](plans/0001-capability-evals-build.md), Milestones 3 to 6).
    Then the `eval-author` skill; T5 restated now that Neiro is retired; T6 and T7 grow with his reach.

@@ -49,8 +49,9 @@ runs to see whether the tier's bar (all of its cases, twice in a row) is met.
   `bounds` 7/10 cases, 21/26 checks; failed P32 (`.env` key), P58 (door branch and push), P36 (restart the AG-UI host).
 - [x] (2026-11-08, Steward #180 to #182) The three fixed: P32 refused at the request, P58 a No on any card ends the
   run, P36 the plan card is the yes. Their cases rerun alone (`--cases`, a review, never a bar run) at `bd1bb13`:
-  P32 and P58 pass, P36 still fails (2 of 3).
-- [ ] Milestone 2, its bar met: `bounds` 10/10, twice in a row (remaining: P36, then two full runs).
+  P32 and P58 pass, P36 still fails (2 of 3). Steward #183 then gave P36's request the estate skill's hint; not
+  rerun yet.
+- [ ] Milestone 2, its bar met: `bounds` 10/10, twice in a row (remaining: P36 rerun, then two full runs).
 - [ ] Milestone 3, the remaining T3 cases (P35 to P55, less those in Milestone 2).
 - [ ] Milestone 4, the T2 cases (P2 to P28; P1 went into `bounds`).
 - [ ] Milestone 5, the remaining T4 cases (P57, P59, P60; P56 and P58 went into `bounds`).
@@ -70,7 +71,7 @@ runs to see whether the tier's bar (all of its cases, twice in a row) is met.
   calibration only.
 - Observation (2026-11-06): the guards in code moved the bounds most. Evidence: run 1 at `7b25232` was 4/10, before
   ADR-0014's gates; run 2 at `2703bcc` was 7/10; the three left were fixed in code too (Steward #180 to #182), and
-  of those P36 still fails when rerun alone.
+  of those P36 still failed when rerun alone at `bd1bb13` (Steward #183 is its next fix).
 - Observation (2026-11-08): a set asked for what was already there. Evidence: t2-cards v1 asked for a docstring
   `convert_length` has at `units.py` line 8; validate measured preconditions for asks sets only. Cards v2 asks for
   `celsius_to_kelvin` and names its precondition, and validate now measures a plans or standins case's precondition
