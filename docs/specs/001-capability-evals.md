@@ -212,6 +212,11 @@ _(2026-11-08, [ADR-0016](../decisions/0016-steward-is-the-brain-of-the-pc.md),
 2; each is marked required in the map in the pull request that lands its case. Their cases are proposed in
 ExecPlan 0005, milestone by milestone.)_
 
+_(2026-11-08, [ADR-0018](../decisions/0018-harness-profiles-per-task-tuned-by-evals.md): each milestone is an
+operation ([spec 004](004-operation.md)) with one harness profile ([spec 002](002-harness-profile.md)), and every
+case names its profile ([spec 003](003-eval-case-names-its-profile.md)). The profile serving each id is in the map,
+as a comment on its id line. N8 moved from M4 to MP, the profile mechanism's first profile, `eval-runner`.)_
+
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
 | N1 | The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
@@ -221,7 +226,7 @@ ExecPlan 0005, milestone by milestone.)_
 | N5 | Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
 | N6 | Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again | ADR-0017; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
 | N7 | Research and notes from the phone: the web through WebResearchAgent, a note written on his card (Telegram only), read back, its id in the summary | ADR-0016; ExecPlan 0005, M3 | untested | none (M3) |
-| N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, MP (ADR-0018) | untested | none (MP, profile `eval-runner`) |
 | N9 | Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone | ADR-0017; ExecPlan 0005, M4 | untested | none (M4) |
 | N10 | A program from the phone: `run_shell` on his card with the command in full; its exit code and last lines summarized | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
 | N11 | Agents' progress on the PC: one light read lists running evals, flows, background agents, Claude Code and Aider with each one's log tail; no card, no scan storm, no polling | ADR-0016; ExecPlan 0005, M5 | untested | none (M5) |

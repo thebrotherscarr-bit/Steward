@@ -13,6 +13,10 @@ Accepted on the operator's word of 2026-11-08 (quoted below). This record supers
 [ExecPlan 0005](../plans/0005-steward-runs-the-pc-from-the-phone.md); its capabilities are N1 to N18 in
 [spec 001](../specs/001-capability-evals.md).
 
+2026-11-08: amended in part by [ADR-0018](0018-harness-profiles-per-task-tuned-by-evals.md): each operation of the
+table below is a harness profile ([spec 004](../specs/004-operation.md)), and Steward's GitHub write tools come out
+of his build now (ExecPlan 0005, M9a). Everything else here stands.
+
 ## Context and Problem Statement
 
 The operator, 2026-11-08: "We are building a harness for agents to get them to properly conduct my PC operations
