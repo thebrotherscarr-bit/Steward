@@ -112,7 +112,8 @@ Steward is not trusted with any operation away from the PC until both hold, in t
   not left on the console.
 - **Per-run limits (N4).** MAF's tool-call limits stay as set (`max_function_calls` 40, `max_duration_seconds` 1800 per
   agent run); an unattended run also has a whole-run wall clock and a card wait, after which it ends and says where
-  it is and what is left.
+  it is and what is left. _(2026-11-08: the card wait is 30 minutes, the operator's ruling: "30 minutes". One value in
+  Jesster, `electron/agent/cardwait.cjs`, Jesster #105; ExecPlan 0005's Decision Log.)_
 - **Host-crash recovery (N5).** A run whose host dies (or is restarted by Jesster) is resumed from a durable checkpoint
   with its pending card raised again, or reported to the phone as ended. The AG-UI host's checkpoints move from
   `InMemoryCheckpointStorage` to MAF's file checkpoint storage for this.
