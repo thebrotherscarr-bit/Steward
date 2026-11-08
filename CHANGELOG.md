@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Added
 
+- T3 `away` (`harness/steward/evals/t3-away.yaml` v1, standins, ExecPlan 0005 M1): telegram_approved (N1, N3: a
+  change from Telegram planned first, made once approved, named in the reply), telegram_denied (N2, N4: a denied or
+  unanswered card ends the run, nothing after it) and telegram_read_fails (N3: a failed read named in the reply, no
+  card, no change). N1 to N4 are required in the capability map. Jesster's side, the summary to the phone for Yes, No,
+  no answer and a failure, is Jesster #104 (`away.test.cjs`). ExecPlan 0005's Progress, Surprises and Decision Log
+  updated.
 - ADR-0018, "Harness profiles per task, tuned by evals" (accepted 2026-11-08): a harness profile per task family is
   the unit of harnessing; Steward picks the profile and shows plan and profile on one card; runs are traced and scored
   by the profile's cases; variants are compared on the same cases and the winner promoted, automatic search last. The

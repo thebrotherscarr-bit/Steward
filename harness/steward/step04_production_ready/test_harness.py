@@ -8678,7 +8678,7 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6"}, sorted(required)
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "F2", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6", "N1", "N2", "N3", "N4"}, sorted(required)  # N1 to N4: t3-away v1
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() for t in c.tools} == evals.steward_tool_names()
