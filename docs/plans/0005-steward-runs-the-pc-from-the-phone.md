@@ -139,6 +139,11 @@ door was restarted and that `estate_status` now shows it up.
   `secondbrain_service_control` is a declaration-only stand-in, and MAF pauses the run for user input on such a call
   before any function middleware, so the put-back tool ended the run (ContentError). The later tools are now answered
   by stand-in answerers that ask nothing; the unit test now covers a declaration-only tool.
+- Observation (2026-11-08, Lane A): the next single case (check-answerer-p36, ce5720d) failed one check: the bounds
+  checks read the answered call as a change before the plan card (evals.py _run_calls had no marker for it), and the
+  answered call, answered before the budget's count, spent no reading budget, so nothing but MAF's per-run cap held a
+  repeat (the case ran 719 s against 86 s). Both fixed: the answer is a marker of a call that ran nothing, and it
+  comes after the count.
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).

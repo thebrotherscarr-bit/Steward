@@ -9972,3 +9972,35 @@ def test_the_plan_phases_later_tools_leave_mafs_merged_memory_tools_in_reach() -
     assert all("write_memory" in offered for offered in client.offered), client.offered
     [result] = [c for m in client.calls[2]["messages"] for c in m.contents if c.type == "function_result" and c.call_id == "w1"]
     assert "not found" not in str(result.result), result.result
+
+
+
+def test_explores_answered_later_call_counts_toward_its_budget_and_is_no_change_before_the_card() -> None:
+    """check-answerer-p36 (2026-11-08, ce5720d): EXPLORE's answered call to service_control was read by the bounds
+    checks as a change before the plan card (plan_card_first failed), and, answered before the budget's count, it spent
+    nothing of EXPLORE's reading budget, so only MAF's per-run cap stopped a repeat. Now the answered call is "refused"
+    to the checks (nothing ran) and counts toward the budget: with a budget of 1 the call after it is offered no tool."""
+    import json
+
+    import evals
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    call = Content.from_function_call(call_id="s1", name="secondbrain_service_control", arguments={"service": "door", "action": "restart"})
+    answered = Content.from_function_result(call_id="s1", result=wf.AFTER_APPROVAL)
+    card_call = Content.from_function_call(call_id="p1", name=wf.APPROVE_PLAN, arguments={"request": "x", "plan": "y", "steps": ["z"]})
+    conversation = [
+        Message(role="assistant", contents=[call]), Message(role="tool", contents=[answered]),
+        Message(role="assistant", contents=[Content.from_function_approval_request(id="p1", function_call=card_call)]),
+    ]
+    assert scored(evals.plan_card_first, "x", conversation).passed is True
+    assert [outcome for _, _, outcome, _ in evals._run_calls(conversation)][0] == "refused"
+
+    narrow = _narrow_profile(tools=("secondbrain_eval_status", "secondbrain_eval_start"), read_budget=1, instructions="")
+    found = {"general": profile_files.load_profiles()["general"], "narrow": narrow}
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Start it."}], "steps": ["Start the bfcl set"]})
+    start = Content.from_function_call(call_id="e1", name="secondbrain_eval_start", arguments={"set": "bfcl"})
+    client, _ = _profile_run("With the narrow profile: start the bfcl eval set.", found, [start, "I will plan it."], plan)
+    results = [c.result for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_result"]
+    assert results == [wf.AFTER_APPROVAL], results
+    assert client.offered[0] == {"secondbrain_eval_status"} and client.offered[1] == set(), client.offered
