@@ -40,6 +40,9 @@ was never merged and has no entry.
   effort), validate checks it, and the router refuses a profile the binding does not fit in one line naming what is
   missing. The reasoning option is sent only when the binding provides it. A standins case may run under its own
   `binding:`; T3 `install` v1 holds O1 and O2's cases (both required; not run yet). Restart required.
+- ExecPlan 0006 P8 step 1 (ADR-0019 migration step 1): the gate's new `stew` step checks out STEW at a pinned
+  commit (`aec5527`) and runs its `tools/validate.py` over every tracked `.us` file (`git ls-files "*.us"`), so main
+  cannot take an invalid declaration. CI only; no restart.
 
 ### Fixed
 

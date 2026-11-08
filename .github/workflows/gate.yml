@@ -28,6 +28,11 @@
 #            dependency below them and the build backend pinned with its hashes), then the
 #            project itself with no deps.
 #
+# STAGE 3 (ExecPlan 0006 P8, ADR-0019 migration step 1):
+#   stew     every tracked .us file (git ls-files "*.us": binding.us, the eval bindings, and each one added later)
+#            passes STEW's own validator, tools/validate.py, checked out from github.com/thebrotherscarr-bit/STEW at the
+#            commit pinned in the "stew checkout" step's ref. A bump of the pin is a change of its own, made here by hand.
+#
 # Each later stage is one more step here. Anything that needs Steward's model
 # (gpt-oss:20b) runs on this PC: GitHub's runners have no GPU.
 name: gate
@@ -64,6 +69,20 @@ jobs:
           cache-dependency-path: requirements.lock
       - name: compile
         run: python -m compileall -q .
+      - name: stew checkout
+        # STEW at a pinned commit (main, 2026-11-08: "Samples 01 to 05"), beside the repository, untracked by it.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: thebrotherscarr-bit/STEW
+          ref: aec5527ebe25c366057674b558e31e6a5e284881
+          path: .stew
+          persist-credentials: false
+      - name: stew
+        # Standard library only, so it runs before the install. No .us file tracked is itself a failure.
+        run: |
+          git ls-files -z "*.us" > "$RUNNER_TEMP/us-files"
+          test -s "$RUNNER_TEMP/us-files" || { echo "FAIL: no tracked .us file"; exit 1; }
+          xargs -0 python .stew/tools/validate.py < "$RUNNER_TEMP/us-files"
       - name: install
         run: |
           python -m pip install --quiet pip==26.3

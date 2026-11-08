@@ -60,7 +60,8 @@ flowchart LR
   WebResearchAgent), file memory, compaction, looping, OpenTelemetry with the HALO JSONL exporter.
 - **The model:** the install's binding, `binding.us` (a STEW `kind: binding` declaration; ExecPlan 0006 P2): model,
   endpoint and options, read once by `harness/steward/install.py` and named nowhere else in his code. Each profile
-  declares `requires`; the router refuses a profile the binding does not fit, naming what is missing.
+  declares `requires`; the router refuses a profile the binding does not fit, naming what is missing. Every tracked
+  `.us` file passes STEW's validator, pinned to a STEW commit, in the gate (`gate.yml`, step `stew`; ExecPlan 0006 P8).
 - **The workflow:** `steward_workflow.py`: plan, the `approve_plan` card, execute (the plan's steps as todos), a
   model-free check (pytest), repair (at most 3 attempts), the `git_commit` card, report. Defined once and served by
   every host. A change always ends at the `git_commit` card, a docs change with no test to run too; EXECUTE stops and
