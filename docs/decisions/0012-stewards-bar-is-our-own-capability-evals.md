@@ -20,6 +20,10 @@ deciders: Kyle
 > Steward's that the map does not name, and a map whose ids are not spec 001's. A capability with no case that is
 > not yet required is counted as untested, a warning. The first ten cases (spec 001's first ten) are
 > `t3-bounds.yaml` v1, and their capabilities are required.
+>
+> Amended in part 2026-11-08 by [ADR-0018](0018-harness-profiles-per-task-tuned-by-evals.md): every eval case also
+> names the harness profile it runs under (`profile:`, [spec 003](../specs/003-eval-case-names-its-profile.md)), and a
+> profile's cases are its eval. Everything else here stands.
 
 ## Context and Problem Statement
 

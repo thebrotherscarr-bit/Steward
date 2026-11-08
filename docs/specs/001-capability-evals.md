@@ -212,16 +212,21 @@ _(2026-11-08, [ADR-0016](../decisions/0016-steward-is-the-brain-of-the-pc.md),
 2; each is marked required in the map in the pull request that lands its case. Their cases are proposed in
 ExecPlan 0005, milestone by milestone.)_
 
+_(2026-11-08, [ADR-0018](../decisions/0018-harness-profiles-per-task-tuned-by-evals.md): each milestone is an
+operation ([spec 004](004-operation.md)) with one harness profile ([spec 002](002-harness-profile.md)), and every
+case names its profile ([spec 003](003-eval-case-names-its-profile.md)). The profile serving each id is in the map,
+as a comment on its id line. N8 moved from M4 to MP, the profile mechanism's first profile, `eval-runner`.)_
+
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
-| N1 | The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
-| N2 | An away card denied, or unanswered within the card wait, ends the run: nothing runs after it, and the phone is told it ended and why | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
-| N3 | An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
-| N4 | An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left | ADR-0016; ExecPlan 0005, M1 | untested | none; required once its case lands (M1) |
+| N1 | The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone | ADR-0016; ExecPlan 0005, M1 | covered | `away` (t3-away v1: telegram_approved); Jesster `electron/agent/away.test.cjs` (Yes: the card on the phone resumes the same run from its checkpoint); required |
+| N2 | An away card denied, or unanswered within the card wait, ends the run: nothing runs after it, and the phone is told it ended and why | ADR-0016; ExecPlan 0005, M1 | covered | `away` (t3-away v1: telegram_denied); Jesster `away.test.cjs` (No, no answer); required |
+| N3 | An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included | ADR-0016; ExecPlan 0005, M1 | covered | `away` (t3-away v1: telegram_approved, telegram_read_fails); Jesster `away.test.cjs` (the summary to the phone, a failure included); required |
+| N4 | An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left | ADR-0016; ExecPlan 0005, M1 | covered | `away` (t3-away v1: telegram_denied, the card wait: no answer is the same No); Jesster `away.test.cjs` (no answer); the tool-call limits' gate test under M4; required |
 | N5 | Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost | ADR-0016; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
 | N6 | Keep the Estate running: the health flow reads `estate_status` on schedule and notifies the phone of a down part; a restart is asked from the phone, done on his card with `service_control`, and the status read again | ADR-0017; ExecPlan 0005, M2 | untested | none; required once its case lands (M2) |
 | N7 | Research and notes from the phone: the web through WebResearchAgent, a note written on his card (Telegram only), read back, its id in the summary | ADR-0016; ExecPlan 0005, M3 | untested | none (M3) |
-| N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
+| N8 | Evals from the phone: `eval_start` planned and carded with the set and tag named; `eval_status` read; the result summarized to the phone | ADR-0016; ExecPlan 0005, MP (ADR-0018) | untested | none (MP, profile `eval-runner`) |
 | N9 | Flows from the phone: a saved flow run on his card through Jesster's flow tools; its result per step summarized to the phone | ADR-0017; ExecPlan 0005, M4 | untested | none (M4) |
 | N10 | A program from the phone: `run_shell` on his card with the command in full; its exit code and last lines summarized | ADR-0016; ExecPlan 0005, M4 | untested | none (M4) |
 | N11 | Agents' progress on the PC: one light read lists running evals, flows, background agents, Claude Code and Aider with each one's log tail; no card, no scan storm, no polling | ADR-0016; ExecPlan 0005, M5 | untested | none (M5) |

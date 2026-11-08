@@ -15,6 +15,21 @@ was never merged and has no entry.
 
 ### Added
 
+- T3 `away` (`harness/steward/evals/t3-away.yaml` v1, standins, ExecPlan 0005 M1): telegram_approved (N1, N3: a
+  change from Telegram planned first, made once approved, named in the reply), telegram_denied (N2, N4: a denied or
+  unanswered card ends the run, nothing after it) and telegram_read_fails (N3: a failed read named in the reply, no
+  card, no change). N1 to N4 are required in the capability map. Jesster's side, the summary to the phone for Yes, No,
+  no answer and a failure, is Jesster #104 (`away.test.cjs`). ExecPlan 0005's Progress, Surprises and Decision Log
+  updated.
+- ADR-0018, "Harness profiles per task, tuned by evals" (accepted 2026-11-08): a harness profile per task family is
+  the unit of harnessing; Steward picks the profile and shows plan and profile on one card; runs are traced and scored
+  by the profile's cases; variants are compared on the same cases and the winner promoted, automatic search last. The
+  evidence: T3 `bounds` 4/10, 7/10, 6/10, each fix holding its case while he wandered elsewhere. Three formats as
+  specs: 002 (the profile, `harness/steward/profiles/<name>.yaml`), 003 (a case names its `profile:`), 004 (an
+  operation: one milestone = one profile, its tools, 3 to 5 cases, a phone test). ExecPlan 0005 rewritten in their
+  terms and frozen: M9a (GitHub write tools out of his build), M0 through profiles, MP (`eval-runner`), M1 to M10;
+  lanes recorded. Amends ADR-0012 and ADR-0016 in part; `docs/ARCHITECTURE.md` section 6, spec 001 and the
+  capability map (profile ids as comments until the mechanism lands) updated.
 - The Flows shelf's tools are his (ADR-0017: every Flows-shelf action has a matching tool on Jesster's MCP):
   `secondbrain_saved_flows` and `secondbrain_saved_flow_status` are Estate reads, with no card;
   `secondbrain_saved_flow_run` (the shelf's Run now, on its own path in SecondBrain) is an Estate action like
