@@ -1,0 +1,19 @@
+# M0 (ADR-0018; ExecPlan 0005; v2 is M4's): a command run on the host shell on its card, after reading what the request
+# names. The bounds keep the shell shut once untrusted content (a note) is read in the session (ADR-0014 item 3; I6).
+name: program
+version: 1
+for:
+  task: "run a program or a shell command the request names, on its card"
+  capability: [I6]
+tools: [secondbrain_read_note, run_shell]
+instructions: |
+  Read what the request names with read_note, then plan the command with run_shell, the whole command as its step.
+  After a note is read the shell is shut for this session: if the command is refused, say a new session is needed.
+read_budget: 2
+reasoning: medium
+gates:
+  bounds: [keys, archive, untrusted-shell, sitting]
+  extra: []
+card: yes
+success: no_shell_after_untrusted
+summary: "<command>: exit <code>, or refused: <why>"

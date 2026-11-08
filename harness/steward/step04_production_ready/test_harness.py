@@ -9836,3 +9836,42 @@ def test_the_eval_runner_profile_is_picked_for_eval_asks_and_its_set_passes_on_a
     assert "secondbrain_eval_status" in client.offered[0]
     assert client.calls[0]["options"].get("think") == "low", "eval-runner's reasoning, low"
     assert len(client.calls) == 2, "one read and its answer; the refusal makes no model call of his"
+
+
+def test_each_bounds_case_runs_under_the_m0_profile_it_names() -> None:
+    """ExecPlan 0005, M0 through profiles: each t3-bounds v2 case (its asks unchanged) is run through the workflow on a
+    scripted client, and the router picks the profile it names: refuse for the bounds' refusals (P29 the sitting, P30
+    WhatsApp, P56 a force-push, P32 a key, P33 the Archive), github-review for a withheld GitHub write (P58), code-fix
+    (P1), away-end for an automation's change (P31: answered with no tool at all), program (P34) and estate-keeper
+    (P36). Each case's pick is recorded as name@version (spec 003). With the M0 routes unplugged, the narrow cases run
+    under general: red."""
+    import dataclasses
+
+    import evals
+    import profiles as profile_files
+
+    bounds = evals.EVAL_SETS["bounds"]
+    assert {c.profile for c in bounds.cases} == {"refuse", "github-review", "code-fix", "away-end", "program", "estate-keeper"}
+    found = profile_files.load_profiles()
+    offered: dict[str, list[set[str]]] = {}
+    for case in bounds.cases:
+        client = _NamingClient([])
+        asyncio.run(evals.standins_case_run(case, bounds.name, client=client, enable_shell=False))
+        picked = evals.CASE_PROFILES[case.ask]
+        assert picked and picked[-1] == found[case.profile].ref, (case.id, picked, case.profile)
+        assert evals.profile_mismatch(case.ask) is None, case.id
+        offered[case.id] = client.offered
+    assert offered["p31_automation_unanswered"] and all(not o for o in offered["p31_automation_unanswered"]), "away-end offers nothing"
+    assert all(o <= set(found["estate-keeper"].tools) for o in offered["p36_restart_ag_ui"]), offered["p36_restart_ag_ui"]
+    assert all(o <= set(found["program"].tools) for o in offered["p34_untrusted_shell"]), offered["p34_untrusted_shell"]
+
+    original = dict(profile_files.PROFILE_ROUTES)
+    try:
+        for name in ("code-fix", "program", "estate-keeper", "away-end"):
+            profile_files.PROFILE_ROUTES.pop(name)
+        case = bounds.case("p36_restart_ag_ui")
+        asyncio.run(evals.standins_case_run(dataclasses.replace(case), bounds.name, client=_NamingClient([]), enable_shell=False))
+        assert evals.CASE_PROFILES[case.ask] == ["general@1"] and evals.profile_mismatch(case.ask), "unplugged: general, red"
+    finally:
+        profile_files.PROFILE_ROUTES.clear()
+        profile_files.PROFILE_ROUTES.update(original)

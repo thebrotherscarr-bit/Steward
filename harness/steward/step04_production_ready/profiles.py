@@ -1,7 +1,7 @@
 """Harness profiles (ADR-0018, spec 002): one small YAML file per task family, read when Steward's workflow is built.
 
 A profile names what a task is offered: its tools (an allow-list of exact names; nothing else is offered), up to 8 lines
-of instructions added to the Charter for the task, its reading budget before the plan card, gpt-oss's reasoning effort,
+of instructions added to the Charter for the task, its reading budget before the plan card, the model's reasoning effort,
 the bounds it touches and any extra refusal (the bounds stay on whatever it says, ADR-0014), whether it raises a plan
 card, the deterministic check that says done, and the one-line summary for the phone. The files are
 harness/steward/profiles/<name>.yaml; their fields are spec 002's, and only those.
@@ -10,7 +10,7 @@ The router (steward_workflow.Router) picks one profile per request (pick_profile
 first, then the patterns below (PROFILE_ROUTES), the model only when two profiles' patterns both match, and `general`
 otherwise. The run applies it (steward_workflow): only its tools at each step, intersected with the step's own narrowing
 (offered_in_step), its instructions through a MAF context provider (ProfileInstructions), its reading budget for EXPLORE,
-its reasoning effort as Ollama's `think` chat option, and its name, version, tools, budget, reasoning and success check on
+its reasoning effort as the chat client's reasoning option (Ollama's `think` today), and its name, version, tools, budget, reasoning and success check on
 the plan card; its success and summary ride on a custom workflow event for the phone (PROFILE_EVENT).
 
 `general` is today's whole harness unchanged (ExecPlan 0005, Decision Log 2026-11-08): its tools are every tool the build
@@ -67,13 +67,31 @@ MAF_HARNESS_TOOLS = frozenset({
     *MEMORY_TOOLS,
 })
 
-# The router's deterministic patterns, by profile name: a request whose body (past Jesster's source line) matches a
-# profile's pattern picks it. A profile with no pattern is picked only by name (or, for `general`, by default). Each
+# The router's deterministic patterns, by profile name: a request (its source line included) that matches a profile's
+# pattern picks it. A profile with no pattern is picked only by name (or, for `general`, by default). Each
 # narrow profile adds its pattern here in the pull request that lands it (validate refuses a pattern naming no profile).
 PROFILE_ROUTES: dict[str, re.Pattern[str]] = {
     # MP (N8): a request naming an eval, the evals or an eval tool, or a set with its tag ("Run the bounds set, tag
     # phone-1", the operator's own example).
     "eval-runner": re.compile(r"\beval(?:s|_start|_status)?\b|\bset,?\s+tag\s+[\w.-]+", re.IGNORECASE),
+    # M0 (ExecPlan 0005's bounds profile set). Each pattern sees the whole request, Jesster's source line included (an
+    # automation's turn is told apart by it); a request a bound refuses runs under refuse or github-review instead
+    # (steward_workflow.refusal_profile), whatever these say.
+    # code-fix (A4, P1): a request that opens with "fix" (the small, steps and heldout sets' bug fixes are this family).
+    "code-fix": re.compile(r"\A(?:\s*\[[^\]\n]*\]\s*)?\W*(?:please\W+)?fix\b", re.IGNORECASE),
+    # program (I6, P34): a command written in backticks, or one to run in the shell.
+    "program": re.compile(r"`[^`\n]+`|\bin the shell\b", re.IGNORECASE),
+    # estate-keeper (C7, G7, P36): a request that opens with restart, stop or start (an eval excepted), not an automation's.
+    "estate-keeper": re.compile(
+        r"\A(?!\s*\[from an automation)(?:\s*\[[^\]\n]*\]\s*)?\W*(?:please\W+)?(?:restart|stop|start)\b(?!.*\beval)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # away-end (B4, B5, P31): an automation's turn that asks for a change to the Estate or the PC.
+    "away-end": re.compile(
+        r"\A\s*\[from an automation \([^\]\n]*\]\s*\n\W*(?:please\W+)?"
+        r"(?:restart|stop|start|install|update|upgrade|delete|remove|push|commit|unload|kill)\b",
+        re.IGNORECASE,
+    ),
 }
 # A profile's extra refusals in code (spec 002's `gates.extra`, held as ADR-0014 holds the bounds): by profile name, a
 # pattern on the request's body and the reply, in words, with no plan and no card.
