@@ -44,6 +44,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0014](decisions/0014-the-bounds-are-gates-in-code.md) | The bounds are gates in code: refused at the call, and at the plan | accepted; superseded in part by 0016 (the Archive, for Steward) |
 | [0015](decisions/0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
 | [0016](decisions/0016-steward-is-the-brain-of-the-pc.md) | Steward is the brain of the PC: what he runs while Kyle is away | accepted |
+| [0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
 
 ## Specs
 

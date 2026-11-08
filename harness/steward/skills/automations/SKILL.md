@@ -1,6 +1,6 @@
 ---
 name: automations
-description: What SecondBrain's flows and automations are (ADR-0009; a flow is an ordered chain of steps from a fixed list, with a summarize prompt and deliver, and an automation is a saved flow, when, and on or off), the operator's Startup and eval flows as worked examples, and how to propose a new or changed one. Use when the user asks about his automations, a scheduled run, the daily what-happened, an eval flow, or asks you to make, change or explain an automation; and when a turn's first line is "[from an automation (<name>)]".
+description: What SecondBrain's flows and automations are (ADR-0009; a flow is an ordered chain of steps from a fixed list, with a summarize prompt and deliver, and an automation is a saved flow, when, and on or off), the operator's Startup and eval flows as worked examples, and how to propose a new or changed one. Use when the user asks about his automations, a scheduled run, the daily what-happened, an eval flow, or asks you to make, change or explain an automation; when he asks you to run a saved flow by its name, or how a flow's run went (saved_flows, saved_flow_run, saved_flow_status); and when a turn's first line is "[from an automation (<name>)]".
 ---
 
 ## Usage
@@ -63,6 +63,30 @@ skill).
 2. **An eval flow** (run whenever he says; for example an automation at 23:00): `{"name": "Nightly aider-py", "when": "daily 23:00", "steps": [{"step":
    "eval_start", "sets": ["aider-py"], "runs": 1}, {"step": "eval_wait", "hours": 8}], "deliver": ["note",
    "telegram"]}`. An optional second for `bfcl` has the same shape. No `summarize`: the progress lines are the result.
+
+### Running a saved flow, and how it went (ADR-0017)
+
+The Flows shelf's own actions are your tools on SecondBrain's MCP, each on the shelf's own path:
+
+1. **Find it.** `secondbrain_saved_flows`: every saved flow's `id`, `name`, steps, when, whether it is running or
+   waiting on its run, and its last result. A flow the user names ("the Repo drift check flow", "Startup", "the bfcl
+   eval flow") is the one whose `name` matches; use its `id`. If none matches, or two do, say so and ask.
+2. **How it went.** `secondbrain_saved_flow_status` with the flow's `id` (its run now, else its last), or Steward's
+   `run_id`: `state` (running, done or failed), each step's `state` and `ms`, and the `reason` a failed run gave.
+   "How did Startup do this morning?" is this read and an answer in words: no plan, no card. Quote the failed step and
+   its reason as the tool gives them.
+3. **Run it now.** `secondbrain_saved_flow_run` with the `id`: exactly his Run now button. Asked in chat it is an
+   action: in plan mode put it on the plan (the flow's name and id) and present the plan; once approved, call it; it
+   asks its own card, and a No ends it. It answers `started` (read back from Steward once), `run_id` and `state`, or
+   `started: false` with the `reason` (the flow is already running, Steward's host is down); report that as it says.
+   Then one `secondbrain_saved_flow_status` read at most in the turn: a flow's run takes seconds to hours.
+
+A saved eval flow asked for by name ("run the bfcl eval flow") is run with `secondbrain_saved_flow_run`, not
+`secondbrain_eval_start`: the flow is his saved plan, with its own sets, runs and wait. `secondbrain_eval_start` is
+for a set he names that no saved flow holds (the `bar-runner` skill).
+
+These are not the door's `flow_*` tools (Manjuel's engine flows, a different system on the same MCP): a Flows-shelf
+flow is always `saved_flow*`.
 
 ### When a turn says "[from an automation (<name>)]" (legacy)
 

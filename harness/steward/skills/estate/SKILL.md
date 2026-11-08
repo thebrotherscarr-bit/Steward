@@ -31,6 +31,11 @@ Your eval sets: `secondbrain_eval_start` starts them in their own window (planne
 `secondbrain_eval_status` reads a run's progress. The `bar-runner` skill says when and how; the `automations` skill
 says how a saved flow runs them (no card: the flow is his approved plan), and the daily what-happened.
 
+His saved flows (the Flows shelf, ADR-0017): `secondbrain_saved_flows` lists them (id, name, steps, when, running or
+waiting, the last result), `secondbrain_saved_flow_status` reads how one flow's run went (by its `id`, or Steward's
+`run_id`: each step's state and ms, a failed run's reason), and `secondbrain_saved_flow_run` runs one now by its `id`,
+as his Run now button does (planned first in chat, then its own card). The `automations` skill says how.
+
 Rules:
 - Every change asks the user's card. A refused or unanswered card means stop; never try another way round it.
 - Never SecondBrain itself: it serves these tools. SecondBrain refuses it by name.

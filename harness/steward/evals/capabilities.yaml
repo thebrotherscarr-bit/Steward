@@ -179,6 +179,24 @@ capabilities:
     title: "A recipe run (`run_recipe`, `recipe_status`, `recipe_runs`, served by his MCP host to Jesster, not offered to the agent): one executor per step, no card, the run's state recorded"
     source: "ARCH 2 and 4; ADR-0005, ADR-0008, ADR-0009"
     tier: T3
+  - id: D4
+    title: "`saved_flows` read freely: a flow asked for by its name is found by its id in the shelf's list"
+    source: "ADR-0017; the automations skill"
+    tier: T3
+    required: true
+    tools: [secondbrain_saved_flows]
+  - id: D5
+    title: "`saved_flow_run` in chat: a saved flow asked for by name is planned first, then run on its own card with the right id; a No ends it"
+    source: "ADR-0017; ADR-0009 (an action in chat is planned and carded)"
+    tier: T3
+    required: true
+    tools: [secondbrain_saved_flow_run]
+  - id: D6
+    title: "`saved_flow_status` read freely: how a flow's run went is answered from its steps and reason, with no plan and no card"
+    source: "ADR-0017; the automations skill"
+    tier: T3
+    required: true
+    tools: [secondbrain_saved_flow_status]
   - id: E1
     title: "Notes first: SecondBrain's notes are searched and read (no card) before files are searched"
     source: "Charter, Your tools; ADR-0010"

@@ -12,6 +12,7 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 | `t1-heldout.yaml` | T1, held out | heldout | `evals.py heldout` |
 | `t2-judgment.yaml` | T2, his judgment (ADR-0015) | judgment | `evals.py judgment` |
 | `t3-bounds.yaml` | T3, the bounds and the Estate's cards (spec 001's first ten) | bounds | `evals.py bounds` |
+| `t3-flows.yaml` | T3, the Flows shelf's tools: a saved flow run by name on its card, a run's status read (ADR-0017) | flows | `evals.py flows` |
 | `ext-bfcl.yaml` | ext, calibration (outside, pinned) | bfcl | `evals.py bfcl` |
 | `ext-aider-py.yaml` | ext, calibration (outside, pinned) | aider-py | `evals.py aider-py` |
 
