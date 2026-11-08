@@ -9626,12 +9626,14 @@ class _NamingClient(ScriptedChatClient):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.offered: list[set[str]] = []
+        self.instructions: list[str] = []  # each such call's instructions, beside its tools
 
     def _inner_get_response(self, *, messages: Sequence[Message], stream: bool = False, options: Mapping[str, Any], **kwargs: Any) -> Any:
         import steward_workflow as wf
 
         if options.get("response_format") is not wf.Route and options.get("tool_choice") != "none":
             self.offered.append({getattr(t, "name", "") for t in options.get("tools") or []})
+            self.instructions.append(str(options.get("instructions") or ""))
         return super()._inner_get_response(messages=messages, stream=stream, options=options, **kwargs)
 
 
@@ -9735,3 +9737,49 @@ def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -
     assert code == 1 and line["cases"][0]["profile_picked"] == ["other@1"], line
     reasons = [c["reason"] for c in line["cases"][0]["failed_checks"] if c["name"] == "run_completed"]
     assert reasons == ["The router picked the profile other@1; the case names general."], line
+
+
+def test_a_steps_instructions_name_no_todo_tool_it_does_not_offer(monkeypatch: Any) -> None:
+    """t3-away's first run (2026-11-08, storage/evals/runs/away-first, head 095fe12): in plan mode the instructions told
+    him to call todos_add, the workflow's EXPLORE offers no todo tool, and the "not found" errors (two or three a case)
+    tripped MAF's three consecutive function-call errors. Now each EXPLORE and ANSWER call's instructions name no todo
+    tool (StepInstructions drops the lines; the plan-mode text and its refusal name none), while a run with no step
+    keeps MAF's todo text. With StepInstructions unplugged the todo provider's todos_add line is back: red. And a
+    profile whose instructions name a tool it does not offer is refused by validate."""
+    import json
+
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    assert "todos_add" not in steward.STEWARD_MODE_INSTRUCTIONS["plan"] and "todos_add" not in steward.PLAN_MODE_REFUSAL
+    found = {"general": profile_files.load_profiles()["general"]}
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Start the bfcl set."}], "steps": ["Call secondbrain_eval_start with set bfcl"]})
+
+    def todo_tools_named(client: Any) -> list[tuple[set[str], set[str]]]:
+        return [
+            ({t for t in wf.TODO_TOOLS if t in text}, offered)
+            for text, offered in zip(client.instructions, client.offered)
+        ]
+
+    client, _ = _profile_run("Start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert client.instructions and all(named <= offered for named, offered in todo_tools_named(client)), todo_tools_named(client)
+    assert all(not named for named, _ in todo_tools_named(client)), "EXPLORE offers no todo tool, and names none"
+
+    client, _ = _profile_run("What does inventory.py define?", found, ["It defines order_total."], plan)
+    assert client.instructions and all(not named for named, _ in todo_tools_named(client)), "nor does ANSWER"
+
+    # A run with no step (no graph) keeps MAF's todo text, todos_add and all.
+    run_client, _, _ = run_steward(["Hello."], "Hello", mode="execute")
+    assert "todos_add" in str(run_client.calls[0]["options"].get("instructions") or "")
+
+    monkeypatch.setattr(wf.StepInstructions, "before_run", lambda self, **kwargs: asyncio.sleep(0))  # unplugged
+    client, _ = _profile_run("Start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert any("todos_add" in named for named, _ in todo_tools_named(client)), "unplugged, the todo text names todos_add again"
+
+    assert wf.lines_naming_only_offered("a\nuse todos_add now\nb todos_addx", ["todos_add"]) == "a\nb todos_addx"
+    narrow = _narrow_profile(instructions="Call eval_start, then read eval_status once.")
+    problems = profile_files.profile_problems(
+        {"general": found["general"], "narrow": narrow}, [("t.yaml", "n", "narrow", ("C6",)), *(("t.yaml", f"g{n}", "general", (c,)) for n, c in enumerate(found["general"].capabilities))],
+        wf.steward_tool_names(), set(), {"C6", *found["general"].capabilities}, ["plan_reached_directly", "run_completed"], routes={},
+    )
+    assert problems == ["profiles/narrow.yaml: its instructions name secondbrain_eval_start, which it does not offer (tools)"], problems

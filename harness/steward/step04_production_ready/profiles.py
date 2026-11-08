@@ -241,6 +241,18 @@ class ProfileInstructions(ContextProvider):
             )
 
 
+def tools_named_in(text: str, tools: Iterable[str]) -> set[str]:
+    """The tools a text names: each by its whole name, or a prefixed tool (secondbrain_, atlas_) by the name after its
+    prefix when that holds an underscore ("eval_start" names secondbrain_eval_start; a bare "git" names nothing)."""
+    found: set[str] = set()
+    for tool in tools:
+        short = tool.split("_", 1)[1] if tool.startswith(("secondbrain_", "atlas_")) else ""
+        for word in (tool, short if "_" in short else ""):
+            if word and re.search(rf"(?<![\w]){re.escape(word)}(?![\w])", text or ""):
+                found.add(tool)
+    return found
+
+
 def profile_problems(
     profiles: Mapping[str, Profile],
     cases: Iterable[tuple[str, str, str, tuple[str, ...]]],
@@ -254,7 +266,9 @@ def profile_problems(
 
     ``cases`` is every non-ext case as (set file name, case id, its profile, its capability ids); ``known_tools`` is
     Steward's own tools (evals.steward_tool_names), to which the MAF harness's own (MAF_HARNESS_TOOLS) are added here;
-    ``withheld`` the withheld tools (capabilities.yaml's withheld entries); ``checks`` every check name evals.py knows."""
+    ``withheld`` the withheld tools (capabilities.yaml's withheld entries); ``checks`` every check name evals.py knows.
+    A profile's instructions name only tools it offers (tools_named_in): an instruction to call a tool the run is not
+    offered is a "not found" error, and three in a row end the run (t3-away's first run, 2026-11-08)."""
     known = {*known_tools, *MAF_HARNESS_TOOLS}
     withheld = set(withheld)
     capability_ids = set(capability_ids)
@@ -268,6 +282,10 @@ def profile_problems(
         problems += [f"{where}: names the tool {t}, which neither Steward nor the MAF harness has" for t in profile.tools if t not in known and t not in withheld]
         if profile.success not in checks:
             problems.append(f"{where}: its success check {profile.success!r} is not a check evals.py knows")
+        named = tools_named_in(profile.instructions, known | withheld)
+        problems += [
+            f"{where}: its instructions name {t}, which it does not offer (tools)" for t in sorted(named - set(profile.tools))
+        ]
         own = [case for case in cases if case[2] == name]
         if not own:
             problems.append(f"{where}: no eval case names it (profile: {name}); a profile's cases are its eval")
