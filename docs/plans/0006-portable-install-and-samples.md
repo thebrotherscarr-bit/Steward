@@ -37,16 +37,16 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
 - [x] (2026-11-08) P1 step 1: the audit (SecondBrain note `portability-audit-2026-11-08-8af9d1`) read; its Steward
   entries copied below and into P1, one line each, by the audit's own numbers. Jesster's entries are Lane B's.
 - [ ] P1 portability fixes from the audit (Lanes A and B). Steward's entries, each fixed in P1 or owned by the milestone named:
-  - [ ] A4 `recipe_workflow.estate_repos`: the Estate's repositories hard-wired under the ground (P1: from the ground entry, A7).
-  - [ ] A5 `agent._build_shell`: Git Bash at `C:\Program Files\Git\bin\bash.exe`, hard-coded (P1: a config entry).
+  - [x] (2026-11-08, Steward PR p1-config-entries) A4 `recipe_workflow.estate_repos`: the Estate's repositories hard-wired under the ground (P1: from the ground entry, A7).
+  - [x] (2026-11-08, p1-config-entries: `STEWARD_BASH`) A5 `agent._build_shell`: Git Bash at `C:\Program Files\Git\bin\bash.exe`, hard-coded (P1: a config entry).
   - [ ] A6 `agent.ARCHIVE_DIR`: the operator's Archive bound inside the product (P8, ADR-0019 step 4: the bounds' paths to runtime config).
-  - [ ] A7 `agent.GROUND_DIR` and `mcp_app.recipe_tools`: the ground inferred from the folder layout (P1: an explicit optional entry).
-  - [ ] A8 `agent._WORKING_DIR`: `STEWARD_WORKSPACE` defaults to the repository, unsaid (P1: said in `.env.example`).
-  - [ ] A14 halo and eval storage paths are repository-relative (no change: already portable).
-  - [ ] B1 the operator's name in model-facing text (`steward.py` INSTRUCTIONS, `agent.SANDBOX_SHELL_REFUSAL`) (P1: an owner entry).
-  - [ ] B6 the operator's name in the improvement loop's review prompt (P1: the owner entry).
-  - [ ] B7 LICENSE names the operator (docs; no change).
-  - [ ] B8 README clones the operator's repository (docs; no change).
+  - [x] (2026-11-08, p1-config-entries: `STEWARD_GROUND_DIR`) A7 `agent.GROUND_DIR` and `mcp_app.recipe_tools`: the ground inferred from the folder layout (P1: an explicit optional entry).
+  - [x] (2026-11-08, p1-config-entries) A8 `agent._WORKING_DIR`: `STEWARD_WORKSPACE` defaults to the repository, unsaid (P1: said in `.env.example`).
+  - [x] A14 halo and eval storage paths are repository-relative (no change: already portable).
+  - [x] (2026-11-08, p1-config-entries: `STEWARD_OWNER`) B1 the operator's name in model-facing text (`steward.py` INSTRUCTIONS, `agent.SANDBOX_SHELL_REFUSAL`) (P1: an owner entry).
+  - [x] (2026-11-08, p1-config-entries: `STEWARD_OWNER`) B6 the operator's name in the improvement loop's review prompt (P1: the owner entry).
+  - [x] B7 LICENSE names the operator (docs; no change).
+  - [x] B8 README clones the operator's repository (docs; no change).
   - [ ] C1, C2 the model's defaults disagree (`steward.py` gpt-oss:20b; `improvement_loop.py`, step02 steward:1) (P2: the binding).
   - [ ] C3 `steward:1` is built by hand from `steward.Modelfile` (P2 binds it; P4's setup pulls or builds the bound model).
   - [ ] C4 the context window 65536 in code (`_STEWARD_CONTEXT`, the compaction budget) (P2: the binding).
@@ -57,9 +57,9 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   - [ ] C15 the eval baselines are measured on `steward:1` only (P8, ADR-0019 step 6: results recorded per binding).
   - [ ] D1 the Python version said four ways (P3: one version, checked by the installer).
   - [ ] D2 the README installs unlocked from PyPI (P3: the installer uses the lock).
-  - [ ] D7 `mcp_app.PORT` 43121 cannot be overridden (P1: a config entry).
+  - [x] (2026-11-08, p1-config-entries: `STEWARD_MCP_PORT`) D7 `mcp_app.PORT` 43121 cannot be overridden (P1: a config entry).
   - [ ] D9 the MCP key pasted by hand into `.env` (P4, Lane B: SecondBrain passes it in the child environment).
-  - [ ] D12 Hyperlight's packages imported unconditionally (no change: they are in the lock; opt-in at run time).
+  - [x] D12 Hyperlight's packages imported unconditionally (no change: they are in the lock; opt-in at run time).
   - [ ] D16 README step 5 starts `hosted.py`, though SecondBrain starts AG-UI itself (P3: the install's README).
   - [ ] E1 the Charter is not shipped; a missing note runs him without it, silently (P4 and P5: a shipped default).
   - [ ] E2 SecondBrain's MCP is effectively required yet only warned about (P4: the doctor fails loudly).
@@ -82,7 +82,9 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
 - Observation: the audit found very few literal host paths in Steward. Most of the risk is in layout assumptions (the
   ground beside him, Git Bash's folder), the model named in code, and steps done by hand.
   Evidence: the audit's sections A to E; `git grep` for the operator's user folder and `Desktop\Research` in Steward's
-  code finds only comments, docstrings, tests and one bound (`ARCHIVE_DIR`, A6).
+  code finds only comments, docstrings, tests and one bound (`ARCHIVE_DIR`, A6). A scan of the string literals in his
+  code (comments and docstrings aside) found two more the audit had not listed: the door's description of the ground
+  (`agent.ESTATE_WORLDS`, "Desktop\Research") and step02's mem0 scope `"kyle"`; both moved in P1.
 - Observation: MAF's Python samples are no longer under `python/samples/getting_started/`; they are a numbered ladder.
   Evidence: microsoft/agent-framework at commit `924a6e5`, `python/samples/`: `01-get-started/`, `02-agents/`,
   `03-workflows/`, `04-hosting/`, `05-end-to-end/`; `01-get-started/` holds `01_hello_agent.py` to
@@ -108,6 +110,13 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   `Progress`. Comments and docstrings that quote a dated ruling by the operator's name stay: they are the record.
   Rationale: the plan's P1 is "each value moves to a config entry or a computed path"; the others are an installer,
   a doctor, an optional piece or a format migration, which are P2 to P8.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: P1's entries are environment entries read in one module, `harness/steward/install.py` (`STEWARD_OWNER`,
+  `STEWARD_BASH`, `STEWARD_GROUND_DIR`, `STEWARD_MCP_PORT`), documented in `.env.example`, each with today's value as
+  its default; a relative path is read against the install folder (the repository's root). The owner's default stays
+  "Kyle", today's value, so nothing changes on this PC; P4's setup asks a new install for its owner.
+  Rationale: `.env` is the one config Steward reads today; STEW has no `install` kind yet, so P4 folds these entries
+  into the install's `.us` declaration when it has one. One module is the one place each is read.
   Date/Author: 2026-11-08, Lane A.
 
 ## Outcomes & Retrospective

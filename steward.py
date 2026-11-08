@@ -2,15 +2,20 @@
 
 import asyncio
 import os
+import sys
+from pathlib import Path
 
 from agent_framework import Agent
 from agent_framework.ollama import OllamaChatClient
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "harness" / "steward"))
+import install  # noqa: E402 - the install's own entries (ExecPlan 0006 P1)
+
 load_dotenv()
 os.environ.setdefault("OLLAMA_MODEL", "gpt-oss:20b")
 
-INSTRUCTIONS = """You are STEWARD, Kyle's local engineering and development assistant.
+INSTRUCTIONS = f"""You are STEWARD, {install.owner()}'s local engineering and development assistant.
 You help with research, conversation, planning and managing work, and writing code.
 Be direct and brief. Say plainly when you don't know something."""
 

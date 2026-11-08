@@ -21,6 +21,12 @@ was never merged and has no entry.
   config (ADR-0002's one model holds per install); the next piece is a portability audit of Steward and Jesster.
 - ExecPlan 0006 P1, step 1: the portability audit's Steward entries (note `portability-audit-2026-11-08-8af9d1`)
   copied into the plan's P1 section and Progress, one line each, each with the milestone that fixes it (ADR-0020).
+- ExecPlan 0006 P1 (ADR-0020): the install's own entries, read in one place (`harness/steward/install.py`), each with
+  today's value as its default: `STEWARD_OWNER` (who the model is told he works for: `steward.py`, the sandbox's
+  refusal, the improvement loop's review, step02's memory scope), `STEWARD_BASH` (Git Bash's path), `STEWARD_GROUND_DIR`
+  (the ground, else inferred as before; the recipes' repositories under it) and `STEWARD_MCP_PORT` (43121). The door's
+  description of the ground no longer names its folder. A test scans his code's strings for the operator's user folder,
+  his ground's folder and his name outside the install's defaults. Restart required.
 
 ### Fixed
 

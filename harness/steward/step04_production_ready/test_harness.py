@@ -10004,3 +10004,59 @@ def test_explores_answered_later_call_counts_toward_its_budget_and_is_no_change_
     results = [c.result for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_result"]
     assert results == [wf.AFTER_APPROVAL], results
     assert client.offered[0] == {"secondbrain_eval_status"} and client.offered[1] == set(), client.offered
+
+
+# <install_entries>
+def test_the_install_entries_keep_todays_values_and_move_by_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ExecPlan 0006 P1 (ADR-0020 decision 2; the portability audit's A5, A7, B1, B6, D7): each value that belongs to
+    one machine is an install entry with today's value as its default, read in one place (harness/steward/install.py),
+    and the code reads it there: the owner the model is told, Git Bash's path, the ground, and the MCP port."""
+    import install
+
+    assert install.owner({}) == install.OWNER_DEFAULT == "Kyle"
+    assert install.owner({"STEWARD_OWNER": " Sam "}) == "Sam"
+    assert install.bash({"ProgramFiles": r"C:\Program Files"}) == (
+        str(Path(r"C:\Program Files") / "Git" / "bin" / "bash.exe") if os.name == "nt" else None
+    )
+    assert install.bash({"STEWARD_BASH": "tools/bash.exe"}) == str(install.INSTALL_DIR / "tools" / "bash.exe"), "relative to the install"
+    assert install.ground_dir(None, {}) is None and install.ground_dir(tmp_path, {}) == tmp_path, "unset: the inferred one"
+    assert install.ground_dir(None, {"STEWARD_GROUND_DIR": str(tmp_path)}) == tmp_path.resolve()
+    assert install.mcp_port({}) == 43121 and install.mcp_port({"STEWARD_MCP_PORT": "43199"}) == 43199
+    with pytest.raises(ValueError, match="STEWARD_MCP_PORT"):
+        install.mcp_port({"STEWARD_MCP_PORT": "port"})
+    # The code reads them there.
+    assert steward._install is install
+    assert steward.SANDBOX_SHELL_REFUSAL.endswith(f"or tell {install.owner()} it needs the shell and a new session.")
+    monkeypatch.setenv("STEWARD_BASH", str(tmp_path / "bash.exe"))
+    assert steward._build_shell()._shell_override == [str(tmp_path / "bash.exe")], "his shell runs the bash the entry names"
+    import mcp_app
+
+    assert mcp_app.PORT == install.mcp_port()
+
+
+def test_no_host_string_in_code_outside_the_install_defaults() -> None:
+    """ExecPlan 0006 P1's acceptance: no string in Steward's code names the operator's user folder, his ground's folder
+    (Desktop\\Research) or his name, outside the install's defaults (install.py), the tests and the docs (comments and
+    docstrings, which keep the record of his rulings). A new one is red here until it moves to an install entry."""
+    import io
+    import re
+    import tokenize
+
+    repo = Path(__file__).resolve().parents[3]
+    named = re.compile(r"novad|Desktop[\\/]+Research|\bKyle\b", re.IGNORECASE)
+    skip_dirs = {".venv", ".venv-halo", "working", "data", "node_modules", "__pycache__", ".git"}
+    found: list[str] = []
+    for path in sorted(repo.rglob("*.py")):
+        rel = path.relative_to(repo)
+        if skip_dirs & set(rel.parts) or path.name in {"test_harness.py", "install.py"}:
+            continue
+        before = None
+        for token in tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline):
+            if token.type == tokenize.STRING and named.search(token.string):
+                docstring = before is None or before.type in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)
+                if not docstring:
+                    found.append(f"{rel.as_posix()}:{token.start[0]}")
+            if token.type not in (tokenize.COMMENT, tokenize.NL):
+                before = token
+    assert found == [], f"a host string in code; move it to an install entry (harness/steward/install.py): {found}"
+# </install_entries>

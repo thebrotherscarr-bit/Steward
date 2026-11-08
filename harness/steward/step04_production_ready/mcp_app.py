@@ -57,6 +57,7 @@ from agent_framework.ollama import OllamaChatClient  # noqa: E402
 
 from agent import (  # noqa: E402
     _WORKING_DIR,
+    _install,
     build_steward_agent,
     steward_history_provider,
     steward_memory_store,
@@ -69,8 +70,8 @@ from halo_traces import setup_halo_tracing  # noqa: E402
 
 HOST = "127.0.0.1"
 # Beside his service (43120) and SecondBrain's MCP (43110), Kyle's word 2026-11-02; it was MAF's samples' 8000,
-# which ComfyUI also takes
-PORT = 43121
+# which ComfyUI also takes. The install's entry STEWARD_MCP_PORT moves it (install.mcp_port; the portability audit's D7).
+PORT = _install.mcp_port()
 
 logger = logging.getLogger("steward.mcp_app")
 
@@ -294,7 +295,8 @@ def recipe_summarizer() -> Agent:
 async def recipe_tools(stack: AsyncExitStack, url: str | None, key: str | None) -> Callable[[], RecipeTools]:
     """What the recipes' steps run on: the Estate's repositories from the ground (two folders above his own), and
     SecondBrain's MCP (estate_status, eval_start, eval_status) on a client of its own, read for up to a minute."""
-    ground = _WORKING_DIR.parents[1] if (_WORKING_DIR.parents[1] / "manjuel.py").exists() else None
+    # STEWARD_GROUND_DIR names it (install.ground_dir; the portability audit's A7, and A4: the repositories under it).
+    ground = _install.ground_dir(_WORKING_DIR.parents[1] if (_WORKING_DIR.parents[1] / "manjuel.py").exists() else None)
     call: Any = None
     if url and key:
         http = await stack.enter_async_context(

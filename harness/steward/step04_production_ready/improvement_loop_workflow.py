@@ -553,7 +553,8 @@ class ReviewGateway(Executor):
             )
             return
         prompt = (
-            f"Kyle reviewed attempt {original_request.attempt}. Revise the change, handing each edit to the coder "
+            f"{steward._install.owner()} reviewed attempt {original_request.attempt}. Revise the change, handing each "
+            "edit to the coder "
             f"with {HAND_TO_CODER}: {decision}"
         )
         await ctx.send_message(
