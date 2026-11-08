@@ -1,12 +1,12 @@
 # The general profile (ADR-0018; ExecPlan 0005, Decision Log 2026-11-08): today's whole harness, unchanged. Its tools are
 # every tool Steward's build offers (his own, as capabilities.yaml names them, and the MAF harness's own), so it cuts
-# nothing; its reading budget is EXPLORE's (ADR-0015), and medium is gpt-oss's own default reasoning effort. Every case
+# nothing; its reading budget is EXPLORE's (ADR-0015), and medium is the model's own default reasoning effort. Every case
 # starts here; narrow profiles take their families from it in the frozen order, and `for` loses their ids as they go.
 name: general
 version: 1
 for:
   task: "anything no narrower profile is for: the whole harness as it was before profiles"
-  capability: [A1, A4, A5, A7, A8, A9, A12, A13, A14, A15, A16, A17, A18, B3, B4, B5, C7, D4, D5, D6, F4, G7, G10, I6, J1, J2, L1, L2, L3, N1, N2, N3, N4, N17]
+  capability: [A1, A7, A8, A9, A13, A14, A15, A16, A17, A18, D4, D5, D6, J1, J2, N1, N2, N3, N4]
 tools:
   # Steward's own (evals.steward_tool_names; the door's GitHub writes are withheld, M9)
   - get_repo_status

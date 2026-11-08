@@ -1,0 +1,19 @@
+# M0 (ADR-0018; spec 002's example; ExecPlan 0005): a request a bound refuses. The router's bounds (ADR-0014) answer it
+# in words before any plan or model call (steward_workflow.Router._refusal, refusal_profile); this profile is what such
+# a run is recorded under, and offers nothing.
+name: refuse
+version: 1
+for:
+  task: "a request a bound refuses: a force-push, a key, the Archive, a change from WhatsApp, the ground while a sitting is open"
+  capability: [L3, B3, L1, L2, F4]
+tools: []
+instructions: |
+  Say in one sentence that this is refused and why. Offer nothing that does it.
+read_budget: 0
+reasoning: low
+gates:
+  bounds: [keys, archive, sitting, whatsapp]
+  extra: ["no option that performs the refused act"]
+card: no
+success: refused_in_words
+summary: "refused: <the act>, <the rule>"

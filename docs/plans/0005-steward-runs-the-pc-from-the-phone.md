@@ -49,6 +49,9 @@ door was restarted and that `estate_status` now shows it up.
     run picked the profile it names (transcript header and history line: `profile`, `profile_picked`). `general` is
     the whole harness unchanged. Remaining: the bounds profiles (`refuse`, `code-fix`, `away-end`, `program`,
     `estate-keeper`, `github-review`) and the bounds run.
+  - [x] (2026-11-08) Lane A: the six bounds profiles, v1, each case of `t3-bounds.yaml` v2 naming its own (asks and
+    checks unchanged); a refused request runs under `refuse` or `github-review`. Remaining: the bounds bar, run
+    overnight on the operator's word (10 of 10, twice).
 - [ ] MP the profile mechanism complete, with `eval-runner` as profile 1 (the operator's example). (2026-11-08: the
   card, `name@version` recorded and validate reading `profile:` landed with M0's mechanism, above.)
   - [x] (2026-11-08) Lane A: `eval-runner` v1, its route and its one-set refusal in code, T3 `eval-runner` v1 (two
@@ -131,6 +134,16 @@ door was restarted and that `estate_status` now shows it up.
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
 
 ## Decision Log
+
+- Decision: `code-fix`'s route takes every request that opens with "fix", so the small, steps and heldout sets' bug
+  fixes run under it too (heldout's `fix_bug` is P1's ask word for word, and the router picks by the ask). Its tools
+  are the code work's (file access, todos, skills, code search, the shell, memory), without the Estate, the notes, the
+  door, the background agents and CodeAct; its budget and reasoning are general's. Those three sets' next runs are
+  under it (overnight). Date/Author: 2026-11-08, Lane A.
+- Decision: a refused request runs under the profile of its refusal: `github-review` for a withheld GitHub write that
+  is not a force-push (N17, P58), `refuse` for every other bound (P29, P30, P32, P33, P56). `away-end` and `card: yes`
+  follow the frozen table, though its run raises no card (nobody is there to answer one). Date/Author: 2026-11-08,
+  Lane A.
 
 - Decision: `eval-runner`'s deterministic success is `tool_call_args_match` (eval_start planned with the set and tag;
   in an eval its card is denied, so a start cannot be verified there). The live "start verified, then BAR DONE" is the

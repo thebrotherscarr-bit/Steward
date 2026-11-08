@@ -11,6 +11,8 @@
 # Profiles (ADR-0018, 2026-11-08): each capability ExecPlan 0005 builds names the harness profile that serves it, as a
 # comment on its id line (`# profile: <name>`, spec 002), until the profile mechanism teaches validate a `profile` key
 # (validate refuses unknown keys today). A profile's cases are its eval; every case names its profile (spec 003).
+# (2026-11-08, Steward #191: the mechanism landed. A case's `profile:` is now required and checked by validate; the map
+# keeps these comments as a pointer, and a profile's own file names the ids it serves in its `for`.)
 capabilities:
   - id: A1
     title: "A change request gets a plan first: an `approval` card with one question and short, named, non-empty steps"

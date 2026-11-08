@@ -1,0 +1,19 @@
+# M0 (ADR-0018; ExecPlan 0005, M9a and M9): GitHub review, writes withheld (N17). A write asked for is refused by the
+# router's bound (GITHUB_WRITE_REFUSAL) before any plan; v2 (M9) adds the review reads and their cases.
+name: github-review
+version: 1
+for:
+  task: "a GitHub write asked for while the writes are withheld: answered in words, the reads offered"
+  capability: [N17, G10]
+tools: [atlas_git, atlas_git_diff, atlas_records, pr_checks]
+instructions: |
+  GitHub writes (a branch, a push, a pull request) are withheld from you: say in one sentence that the hand does them for now.
+  You may read a repository's state with atlas_git, atlas_git_diff, atlas_records and pr_checks; change nothing.
+read_budget: 2
+reasoning: low
+gates:
+  bounds: [github-writes]
+  extra: ["no GitHub write, and no card for one"]
+card: no
+success: refused_in_words
+summary: "not done: <the write>, GitHub writes are withheld"

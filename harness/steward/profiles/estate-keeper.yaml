@@ -1,0 +1,19 @@
+# M0 (ADR-0018; ExecPlan 0005; v2 is M2's): start, stop or restart one of the Estate's servers on its card (C7, G7;
+# P36). The estate skill names the servers; estate_status gives the exact name.
+name: estate-keeper
+version: 1
+for:
+  task: "start, stop or restart one server of the Estate, on its card"
+  capability: [C7, G7]
+tools: [load_skill, read_skill_resource, secondbrain_estate_status, secondbrain_service_control]
+instructions: |
+  Load the estate skill and read estate_status once for the server's exact name.
+  Then plan one service_control call with that name and the action; the card is the question, so do not ask yes or no first.
+read_budget: 3
+reasoning: medium
+gates:
+  bounds: [sitting, whatsapp]
+  extra: ["never SecondBrain itself"]
+card: yes
+success: tool_call_args_match
+summary: "<server> <action>: <its state from estate_status after>"

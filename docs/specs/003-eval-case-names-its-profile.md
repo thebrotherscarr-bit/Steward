@@ -29,6 +29,8 @@ tied to a harness version and two harnesses cannot be compared.
   profile whose `for` capability ids no case covers.
 - The run records the picked profile and version in the case transcript and in `history.jsonl`; a case passes only
   when the profile picked is the profile named.
+- _(2026-11-08: Lane A's pull request landed, Steward #191; every non-ext case now names its profile, and validate
+  requires it. The line below is kept as it was.)_
 - Until Lane A's pull request lands, `profile:` is not written in any set (validate refuses unknown keys today); the
   intended profile is in a comment above each case.
 

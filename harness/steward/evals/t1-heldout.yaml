@@ -31,7 +31,7 @@ cases:
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, fahrenheit_to_celsius_works]
   - id: fix_bug
     capability: [A1, A9, J1, J2]
-    profile: general
+    profile: code-fix
     ask: Fix the bug that makes test_boiling_point fail in harness/steward/working/sample-project-2.
     fixture: {project: harness/steward/working/sample-project-2, plant: fahrenheit_bug}
     subject: [boiling, celsius_to_fahrenheit, fahrenheit, test_boiling_point, units.py, "9 / 5"]

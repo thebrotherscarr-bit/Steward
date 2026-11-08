@@ -36,6 +36,13 @@ was never merged and has no entry.
 
 ### Added
 
+- M0's profiles (ExecPlan 0005, the bounds profile set, v1 of each): `refuse` (P29, P30, P32, P33, P56), `github-review`
+  (P58), `code-fix` (P1), `away-end` (P31), `program` (P34), `estate-keeper` (P36). A refused request runs under
+  `refuse`, or `github-review` for a withheld GitHub write; the others are picked by their routes
+  (`profiles.PROFILE_ROUTES`, seeing the source line). Each `t3-bounds.yaml` v2 case names its profile, its ask and
+  checks unchanged (no new version). `code-fix`'s route takes every request that opens with "fix", so t0-small's
+  `discount`, t0-steps' `discount_fix` and t1-heldout's `fix_bug` (P1's own ask) name it too. `general` keeps the rest.
+
 - Profile 1, `eval-runner` (ExecPlan 0005, Operation MP; N8 required): `harness/steward/profiles/eval-runner.yaml` (the
   Estate's reads, `eval_start`, `saved_flow_run`; read budget 2; reasoning low; success `tool_call_args_match`); the
   router's route for it (`profiles.PROFILE_ROUTES`: an eval, an eval tool, or a set with its tag) and its extra

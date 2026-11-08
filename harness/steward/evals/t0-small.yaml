@@ -38,7 +38,7 @@ cases:
       - item_count_works
   - id: discount
     capability: [A1, A9, J1, J2]
-    profile: general
+    profile: code-fix
     ask: Fix the bug that makes test_percent_discount fail in harness/steward/working/sample-project.
     fixture: {project: harness/steward/working/sample-project, plant: discount_bug}
     subject: [discount, order_total, inventory.py]
