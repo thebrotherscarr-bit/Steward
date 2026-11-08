@@ -21,6 +21,7 @@ changes:
 cases:
   - id: add_function
     capability: [A1, A9, J1, J2]
+    profile: general
     ask: >-
       Add a function fahrenheit_to_celsius(fahrenheit) to harness/steward/working/sample-project-2/units.py that
       converts degrees Fahrenheit to degrees Celsius, with a docstring.
@@ -30,6 +31,7 @@ cases:
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, fahrenheit_to_celsius_works]
   - id: fix_bug
     capability: [A1, A9, J1, J2]
+    profile: general
     ask: Fix the bug that makes test_boiling_point fail in harness/steward/working/sample-project-2.
     fixture: {project: harness/steward/working/sample-project-2, plant: fahrenheit_bug}
     subject: [boiling, celsius_to_fahrenheit, fahrenheit, test_boiling_point, units.py, "9 / 5"]
@@ -37,6 +39,7 @@ cases:
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, boiling_point_test_passes]
   - id: refactor
     capability: [A1, A9, J1, J2]
+    profile: general
     ask: >-
       Rename LENGTH_IN_METRES to METRES_PER_UNIT everywhere in harness/steward/working/sample-project-2, keeping its
       tests passing.
@@ -46,6 +49,7 @@ cases:
     checks: [plan_is_approval, edit_keeps_file_whole, no_nudge_in_reply, answer_on_topic, metres_per_unit_renamed]
   - id: docs_line
     capability: [A1, A9, J2]
+    profile: general
     ask: >-
       Add one line to harness/steward/working/sample-project-2/README.md that lists the length units convert_length
       accepts.
@@ -55,6 +59,7 @@ cases:
     checks: [plan_is_approval, no_nudge_in_reply, answer_on_topic, readme_lists_length_units]
   - id: failing_test
     capability: [A1, A9, J1, J2]
+    profile: general
     ask: >-
       Make the failing test test_format_quantity_without_unit pass in harness/steward/working/sample-project-2,
       without changing the test.

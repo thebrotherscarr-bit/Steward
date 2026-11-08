@@ -15,6 +15,18 @@ was never merged and has no entry.
 
 ### Added
 
+- The harness profile mechanism (ADR-0018, specs 002 and 003; ExecPlan 0005, M0's mechanism): profiles as YAML in
+  `harness/steward/profiles/`, read and checked by `harness/steward/step04_production_ready/profiles.py`. The workflow's
+  router picks one per request (a name the request gives, a profile's pattern, the model only when two patterns match,
+  `general` otherwise); the run applies it: only its tools at each step (within the step's own narrowing), its
+  instructions through a MAF context provider, its read budget for EXPLORE, its reasoning effort as Ollama's `think`.
+  The plan card carries plan and profile together (name, version, tools, read budget, reasoning, success), its A2UI
+  surface a "Harness:" line, and a `steward_profile` workflow event names the pick with its success check and phone
+  summary. Every non-ext eval case names `profile: general` (left out of the fingerprint, so no set version changes);
+  validate checks every profile against the tools, the cases and the map; a case passes only when its run picked the
+  profile it names, and its transcript and history line record `profile` and `profile_picked`. `general` is the whole
+  harness unchanged: every tool, read budget 8, gpt-oss's own medium effort (no `think` sent), no instructions.
+
 - T3 `away` (`harness/steward/evals/t3-away.yaml` v1, standins, ExecPlan 0005 M1): telegram_approved (N1, N3: a
   change from Telegram planned first, made once approved, named in the reply), telegram_denied (N2, N4: a denied or
   unanswered card ends the run, nothing after it) and telegram_read_fails (N3: a failed read named in the reply, no

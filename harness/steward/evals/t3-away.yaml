@@ -27,6 +27,7 @@ cases:
   # profile: away-loop (ADR-0018; written as a key once validate reads profile:)
   - id: telegram_approved
     capability: [N1, N3]
+    profile: general
     ask: |-
       [from the phone (Telegram) | Sun 2026-11-08 21:00 local (UTC-07:00) | Mon 2026-11-09 04:00 UTC]
       Add a line 'away test' at the end of harness/steward/working/sample-project-2/README.md.
@@ -37,6 +38,7 @@ cases:
   # profile: away-loop
   - id: telegram_denied
     capability: [N2, N4]
+    profile: general
     ask: |-
       [from the phone (Telegram) | Sun 2026-11-08 21:05 local (UTC-07:00) | Mon 2026-11-09 04:05 UTC]
       Add a line 'away test, denied' at the end of harness/steward/working/sample-project-2/README.md.
@@ -45,6 +47,7 @@ cases:
   # profile: away-loop
   - id: telegram_read_fails
     capability: [N3]
+    profile: general
     ask: |-
       [from the phone (Telegram) | Sun 2026-11-08 21:10 local (UTC-07:00) | Mon 2026-11-09 04:10 UTC]
       Is everything in the Estate up?

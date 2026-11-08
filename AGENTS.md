@@ -81,9 +81,11 @@ harness/
     │   ├── ag_ui_app.py       # AG-UI host, 43122
     │   ├── mcp_app.py         # MCP host, 43121 (run_recipe, recipe_status, recipe_graph, recipe_runs)
     │   ├── recipe_workflow.py # automations as MAF workflows
+    │   ├── profiles.py        # harness profiles: loader, validator, pick, instructions provider (ADR-0018)
     │   ├── evals.py           # eval runner, validate, bar
     │   └── test_harness.py    # the gate's model-free checks
     ├── evals/                 # versioned eval sets, baselines, run-bar.ps1
+    ├── profiles/              # harness profiles, one YAML per task family (spec 002)
     ├── skills/                # Steward's skills
     └── working/               # sample projects the evals use
 ```
