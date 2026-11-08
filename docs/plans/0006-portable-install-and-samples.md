@@ -75,6 +75,9 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
 - [ ] P6 the clean-machine test in CI (Lane B; O6).
 - [ ] P7 STEW samples 01 to 05 (the STEW repository).
 - [ ] P8 Steward's declarations migrated to STEW `.us` (Lane A; ADR-0019's migration steps 1 to 4, 6 and 7).
+  - [x] (2026-11-08, Steward PR p8-stew-validator-ci) Step 1: the gate's `stew` step validates every tracked `.us`
+    file with STEW's `tools/validate.py`, STEW checked out at `aec5527ebe25c366057674b558e31e6a5e284881`. Wire: a
+    throwaway pull request adding an invalid `.us` file turned the gate red, and was closed unmerged.
 
 ## Surprises & Discoveries
 
@@ -144,6 +147,15 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   tool calling. Both capabilities are required; the set's live run waits for the operator's word.
   Rationale: ADR-0012 (every capability ships with its case); the operator's instruction that no live run is made
   while he is using the PC.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: P8 step 1 is a step in the existing `gate` job (`.github/workflows/gate.yml`, step `stew`), not a job of
+  its own. STEW is checked out by `actions/checkout` at a full commit sha (no branch or tag) into `.stew/`, untracked,
+  and its validator is given every file `git ls-files "*.us"` lists; no tracked `.us` file is a failure. The step runs
+  after `compile` and before `install`, since the validator is standard library only. The first pin is STEW main
+  `aec5527` (2026-11-08); a bump is a change of its own.
+  Rationale: `gate` is the check main's protection already requires, so a step in it gates the merge with no change
+  to the protection; a full sha cannot move under the gate; `git ls-files` takes each new `.us` file with no list to
+  keep.
   Date/Author: 2026-11-08, Lane A.
 
 ## Outcomes & Retrospective
