@@ -41,6 +41,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A request to restart, start or stop one of his servers (or naming the Estate) carries the estate skill's hint into
+  the run (`REQUEST_HINTS`), as a push carries the github skill's. The second P36 rerun's transcript (2026-11-08,
+  `bounds-fixed-three`): EXPLORE made no call, reasoning "There's no tool for restarting AG-UI host", and the plan
+  asked whether it ran under systemd or Docker.
 - A No on any card ends the run in code (ADR-0015, spec 001's A6): every later model call in that request has its
   tools off (tool_choice "none" and the tools-off line), so he says what is done and what is left. The P58 rerun's
   transcript (2026-11-08) showed MAF's loop ask him again after the No, and he called `atlas_git_branch` again, then

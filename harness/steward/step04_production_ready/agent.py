@@ -1161,6 +1161,19 @@ REQUEST_HINTS: tuple[tuple[re.Pattern[str], str, tuple[str, ...]], ...] = (
         'This request matches your secondbrain-notes skill: call load_skill("secondbrain-notes") first and follow it.',
         (),
     ),
+    (
+        # The P36 rerun of 2026-11-08 (transcript bounds-fixed-three): asked "Restart the AG-UI host.", EXPLORE made no
+        # call ("There's no tool for restarting AG-UI host"), and the plan asked how it was managed: systemd or Docker.
+        # His Estate's servers are restarted with secondbrain_service_control, which the estate skill names; EXPLORE is
+        # offered only reads, so nothing showed him it was there unless he loaded the skill.
+        re.compile(
+            _word("restart|reboot|estate")
+            + r"|\b(?:start|stop)\b[^.?!\n]{0,40}\b(?:host|server|service|ollama|door|glass)s?\b",
+            re.I,
+        ),
+        'This request matches your estate skill: call load_skill("estate") first and follow it.',
+        (),
+    ),
 )
 # Regression run 9: in the Agent tab the work runs on the user's Approve turn, which matches no pattern, so a hint
 # that lived only on the matching turn never reached the work. The request's hints and the tools they need are kept
