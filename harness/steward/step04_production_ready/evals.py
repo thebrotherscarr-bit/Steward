@@ -880,8 +880,11 @@ def _calls_in_order(conversation: list[Any]) -> list[tuple[str, Any, str]]:
     NOT_RUN_RESULTS)."""
     from agent import BOUNDS_REFUSED, PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
-    # A bound's refusal (ADR-0014) is refused too: the call ran nothing.
-    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED)
+    from steward_workflow import AFTER_APPROVAL  # noqa: PLC0415
+
+    # A bound's refusal (ADR-0014) is refused too: the call ran nothing; so is EXPLORE's answer to a later step's tool
+    # (steward_workflow.later_step_calls: check-answerer-p36 read it as a change before the plan card).
+    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED, AFTER_APPROVAL)
     results = {
         content.call_id: str(content.result or "")
         for message in conversation or []
@@ -2152,8 +2155,11 @@ def _run_calls(conversation: list[Any]) -> list[tuple[str, dict[str, Any], str, 
     ran it: not offered, or its arguments did not parse) or "ran"."""
     from agent import BOUNDS_REFUSED, PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
-    # A bound's refusal (ADR-0014) is refused too: the call ran nothing.
-    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED)
+    from steward_workflow import AFTER_APPROVAL  # noqa: PLC0415
+
+    # A bound's refusal (ADR-0014) is refused too: the call ran nothing; so is EXPLORE's answer to a later step's tool
+    # (steward_workflow.later_step_calls: check-answerer-p36 read it as a change before the plan card).
+    markers = (PLAN_MODE_REFUSAL.split("{name}")[0], PLAN_MODE_TODOS_NOT_DONE, BOUNDS_REFUSED, AFTER_APPROVAL)
     contents = [c for m in conversation or [] for c in getattr(m, "contents", None) or []]
     results = {c.call_id: str(c.result or "") for c in contents if c.type == "function_result"}
     carded = {c.function_call.call_id for c in contents if c.type == "function_approval_request" and c.function_call is not None}

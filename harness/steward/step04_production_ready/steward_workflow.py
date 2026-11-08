@@ -1863,8 +1863,10 @@ def build_steward_workflow(
         # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
         # tools (repair_tool_names, recover_text_tool_calls): each step's calls are offered only its tools.
         step_tools_turn,
-        later_step_calls,  # before the budget's count: a call to a later step's tool is answered, not counted
         count_calls,  # ADR-0015: EXPLORE's calls, for its reading budget
+        # After the count: a call to a later step's tool is answered in words and still spends EXPLORE's reading budget,
+        # so repeating it ends at the budget (check-answerer-p36, ce5720d: no error stop held him any more).
+        later_step_calls,
         *(agent.middleware or []),
     ]
     # His own window and keep-alive on the router's call, so Ollama answers it with the model as loaded.

@@ -22,6 +22,9 @@ was never merged and has no entry.
 
 ### Fixed
 
+- EXPLORE's answered call to a later step's tool spends its reading budget (the answer comes after the count), so a
+  repeat ends at the budget; and the bounds checks read the answer as nothing run, not a change before the plan card
+  (check-answerer-p36, ce5720d: plan_card_first failed on the answered call, and the case ran 719 s).
 - A later step's tool is answered in EXPLORE by a stand-in answerer of the same name and arguments that asks no
   card (after_approval_answerer), not by the tool put back: an eval's declaration-only stand-in made MAF pause the run
   for user input before any middleware, and the run ended on a ContentError (check-later-p36, 3119aad).
