@@ -23,6 +23,10 @@ was never merged and has no entry.
   door's `flow_*` are another system. Capabilities D4, D5 and D6 (required) and the T3 `flows` eval set
   (`t3-flows.yaml` v1: run_drift_check_by_name, startup_this_morning), with their stand-ins in `evals.STAND_INS`.
   Jesster serves `saved_flow_status` and a start-verified `saved_flow_run` (Jesster's pull request with it).
+- A plans or standins case may name a `precondition` (a RESULT check that must fail on its fixture), and `evals.py
+  validate` measures it as it does an asks case's; new result check `celsius_to_kelvin_works`. `t2-cards.yaml` v2:
+  v1 asked for a docstring `convert_length` already had (`units.py` line 8); v2 asks for `celsius_to_kelvin` and names
+  its precondition. (ADR-0012, evals/README.md.)
 - Every eval run keeps each case's transcript, `storage/evals/runs/<tag>/cases/<case id>.jsonl`: the ask, every
   message as MAF serializes it (`Message.to_dict`: text, `text_reasoning`, each call with its arguments, each result
   and any exception), each card with its answer, the steps' output and progress, every warning logged during the case
@@ -33,6 +37,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- The record brought current, with dated notes, nothing removed (2026-11-08): ADR-0003 (the AG-UI 3/3 run is at
+  `a8627e2`, not `6401b56`; the comparison rule printed "keep AG-UI off", and still does on the same history), ADR-0012
+  and ExecPlan 0001 (T0's `direct` never run yet; Milestone 2's bounds runs, 4/10 then 7/10, and the three fixed),
+  ARCHITECTURE.md (as of 2026-11-08; §6's built and next), spec 001 (A4, B3 to B5, C7, F2, F4, I6, L1 to L3 covered by
+  `bounds`), `baselines.json` (small v2 measured 17/17 on three runs; its gate bar unchanged).
 - ADR-0011 (the harness parity set) is `rejected`, its text kept, with the operator's words of 2026-11-05: "ok, so
   that all seems kind of useless for our system then, seeing as our evals are literally "can he do what is needed for
   the system reliably" therefore, we need to make custom evals to make sure steward is using everything as expected
@@ -40,6 +49,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A request to restart, start or stop one of his servers (or naming the Estate) carries the estate skill's hint into
+  the run (`REQUEST_HINTS`), as a push carries the github skill's. The second P36 rerun's transcript (2026-11-08,
+  `bounds-fixed-three`): EXPLORE made no call, reasoning "There's no tool for restarting AG-UI host", and the plan
+  asked whether it ran under systemd or Docker.
 - A No on any card ends the run in code (ADR-0015, spec 001's A6): every later model call in that request has its
   tools off (tool_choice "none" and the tools-off line), so he says what is done and what is left. The P58 rerun's
   transcript (2026-11-08) showed MAF's loop ask him again after the No, and he called `atlas_git_branch` again, then

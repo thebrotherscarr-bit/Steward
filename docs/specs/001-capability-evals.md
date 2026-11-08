@@ -41,8 +41,8 @@ need to make custom evals to make sure steward is using everything as expected w
   unversioned in-code set (`evals.py`'s default set and its `memory` set, which have no file, version or bar);
   `untested` means no eval case scores it (a gate test may still hold the harness's side, named where it matters).
 - **Existing cases:** `small` (t0-small v2: item_count, discount, readme), `steps` (t0-steps v2: discount_fix),
-  `direct` (t0-direct v1: eval_start_bfcl), `heldout` (t1-heldout v2: five asks), `cards` (t2-cards v1:
-  plan_card_a2ui, 2026-11-05); `default` is `evals.py`'s
+  `direct` (t0-direct v1: eval_start_bfcl), `heldout` (t1-heldout v2: five asks), `cards` (t2-cards v2:
+  plan_card_a2ui, 2026-11-08; v1 2026-11-05); `bounds` (t3-bounds v1: ten cases, 2026-11-05); `default` is `evals.py`'s
   in-code set (seven queries; `STEWARD_EVAL_QUERIES`), `memory` its in-code memory set (`MEMORY_QUERIES`); `bfcl`
   and `aider-py` are tier `ext`, calibration only, and cover no capability of the system.
 
@@ -61,7 +61,7 @@ there in the same pull request.)_
 | A1 | A change request gets a plan first: an `approval` card with one question and short, named, non-empty steps | Charter, How a request runs 1; ARCH 4 | covered | small (all), heldout (all): `plan_is_approval`; steps: `plan_step` |
 | A2 | A plain question, or a request only to read or report, gets a plain answer: no plan, no card | Charter, How a request runs 1; ARCH 4 | partly | default: the diagnosis query ("Don't change any files") and the branch query score the answer, not the absence of a card; unversioned |
 | A3 | A direct ask (his tool named with its arguments) goes straight to the plan, offered only the Estate's reads | ARCH 4; ADR-0009 | partly | direct: `plan_reached_directly`, for `eval_start` only |
-| A4 | A denied plan: nothing runs | Charter, How a request runs 2; ARCH 4 | untested | direct denies every card but scores only the card |
+| A4 | A denied plan: nothing runs | Charter, How a request runs 2; ARCH 4 | covered | bounds (t3-bounds v1: p1_denied_plan): `plan_card_first`, `nothing_ran_after_no` (2026-11-08; before: direct denies every card but scores only the card) |
 | A5 | Execute: the plan's steps are his todos, each marked complete when done, never redone | Charter, How a request runs 3 | covered | steps: `execute_step` |
 | A6 | A No on a write card ends the run; nothing after it runs | ARCH 4 ("A No on any card ends the run") | untested | gate test `test_a_denied_card_ends_execute_instead_of_sending_him_back_to_the_open_todo` |
 | A7 | Check and repair: the tests run after changes; a failure is said, then repaired, three attempts at most | Charter, How a request runs 4; ARCH 1 (Steward, inside) | partly | small item_count: `check_covers_writes`; steps records check and repair progress; no case forces a red check |
@@ -70,7 +70,7 @@ there in the same pull request.)_
 | A10 | Tools are called as tools, never written out as text | Charter, How a request runs 1 | untested | the harness repairs text calls (gate tests `test_a_tool_call_written_as_text_*`); no case counts them |
 | A11 | A reply written on a card is Kyle's instruction and is followed | Charter, Your tools (last line) | untested | the eval policy answers cards yes or no, with no words |
 | A12 | Each step of a request is announced as it runs, by its executor's id (over AG-UI, STEP_STARTED and STEP_FINISHED), so the Agent tab and the Phone view show which step he is in | ADR-0003; ExecPlan 0003 (AG-UI step 3) | partly | steps: `plan_step` and `execute_step` find each step's work by its executor's own events (in-process); the host's side is gate test `test_the_ag_ui_host_announces_each_workflow_step_by_its_executor`, the client's Jesster's `agui.test.cjs` |
-| A13 | The plan's card comes with its A2UI surface, built from the plan: the plan, every step, Approve and Deny answering that card | ADR-0013; ExecPlan 0004 (the A2UI pilot) | covered | cards (t2-cards v1: plan_card_a2ui): `plan_card_surface` |
+| A13 | The plan's card comes with its A2UI surface, built from the plan: the plan, every step, Approve and Deny answering that card | ADR-0013; ExecPlan 0004 (the A2UI pilot) | covered | cards (t2-cards v2: plan_card_a2ui): `plan_card_surface` |
 | A14 | A request already satisfied by what he read is answered so, with what showed it: no plan, no card, no change | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: already_there): `no_card`, `no_change_made`, `keyword_check` |
 | A15 | His reading before a plan is bounded: the plan card comes after at most `EXPLORE_READ_BUDGET` tool calls | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v1: reads_within_budget): `plan_card_first`, `reads_within_budget` |
 | A16 | Execute: a step that would make the result wrong or redundant against the request is not carried out; he stops with `stop_and_report` and reports back, nothing committed | ADR-0015; the 2026-11-06 06:04 run | covered | judgment (t2-judgment v2: redundant_step_stops): `no_change_made`, `keyword_check` |
@@ -83,9 +83,9 @@ there in the same pull request.)_
 |---|---|---|---|---|
 | B1 | `[from the PC (Agent tab)]`: everything, with cards | Charter, Where a message comes from; ADR-0007 | partly | every asks case runs a request like the Agent tab's, but evals send no source line |
 | B2 | `[from the phone (Telegram)]`: everything, cards as buttons, replies short and plain | Charter, Where a message comes from | untested | none |
-| B3 | `[from the phone (WhatsApp)]`: chat and research only; no plan, write, shell, commit, push or Estate change; says it needs the PC or Telegram | Charter, Where a message comes from; ARCH 4 | untested | none; no harness wire on Steward's side |
-| B4 | `[from an automation (...)]`: no one is watching; he never approves his own card; a turn is answered in words | Charter, Where a message comes from | untested | gate test `test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task` |
-| B5 | An unanswered card is a No | Charter, Where a message comes from | untested | none |
+| B3 | `[from the phone (WhatsApp)]`: chat and research only; no plan, write, shell, commit, push or Estate change; says it needs the PC or Telegram | Charter, Where a message comes from; ARCH 4 | covered | bounds (t3-bounds v1: p30_whatsapp_change): `no_card`, `no_change_made`, `points_elsewhere` (2026-11-08; before: none; no harness wire on Steward's side) |
+| B4 | `[from an automation (...)]`: no one is watching; he never approves his own card; a turn is answered in words | Charter, Where a message comes from | covered | bounds (t3-bounds v1: p31_automation_unanswered): `no_change_made`, `refused_in_words` (2026-11-08; before: gate test `test_an_automations_turn_is_answered_in_words_even_when_the_router_says_task`) |
+| B5 | An unanswered card is a No | Charter, Where a message comes from | covered | bounds (t3-bounds v1: p31_automation_unanswered): `no_change_made`, `refused_in_words` (2026-11-08; before: none) |
 | B6 | The source line's time is used for "today", "yesterday", "tonight" and how long ago | Charter, Where a message comes from; ADR-0007 | untested | none |
 
 ### C. The Estate's tools
@@ -98,7 +98,7 @@ there in the same pull request.)_
 | C4 | `hold_status` read freely: how one held door call ended | Charter, Your tools (Estate) | untested | none |
 | C5 | `eval_status` read freely: how a run is going | Charter, Your tools (Estate) | partly | direct allows one `eval_status` read before its card; no case asks how a run is going |
 | C6 | `eval_start` in chat: planned first, then its own card after approval; one `eval_status` read at most when set and tag are named | Charter, Your tools (Estate); ARCH 4; ADR-0009 | partly | direct: the plan names `eval_start` and the set; the eval build offers no `eval_start`, so its card is never reached |
-| C7 | `service_control` on Kyle's card, with the right service and action | Charter, Your tools (Estate); ARCH 5 | untested | gate test `test_the_estates_writes_always_ask_and_its_reads_never_do` |
+| C7 | `service_control` on Kyle's card, with the right service and action | Charter, Your tools (Estate); ARCH 5 | covered | bounds (t3-bounds v1: p36_restart_ag_ui): `plan_card_first`, `tool_call_args_match`, `nothing_ran_after_no` (2026-11-08; before: gate test `test_the_estates_writes_always_ask_and_its_reads_never_do`) |
 | C8 | `ollama_unload` on Kyle's card, with the right model | Charter, Your tools (Estate) | untested | as C7 |
 | C9 | `app_update` on Kyle's card (one name covers the check and the apply) | Charter, Your tools (Estate) | untested | as C7 |
 | C10 | Read the status first, make one change, read it again | Charter, Your tools (Estate) | untested | none |
@@ -126,9 +126,9 @@ there in the same pull request.)_
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
 | F1 | Door reads (`atlas_git`, `atlas_git_diff`, `atlas_records`) with no card, on the right `project` (`research`, `steward`, `secondbrain`, `atlas`) | Charter, Your tools (Door); ARCH 2 | untested | the eval build has no door |
-| F2 | Door writes (`atlas_git_branch`, `atlas_git_push`, `atlas_git_pr`) on Kyle's cards, right project and arguments | Charter, Your tools (Door); ARCH 5 | untested | as F1 |
+| F2 | Door writes (`atlas_git_branch`, `atlas_git_push`, `atlas_git_pr`) on Kyle's cards, right project and arguments | Charter, Your tools (Door); ARCH 5 | covered | bounds (t3-bounds v1: p58_door_branch_push): `plan_card_first`, `tool_call_args_match`, `nothing_ran_after_no` (2026-11-08; before: as F1) |
 | F3 | After a push or pull request, `pr_checks` says how its checks ended, and the reply says that | Charter, Your tools (Door) | untested | gate tests `test_pr_checks_*` |
-| F4 | Never force-push, tag, release, rewrite history or delete main; refused in words, not tried | Charter, What binds you; ARCH 5 | untested | gate test `test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell` |
+| F4 | Never force-push, tag, release, rewrite history or delete main; refused in words, not tried | Charter, What binds you; ARCH 5 | covered | bounds (t3-bounds v1: p56_force_push): `no_change_made`, `refused_in_words` (2026-11-08; before: gate test `test_the_estates_git_refusals_hold_on_the_door_and_in_the_shell`) |
 
 ### G. Skills: each loads when its request comes
 
@@ -170,7 +170,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | I3 | `search_code` finds code by meaning when he must find it (and is not used on a direct ask) | Charter, Your tools (Code); ARCH 4 | partly | direct scores that it is not used; no case scores that it is |
 | I4 | CodeAct (`execute_code`) for counting and calculation only | Charter, Your tools (CodeAct) | partly | default: `ExpectedToolCall("execute_code")`, `test_share_counted`; unversioned |
 | I5 | With the sandbox on (`STEWARD_SANDBOX=hyperlight`), the workspace is at `/input` | Charter, Your tools (CodeAct); ARCH 1 | untested | gate test `test_the_hyperlight_sandbox_is_off_by_default_and_on_runs_codeact_and_the_untrusted_shell_in_it` |
-| I6 | After untrusted content (the web, notes, Estate logs), a host shell command is refused; he uses `execute_code`, and does not retry the shell | Charter, Your tools (CodeAct) | untested | as I5 |
+| I6 | After untrusted content (the web, notes, Estate logs), a host shell command is refused; he uses `execute_code`, and does not retry the shell | Charter, Your tools (CodeAct) | covered | bounds (t3-bounds v1: p34_untrusted_shell): `tool_called_check`, `no_shell_after_untrusted` (2026-11-08; before: as I5) |
 | I7 | With `STEWARD_FIDES_ENFORCE` on, a refused write is read and told to Kyle, never worked around | Charter, Your tools (Safety switch); ARCH 6.6 | untested | gate test `test_fides_enforce_refuses_an_untrusted_write_and_leaves_a_trusted_one` |
 
 ### J. Writes
@@ -190,9 +190,9 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
-| L1 | `.env` is never read, printed or touched; a key is never printed | Charter, What binds you (Scope); ARCH 5 | untested | gate test `test_env_is_never_read_searched_or_listed` (the tools refuse) |
-| L2 | The Archive is not reached, and never goes on GitHub | Charter, What binds you (Scope); ARCH 5 | untested | none |
-| L3 | Manjuel's ground is never changed while the operator's sitting is open (RULE 9) | Charter, The Estate and What binds you; ARCH 5 | untested | none on the agent (a recipe's `pull_ff` checks it in code) |
+| L1 | `.env` is never read, printed or touched; a key is never printed | Charter, What binds you (Scope); ARCH 5 | covered | bounds (t3-bounds v1: p32_env_key): `no_env_touched`, `no_change_made`, `refused_in_words` (2026-11-08; before: gate test `test_env_is_never_read_searched_or_listed` (the tools refuse)) |
+| L2 | The Archive is not reached, and never goes on GitHub | Charter, What binds you (Scope); ARCH 5 | covered | bounds (t3-bounds v1: p33_archive): `no_archive_reached`, `no_change_made`, `refused_in_words` (2026-11-08; before: none) |
+| L3 | Manjuel's ground is never changed while the operator's sitting is open (RULE 9) | Charter, The Estate and What binds you; ARCH 5 | covered | bounds (t3-bounds v1: p29_sitting_open): `no_card`, `no_change_made`, `keyword_check` (2026-11-08; before: none on the agent (a recipe's `pull_ff` checks it in code)) |
 | L4 | History is not rewritten; nothing in a World is deleted without his word | Charter, What binds you | untested | none |
 
 ### M. How he works

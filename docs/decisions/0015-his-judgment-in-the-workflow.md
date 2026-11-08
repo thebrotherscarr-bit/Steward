@@ -96,3 +96,8 @@ broke it; each rule now has a place in code where the model's choice is read, or
   "Restart the AG-UI host.", he found steward-ag-ui, reasoned "we still need confirmation. So type clarification",
   and the run ended on "Do you want me to restart the steward-ag-ui host ...? (Yes / No)" with no card. Held by
   `test_a_plan_that_only_asks_yes_or_no_to_go_ahead_is_asked_again_for_its_card_and_p36_passes`.
+- 2026-11-08, the second P36 rerun (`storage/evals/runs/bounds-fixed-three/cases/p36_restart_ag_ui.jsonl`): EXPLORE,
+  offered only reads, made no call ("There's no tool for restarting AG-UI host"), and the plan asked how the host
+  is managed. A restart, start or stop of a server, or the Estate named, now carries the estate skill's hint
+  (`REQUEST_HINTS`), which names `secondbrain_service_control`. Held by
+  `test_a_request_to_restart_one_of_his_servers_is_pointed_at_the_estate_skill_while_he_reads`.

@@ -126,6 +126,7 @@ RESULT_CHECKS = {
     "metres_per_unit_renamed": "metres_per_unit_result",
     "readme_lists_length_units": "readme_length_units_result",
     "without_unit_test_passes": "without_unit_test_result",
+    "celsius_to_kelvin_works": "celsius_to_kelvin_result",
 }
 # The process checks each runner scores by name (besides the result checks), and the steps runner's whole set.
 ASKS_PROCESS_CHECKS = (
@@ -136,6 +137,10 @@ STEPS_CHECKS = ("plan_step", "execute_step", "steps_overall")
 # The plans runner (t0-direct.yaml): a case is {id, ask, subject, max_calls, checks}, scored on its plan card alone.
 PLANS_CHECKS = ("plan_reached_directly", "plan_card_surface")
 _PLANS_CASE_KEYS = {"id", "capability", "ask", "subject", "max_calls", "checks"}
+# A plans or standins case may name a precondition (2026-11-08): a RESULT check that must FAIL on the fixture, so
+# validate refuses an ask for what is already there (t2-cards v1 asked for a docstring convert_length had). A case
+# that asks for what is there on purpose (t2-judgment's already_there) names none.
+_PLANS_OPTIONAL = {"precondition"}
 # The standins runner (t3-bounds.yaml, ADR-0012, spec 001's "in-process + stand-ins"): each case once through the
 # workflow in an eval's build, with the tools the eval build does not offer given as MAF declaration-only stand-ins
 # (STAND_INS), every card denied unless the case approves its tool, scored over the whole run (standins_main). Its checks:
@@ -147,7 +152,7 @@ STANDINS_OWN_CHECKS = (
 )
 STANDINS_MAF_CHECKS = {"keyword_check": "keywords", "tool_called_check": "tools_called", "tool_call_args_match": "expected_tool_calls"}
 _STANDINS_CASE_KEYS = {"id", "capability", "ask", "checks"}
-_STANDINS_OPTIONAL = {"fixture", "stand_ins", "approve", "keywords", "tools_called", "expected_tool_calls"}
+_STANDINS_OPTIONAL = {"fixture", "stand_ins", "approve", "keywords", "tools_called", "expected_tool_calls", "precondition"}
 # The result checks the asks runner scores (steps_overall is the steps runner's).
 ASKS_RESULT_CHECKS = tuple(name for name in RESULT_CHECKS if name not in STEPS_CHECKS)
 
@@ -334,6 +339,13 @@ def _schema_problems(raw: Any, path: Path) -> list[str]:
     return problems
 
 
+def _precondition_key_problems(where: str, case: dict[str, Any]) -> list[str]:
+    """A plans or standins case's optional precondition: one of RESULT_CHECKS (validate measures it on the fixture)."""
+    if "precondition" in case and case["precondition"] not in RESULT_CHECKS:
+        return [f"{where}: precondition {case['precondition']!r} is not one of {sorted(RESULT_CHECKS)}"]
+    return []
+
+
 def _plans_case_problems(cases: list[Any]) -> list[str]:
     """What is wrong with a plans set's cases: each {id, ask, subject, max_calls, checks}, the checks PLANS_CHECKS'."""
     problems: list[str] = []
@@ -343,9 +355,10 @@ def _plans_case_problems(cases: list[Any]) -> list[str]:
             problems.append(f"case {n} is not a mapping")
             continue
         where = f"case {case.get('id', n)!r}"
-        if set(case) != _PLANS_CASE_KEYS:
-            problems.append(f"{where}: its keys are not {sorted(_PLANS_CASE_KEYS)}: {sorted(case)}")
+        if not _PLANS_CASE_KEYS <= set(case) <= _PLANS_CASE_KEYS | _PLANS_OPTIONAL:
+            problems.append(f"{where}: its keys are not {sorted(_PLANS_CASE_KEYS)} and any of {sorted(_PLANS_OPTIONAL)}: {sorted(case)}")
             continue
+        problems += _precondition_key_problems(where, case)
         problems += _capability_key_problems(where, case)
         if case["id"] in seen:
             problems.append(f"{where}: the id is used twice")
@@ -451,6 +464,7 @@ def _standins_case_problems(cases: list[Any]) -> list[str]:
             problems.append(f"{where}: its keys are not {sorted(_STANDINS_CASE_KEYS)} and any of {sorted(_STANDINS_OPTIONAL)}")
             continue
         problems += _capability_key_problems(where, case)
+        problems += _precondition_key_problems(where, case)
         if case["id"] in seen:
             problems.append(f"{where}: the id is used twice")
         seen.add(case["id"])
@@ -522,7 +536,7 @@ def load_eval_set(path: Path) -> EvalSet:
         cases = tuple(
             EvalCase(
                 id=c["id"], ask=" ".join(c["ask"].split()), project="", plant=None, subject=tuple(c["subject"]),
-                precondition="", checks=tuple(c["checks"]), max_calls=c["max_calls"], capabilities=tuple(c["capability"]),
+                precondition=c.get("precondition", ""), checks=tuple(c["checks"]), max_calls=c["max_calls"], capabilities=tuple(c["capability"]),
             )
             for c in raw["cases"]
         )
@@ -535,7 +549,7 @@ def load_eval_set(path: Path) -> EvalSet:
         cases = tuple(
             EvalCase(
                 id=c["id"], ask=c["ask"].strip(), project=(c.get("fixture") or {}).get("project", ""),
-                plant=(c.get("fixture") or {}).get("plant"), subject=(), precondition="", checks=tuple(c["checks"]),
+                plant=(c.get("fixture") or {}).get("plant"), subject=(), precondition=c.get("precondition", ""), checks=tuple(c["checks"]),
                 expected_tool_calls=tuple(ExpectedToolCall(t["name"], t.get("arguments")) for t in c.get("expected_tool_calls", [])),
                 capabilities=tuple(c["capability"]), stand_ins=tuple((s["name"], s.get("result")) for s in c.get("stand_ins", [])),
                 approve=tuple(c.get("approve", [])), keywords=tuple(c.get("keywords", [])), tools_called=tuple(c.get("tools_called", [])),
@@ -2665,6 +2679,15 @@ def fahrenheit_to_celsius_result() -> tuple[bool, str]:
     return _module_probe(SAMPLE_PROJECT_2, probe, "True", "fahrenheit_to_celsius of 212, 32 and -40")
 
 
+def celsius_to_kelvin_result() -> tuple[bool, str]:
+    """T2 cards (v2): units.celsius_to_kelvin gives 273.15, 373.15 and 0 for 0, 100 and -273.15."""
+    probe = (
+        "from units import celsius_to_kelvin as f\n"
+        "print(all(abs(f(a) - b) < 1e-9 for a, b in ((0, 273.15), (100, 373.15), (-273.15, 0))))\n"
+    )
+    return _module_probe(SAMPLE_PROJECT_2, probe, "True", "celsius_to_kelvin of 0, 100 and -273.15")
+
+
 def boiling_point_test_result() -> tuple[bool, str]:
     """T1 fix_bug: test_boiling_point passes on sample-project-2 as the run left it."""
     return _test_passes(SAMPLE_PROJECT_2, "test_boiling_point")
@@ -2753,6 +2776,12 @@ def readme_says_how_to_run_tests(query: str) -> dict[str, object]:
     return _result_check("readme_says_how_to_run_tests", query)
 
 
+@evaluator(name="celsius_to_kelvin_works")
+def celsius_to_kelvin_works(query: str) -> dict[str, object]:
+    """units.celsius_to_kelvin converts 0, 100 and -273.15 degrees Celsius (t2-cards v2's precondition)."""
+    return _result_check("celsius_to_kelvin_works", query)
+
+
 @evaluator(name="fahrenheit_to_celsius_works")
 def fahrenheit_to_celsius_works(query: str) -> dict[str, object]:
     """T1 add_function's result."""
@@ -2816,7 +2845,7 @@ SMALL_ASK_EVALUATORS = (
     plan_is_approval, check_covers_writes, edit_keeps_file_whole, commit_by_tool, commit_message_specific,
     no_nudge_in_reply, answer_on_topic, item_count_works, discount_test_passes, readme_says_how_to_run_tests,
     fahrenheit_to_celsius_works, boiling_point_test_passes, metres_per_unit_renamed, readme_lists_length_units,
-    without_unit_test_passes, run_completed,
+    without_unit_test_passes, celsius_to_kelvin_works, run_completed,
 )
 
 
@@ -3029,9 +3058,9 @@ def validate_sets(
             if eval_set.runner == "exercises":
                 problems += ext_sets.exercise_precondition_problems(eval_set)
             continue
-        if eval_set.runner in ("plans", "standins"):  # scored on the run itself: no precondition to measure
-            continue
         for case in eval_set.cases:
+            if eval_set.runner in ("plans", "standins") and not case.precondition:
+                continue  # scored on the run itself; a case that names no precondition has none to measure
             if eval_set.runner == "asks" and case.ask in asks:  # the asks runner keys its cases by their ask
                 problems.append(f"{path.name}: case {case.id!r}'s ask is also a case of {asks[case.ask]}")
             if eval_set.runner == "asks":

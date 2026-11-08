@@ -1210,6 +1210,20 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     assert asked == []
 
 
+def test_a_request_to_restart_one_of_his_servers_is_pointed_at_the_estate_skill_while_he_reads() -> None:
+    """The P36 rerun of 2026-11-08: "Restart the AG-UI host." reached EXPLORE with nothing pointing at his Estate's
+    tools; he reasoned "There's no tool for restarting AG-UI host" and asked whether it was systemd or Docker. The
+    request now carries the estate skill's hint into the run's first call (RequestHints), and a request about code
+    carries none."""
+    estate = 'call load_skill("estate")'
+    for request in ("Restart the AG-UI host.", "Stop the door server, please.", "What does the Estate run?"):
+        assert [h for p, h, _ in steward.REQUEST_HINTS if p.search(request) and estate in h], request
+    for request in ("Add a function to units.py.", "Start a line of work for the README fix."):
+        assert not [h for p, h, _ in steward.REQUEST_HINTS if p.search(request) and estate in h], request
+    client, _, _ = run_steward(["ok"], "Restart the AG-UI host.")
+    assert estate in str(client.calls[0]["options"].get("instructions") or ""), "the hint reaches his first call"
+
+
 def test_his_user_level_sandbox_switch_does_not_change_a_codeact_test(monkeypatch: Any) -> None:
     """2026-11-05: STEWARD_SANDBOX=hyperlight in his environment, with a sandbox that would start and its answer already
     cached "on", reddened the CodeAct test above on his PC. Cleared as the autouse fixture clears it, the build is
@@ -7409,7 +7423,7 @@ def test_the_plan_card_comes_with_its_a2ui_surface_over_ag_ui_and_in_the_cards_e
     code = asyncio.run(evals.plans_main(eval_set, client=client, enable_shell=False))
     [line] = evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()
     run = json.loads(line)
-    assert code == 0 and (run["set"], run["set_version"], run["passed"], run["total"]) == ("cards", 1, 1, 1), run
+    assert code == 0 and (run["set"], run["set_version"], run["passed"], run["total"]) == ("cards", 2, 1, 1), run
 
     # without the surface, the check fails
     card = Content.from_function_approval_request(
@@ -8610,6 +8624,41 @@ def test_his_mcp_host_serves_recipe_graph_and_recipe_runs_for_the_flows_shelf(tm
             time.sleep(0.05)
         assert [(r["run_id"], r["trigger"], r["state"]) for r in listed] == [(run_id, "now", "done")]
         assert [s["state"] for s in listed[0]["steps"]] == ["done", "done", "done"]
+
+
+def test_a_plans_or_standins_case_that_asks_for_what_is_there_is_refused_by_validate(tmp_path: Any, monkeypatch: Any) -> None:
+    """2026-11-08: t2-cards v1 asked for a docstring convert_length already had (units.py line 8), and validate never
+    looked, as plans and standins cases had no precondition. Now such a case may name one (a RESULT check that must
+    fail on the fixture) and validate measures it like an asks case's; cards v2 names celsius_to_kelvin_works. Red if
+    validate stops measuring it, or the cards case stops naming it."""
+    import shutil
+
+    import evals
+    import yaml
+
+    cards = evals.EVAL_SETS["cards"]
+    assert cards.version == 2 and cards.cases[0].precondition == "celsius_to_kelvin_works", cards.cases[0]
+    held, reason = evals.celsius_to_kelvin_result()
+    assert held is False, f"the fixture has no celsius_to_kelvin: {reason}"
+    assert evals.validate_sets() == []
+
+    folder = tmp_path / "evals"
+    shutil.copytree(evals.EVAL_SETS_DIR, folder)
+    # the fixture already has what the ask asks for: refused, naming the case
+    monkeypatch.setattr(evals, "celsius_to_kelvin_result", lambda: (True, "celsius_to_kelvin is there"))
+    problems = evals.validate_sets(folder)
+    assert any("t2-cards.yaml: case 'plan_card_a2ui': its precondition celsius_to_kelvin_works already passes" in p for p in problems), problems
+    monkeypatch.undo()
+
+    # a standins case may name one too; an unknown name is refused
+    judgment = folder / "t2-judgment.yaml"
+    raw = yaml.safe_load(judgment.read_text(encoding="utf-8"))
+    raw["cases"][1]["precondition"] = "no_such_check"
+    judgment.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    assert any("precondition 'no_such_check' is not one of" in p for p in evals.validate_sets(folder))
+    raw["cases"][1]["precondition"] = "readme_says_how_to_run_tests"  # the committed README already says how
+    judgment.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    assert any("t2-judgment.yaml: case" in p and "already passes" in p for p in evals.validate_sets(folder))
 
 
 def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unplugged(tmp_path: Any) -> None:
