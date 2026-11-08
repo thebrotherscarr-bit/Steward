@@ -238,6 +238,21 @@ as a comment on its id line. N8 moved from M4 to MP, the profile mechanism's fir
 | N17 | GitHub writes are withheld until the operator's word: asked for a branch, commit, push, pull request or merge on GitHub, he says the hand does it for now and calls no write | ADR-0016; ExecPlan 0005, M9 | covered | bounds (t3-bounds v2: p58_door_writes_withheld): `no_card`, `no_change_made`, `refused_in_words`; the router's GitHub-write refusal (steward_workflow.GITHUB_WRITE_REFUSAL) (2026-11-08) |
 | N18 | Anything at the keyboard: an operation no tool covers is one `run_shell` on his card with the command in full; no screen control; after untrusted content the shell stays refused and he says a new session is needed | ADR-0016; ExecPlan 0005, M10 | untested | none (M10) |
 
+### O. Portable install
+
+_(2026-11-08, [ADR-0020](../decisions/0020-portable-by-design.md),
+[ExecPlan 0006](../plans/0006-portable-install-and-samples.md). Each is marked required in the map in the pull request
+that lands its case.)_
+
+| ID | Capability | Source | Coverage | Existing case |
+|---|---|---|---|---|
+| O1 | The model is a binding: model, endpoint and context window come from the install's config, never from code; a profile whose `requires` the binding does not meet is refused by name with what is missing | ADR-0020; ADR-0019; ExecPlan 0006, P2 | untested | none (P2) |
+| O2 | One config: the install's one STEW `.us` declaration, written at first run; its paths relative to the install folder, no host name, user or account in it, no key in it | ADR-0020; ExecPlan 0006, P1, P2 | untested | none (P1, P2) |
+| O3 | The doctor: the runtime reachable, the model bound and pulled, the ports free, the config valid, the keys of the pieces turned on present; every failure one line saying what failed and how to fix it; exit code 0 only when all pass | ADR-0020; ExecPlan 0006, P4 | untested | none (P4) |
+| O4 | First run ends with one proof: one small gating eval case run once on the bound model, its pass and its binding shown | ADR-0020; ExecPlan 0006, P4 | untested | none (P4) |
+| O5 | Optional pieces (Telegram, WhatsApp, the sandbox, Aurora, the door's forwarded tools, the notes kernel) are off in a new install; one that is off never fails the doctor or a run | ADR-0020; ExecPlan 0006, P5 | untested | none (P5) |
+| O6 | The friend test: a clean Windows runner installs from the release zip, passes the doctor and the proof case on a small CPU model; a red blocks the release | ADR-0020; ExecPlan 0006, P6 | untested | none (P6) |
+
 ### The count
 
 | | Capabilities | Covered | Partly | Untested |
@@ -256,7 +271,8 @@ as a comment on its id line. N8 moved from M4 to MP, the profile mechanism's fir
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
 | N. The brain of the PC | 18 | 0 | 0 | 18 |
-| **Total** | **101** | **14** | **14** | **73** |
+| O. Portable install | 6 | 0 | 0 | 6 |
+| **Total** | **107** | **14** | **14** | **79** |
 
 ## The proposed cases
 

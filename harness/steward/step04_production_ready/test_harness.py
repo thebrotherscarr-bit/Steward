@@ -8684,7 +8684,7 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     import yaml
 
     capabilities = evals.load_capabilities()
-    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 101  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; N1 to N18: ADR-0016; D4 to D6: ADR-0017
+    assert list(capabilities) == evals.spec_capability_ids() and len(capabilities) == 107  # A12, A13: ExecPlans 0003, 0004; A14 to A18: ADR-0015; N1 to N18: ADR-0016; D4 to D6: ADR-0017; O1 to O6: ADR-0020
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}

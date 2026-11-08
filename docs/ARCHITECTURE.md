@@ -4,7 +4,7 @@ The one design document for the whole system (Neiro, "the Estate"): its parts, t
 keeps, how work flows through it, the rules that bind it, and the build plan ahead. It is kept in Steward's
 repository because Steward runs the Estate.
 
-- **As of:** 2026-11-08 (ADRs 0001 to 0017, spec 001, ExecPlans 0001 to 0005).
+- **As of:** 2026-11-08 (ADRs 0001 to 0020, specs 001 to 004, ExecPlans 0001 to 0006).
 - **Decisions:** every architectural decision is an ADR in [`decisions/`](decisions/README.md). Every architectural
   change gets an ADR before it is built, and this file is updated in the same pull request when a decision changes
   the shape (the operator, 2026-11-05: "make this the standard moving forward, this way nothing gets misaligned").
@@ -320,7 +320,8 @@ lines of instructions, read budget, gpt-oss reasoning effort, gates, card, succe
 profile; the plan card shows plan and profile together. Variants are compared on the profile's cases and the winner
 promoted; automatic variant search comes last. The plan is frozen: changed only on a run's evidence. Lanes: A,
 Steward's harness core (in order); B, Jesster's tools and the phone loop; C, the plan keeper; the lead reviews,
-installs and runs one eval at a time. The order: M9a, M0, MP, then M1 to M10.
+installs and runs one eval at a time. The order: M9a, M0, MP, then ExecPlan 0006 (P1 to P8, below), then the
+remaining items of M1 to M10 (2026-11-08: M1's Lane B pieces, already built, stay built).
 
 - **M9a, GitHub write tools out of his build (now):** `atlas_git_branch`, `_commit`, `_push`, `_pr` removed; the
   Charter's Door lines changed in the same step; `t3-bounds.yaml` v2 (P58 a refusal, N17). Lane A.
@@ -333,6 +334,15 @@ installs and runs one eval at a time. The order: M9a, M0, MP, then M1 to M10.
    by risk (ExecPlan 0001, Milestones 3 to 6).
 - **MP, the profile mechanism, with `eval-runner` as profile 1** (N8): plan and profile on one card, `name@version`
    recorded, validate reading `profile:`, variants compared and promoted.
+- **Portable install and samples, [ExecPlan 0006](plans/0006-portable-install-and-samples.md)**
+   ([ADR-0020](decisions/0020-portable-by-design.md), on [ADR-0019](decisions/0019-steward-implements-stew.md); the
+   operator, 2026-11-08: "installed on a friends PC... it 'just works'. simplicity is key"; capabilities O1 to O6),
+   after M0 and MP and before the rest of M1 to M10, in this order: **P1** the portability fixes from the audit
+   (Lanes A and B); **P2** the model as a binding, `requires` in profiles (Lane A); **P3** one installer, SecondBrain's
+   release carrying Steward and a uv lock (Lane B); **P4** first-run setup, the doctor and the one-case proof (Lane B);
+   **P5** optional pieces off by default (Lane B); **P6** the clean-machine friend test in CI, gating the release
+   (Lane B); **P7** STEW samples 01 to 05, in the STEW repository; **P8** Steward's declarations migrated to STEW
+   `.us` (Lane A, ADR-0019's steps). The lead reviews, installs and runs one eval at a time.
 1. **M1, the away loop and phone summaries** (N1 to N4): a Telegram card answered on the phone continues the run and
    the result comes back to the phone, Deny and no answer included; no run ends silently; per-run limits. Proved on a
    live host. Profile `away-loop`.

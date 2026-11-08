@@ -47,6 +47,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
 | [0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted; amended in part by 0019 |
 | [0019](decisions/0019-steward-implements-stew.md) | Steward implements STEW: profiles, tasks, evals and records become STEW `.us` declarations; the model is a binding in config | accepted |
+| [0020](decisions/0020-portable-by-design.md) | Portable by design: one installer, one config, the model as a binding, a doctor, and a clean-machine test | accepted |
 
 ## Specs
 
@@ -70,6 +71,7 @@ ExecPlan here, kept living to [`.agent/PLANS.md`](../.agent/PLANS.md). The index
 | [0003](plans/0003-ag-ui-step-3.md) | AG-UI step 3: show Steward's workflow steps live in the Agent tab's console and the Phone view | ADR-0003 |
 | [0004](plans/0004-a2ui-pilot-plan-card.md) | A2UI pilot: draw Steward's plan card from an A2UI surface he sends | ADR-0013 |
 | [0005](plans/0005-steward-runs-the-pc-from-the-phone.md) | Steward runs the PC from the phone (frozen 2026-11-08; one operation per milestone) | ADR-0016, ADR-0018 |
+| [0006](plans/0006-portable-install-and-samples.md) | Portable install and samples: one installer, the model as a binding, a doctor, the friend test, STEW samples | ADR-0020, ADR-0019 |
 
 Steward's own guides stay beside his code: `harness/steward/README.md` (the harness, step by step) and
 `harness/steward/evals/README.md` (the eval sets).

@@ -77,3 +77,4 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0017](0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
 | [0018](0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted; amended in part by 0019 |
 | [0019](0019-steward-implements-stew.md) | Steward implements STEW: profiles, tasks, evals and records become STEW `.us` declarations; the model is a binding in config | accepted |
+| [0020](0020-portable-by-design.md) | Portable by design: one installer, one config, the model as a binding, a doctor, and a clean-machine test | accepted |
