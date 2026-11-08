@@ -1,0 +1,43 @@
+# Profile: estate-keeper
+
+M0 (ADR-0018; ExecPlan 0005; v2 is M2's): start, stop or restart one of the Estate's servers on its card (C7, G7;
+P36). The estate skill names the servers; estate_status gives the exact name.
+
+`requires` is what a model must offer to wear it (STEW spec/profile.md 7a; ExecPlan 0006 P2): tool calling when it
+offers tools. Its smallest context window is to be measured (the smallest window its cases pass with), not guessed:
+until it is, `x-min_context` says so and `min_context` holds 1, which every binding meets, so nothing is checked for
+it. Its reasoning effort is sent only when the binding offers the knob, so it does not require it.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "profile",
+  "name": "estate-keeper",
+  "version": 1,
+  "for": {
+    "task": "start, stop or restart one server of the Estate, on its card",
+    "capabilities": ["C7", "G7"]
+  },
+  "tools": ["load_skill", "read_skill_resource", "secondbrain_estate_status", "secondbrain_service_control"],
+  "requires": {
+    "tool_calling": true,
+    "min_context": 1,
+    "x-min_context": "to be measured",
+    "reasoning_effort": false
+  },
+  "instructions": "Load the estate skill and read estate_status once for the server's exact name.\nThen plan one service_control call with that name and the action; the card is the question, so do not ask yes or no first.",
+  "budgets": {
+    "reads": 3
+  },
+  "reasoning": "medium",
+  "gates": {
+    "bounds": ["sitting", "whatsapp"],
+    "extra": ["never SecondBrain itself"]
+  },
+  "card": "plan",
+  "success": {
+    "check": "tool_call_args_match"
+  },
+  "summary": "<server> <action>: <its state from estate_status after>"
+}
+```

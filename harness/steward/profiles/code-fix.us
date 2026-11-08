@@ -1,0 +1,85 @@
+# Profile: code-fix
+
+M0 (ADR-0018; ExecPlan 0005): fix a bug in a workspace's code, on the plan card; the checks run the tests of what
+changed and the commit is its own card (A4; P1). The router picks it for a request that opens with "fix", so every
+such case names it (t0-small discount, t0-steps discount_fix, t1-heldout fix_bug: the same family, one of them the
+same ask as P1). Its tools are the code work's: file access, the todos, the skills, code search, the shell for the
+tests, memory and his notes' reads (a fix may look up a plan or a ruling); not the Estate, the door, the background
+agents or CodeAct.
+
+`requires` is what a model must offer to wear it (STEW spec/profile.md 7a; ExecPlan 0006 P2): tool calling when it
+offers tools. Its smallest context window is to be measured (the smallest window its cases pass with), not guessed:
+until it is, `x-min_context` says so and `min_context` holds 1, which every binding meets, so nothing is checked for
+it. Its reasoning effort is sent only when the binding offers the knob, so it does not require it.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "profile",
+  "name": "code-fix",
+  "version": 1,
+  "for": {
+    "task": "fix a bug in the workspace's code: plan, approve, edit, the tests checked, the commit on its card",
+    "capabilities": ["A1", "A4", "A5", "A9", "A12", "J1", "J2"]
+  },
+  "tools": [
+    "get_repo_status",
+    "search_code",
+    "git_commit",
+    "run_shell",
+    "stop_and_report",
+    "secondbrain_search_notes",
+    "secondbrain_read_note",
+    "secondbrain_list_notes",
+    "file_access_read",
+    "file_access_read_lines",
+    "file_access_ls",
+    "file_access_grep",
+    "file_access_write",
+    "file_access_replace",
+    "file_access_replace_lines",
+    "file_access_delete",
+    "todos_add",
+    "todos_complete",
+    "todos_remove",
+    "todos_get_remaining",
+    "todos_get_all",
+    "file_memory_write",
+    "file_memory_read",
+    "file_memory_delete",
+    "file_memory_ls",
+    "file_memory_replace",
+    "file_memory_replace_lines",
+    "file_memory_grep",
+    "load_skill",
+    "read_skill_resource",
+    "run_skill_script",
+    "list_memory_topics",
+    "read_memory_topic",
+    "search_memory_transcripts",
+    "write_memory",
+    "delete_memory_topic",
+    "consolidate_memories"
+  ],
+  "requires": {
+    "tool_calling": true,
+    "min_context": 1,
+    "x-min_context": "to be measured",
+    "reasoning_effort": false
+  },
+  "instructions": "",
+  "budgets": {
+    "reads": 8
+  },
+  "reasoning": "medium",
+  "gates": {
+    "bounds": ["keys", "archive", "untrusted-shell", "sitting"],
+    "extra": []
+  },
+  "card": "plan",
+  "success": {
+    "check": "nothing_ran_after_no"
+  },
+  "summary": "<the fix>: <files changed>, checks <passed or failed>"
+}
+```

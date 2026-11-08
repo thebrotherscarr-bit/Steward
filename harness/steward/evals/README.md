@@ -78,7 +78,7 @@ changes:                   # what each version changed; the current version must
 cases:
   - id: add_function
     capability: [A1]       # the capability map's ids the case covers (capabilities.yaml)
-    profile: general       # the harness profile it runs under (spec 003; harness/steward/profiles/<name>.yaml)
+    profile: general       # the harness profile it runs under (spec 003; harness/steward/profiles/<name>.us)
     ask: Add a function ... to harness/steward/working/sample-project-2/units.py ...
     fixture: {project: harness/steward/working/sample-project-2, plant: null}   # plant: a name in evals.PLANTS
     subject: [fahrenheit_to_celsius]   # lower-case terms an on-topic answer (and a commit message) names

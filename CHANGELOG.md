@@ -43,6 +43,13 @@ was never merged and has no entry.
 - ExecPlan 0006 P8 step 1 (ADR-0019 migration step 1): the gate's new `stew` step checks out STEW at a pinned
   commit (`aec5527`) and runs its `tools/validate.py` over every tracked `.us` file (`git ls-files "*.us"`), so main
   cannot take an invalid declaration. CI only; no restart.
+- ExecPlan 0006 P8 step 2 (ADR-0019 migration step 2): the eight harness profiles are STEW `kind: profile` `.us`
+  declarations (`harness/steward/profiles/<name>.us`) and `profiles.py` reads only those; the YAML files are removed
+  (the loader was their only consumer). Each keeps its version (all `@1`) and its meaning: `read_budget` is
+  `budgets.reads`, `card` is `plan`/`none`, `success` is `{check}`, `for.capability` is `for.capabilities`; an
+  unmeasured `min_context` is `1` with `"x-min_context": "to be measured"`, read as none. `away-end` says "the
+  operator" where it named him. The gate's `stew` step validates them with the rest; a test goes red if one fails
+  STEW's validator or a YAML profile is read. Spec 002 names the `.us` form. Restart required.
 
 ### Fixed
 

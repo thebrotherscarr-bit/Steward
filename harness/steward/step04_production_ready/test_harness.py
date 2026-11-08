@@ -9572,19 +9572,23 @@ def test_the_profiles_load_and_validate_refuses_what_specs_002_and_003_refuse(tm
 
     folder = tmp_path / "profiles"
     shutil.copytree(profiles.PROFILES_DIR, folder)
-    text = (folder / "general.yaml").read_text(encoding="utf-8")
-    bad = text.replace("name: general", "name: bad")
+    text = (folder / "general.us").read_text(encoding="utf-8")
+    bad = text.replace('"name": "general"', '"name": "bad"')
     for written, refusal in (
-        (bad + "experts: 4\n", "unknown key 'experts'"),
-        (bad.replace("reasoning: medium", "reasoning: max"), "reasoning 'max' is not one of"),
-        (bad.replace('instructions: ""', "instructions: |\n" + "".join(f"  line {n}\n" for n in range(9))), "more than 8 lines"),
+        (bad.replace('"version": 1,', '"version": 1,\n  "experts": 4,'), "unknown member 'experts'"),
+        (bad.replace('"budgets": {', '"read_budget": 8,\n  "budgets": {'), "unknown member 'read_budget'"),
+        (bad.replace('"reasoning": "medium"', '"reasoning": "max"'), "reasoning 'max' is not one of"),
+        (bad.replace('"card": "plan"', '"card": "every-write"'), "card 'every-write' is not one of"),
+        (bad.replace('"x-min_context": "to be measured"', '"x-min_context": "soon"'), "x-min_context is 'to be measured'"),
+        (bad.replace('"instructions": ""', '"instructions": "' + "\\n".join(f"line {n}" for n in range(9)) + '"'), "more than 8 lines"),
     ):
-        (folder / "bad.yaml").write_text(written, encoding="utf-8")
+        assert written != bad, refusal
+        (folder / "bad.us").write_text(written, encoding="utf-8")
         with pytest.raises(profiles.ProfileError, match=re.escape(refusal)):
             profiles.load_profiles(folder)
-    (folder / "bad.yaml").unlink()
-    (folder / "general.yaml").unlink()
-    with pytest.raises(profiles.ProfileError, match="no general.yaml"):
+    (folder / "bad.us").unlink()
+    (folder / "general.us").unlink()
+    with pytest.raises(profiles.ProfileError, match=r"no general\.us"):
         profiles.load_profiles(folder)
 
     sets = tmp_path / "evals"
@@ -9594,6 +9598,50 @@ def test_the_profiles_load_and_validate_refuses_what_specs_002_and_003_refuse(tm
     assert evals.cases_fingerprint(bounds["cases"]) == evals.EVAL_SETS["bounds"].fingerprint, "naming one is no new version"
     (sets / "t3-bounds.yaml").write_text(yaml.safe_dump(bounds, sort_keys=False, allow_unicode=True), encoding="utf-8")
     assert any("p29_sitting_open" in p and "profile" in p for p in evals.validate_sets(sets)), "a case must name its profile"
+
+
+def test_the_profiles_are_stew_us_declarations_and_no_yaml_is_read(tmp_path: Path) -> None:
+    """ExecPlan 0006 P8 step 2 (ADR-0019 migration step 2): every profile is a STEW `kind: profile` .us file that STEW's
+    own validator passes (the gate's pinned copy in .stew/, else STEW beside this repository), and the loader reads
+    those and nothing else; no declaration names the install's model or its owner. Red if a profile's .us fails STEW
+    validation, if a YAML profile comes back, or if the loader reads one."""
+    import subprocess
+
+    import install
+    import profiles
+
+    folder = profiles.PROFILES_DIR
+    assert {p.suffix for p in folder.iterdir() if p.is_file()} == {profiles.PROFILE_SUFFIX}, "a profile is a .us file"
+    found = profiles.load_profiles()
+    us_files = sorted(folder.glob("*.us"))
+    assert sorted(p.path for p in found.values()) == us_files and len(us_files) >= 8
+    assert found["general"].requires["min_context"] is None, "x-min_context: to be measured reads as None"
+    model, owner = install.load_binding(install.install_path(install.BINDING_FILE)).model, install.OWNER_DEFAULT
+    for path in us_files:
+        text = path.read_text(encoding="utf-8")
+        assert model not in text and owner not in text, f"{path.name} names the model or the owner"
+
+    yaml_only = tmp_path / "yaml"
+    yaml_only.mkdir()
+    (yaml_only / "general.yaml").write_text("name: general\nversion: 1\n", encoding="utf-8")
+    with pytest.raises(profiles.ProfileError, match=r"no general\.us"):
+        profiles.load_profiles(yaml_only)
+    with pytest.raises(profiles.ProfileError, match=r"a profile is a STEW \.us file"):
+        profiles.load_profile(yaml_only / "general.yaml")
+
+    repo = Path(__file__).resolve().parents[3]
+    validator = next(
+        (v for v in (repo / ".stew" / "tools" / "validate.py", repo.parent / "stew" / "tools" / "validate.py") if v.is_file()),
+        None,
+    )
+    if validator is None:
+        assert not os.environ.get("CI"), "the gate checks STEW out into .stew/ before this test runs"
+        pytest.skip("STEW's validator is not beside this repository")
+    bad = tmp_path / "bad.us"
+    bad.write_text((folder / "general.us").read_text(encoding="utf-8").replace('"version": 1,', '"version": 1,\n  "experts": 4,'), encoding="utf-8")
+    for files, code in ((us_files, 0), ([bad], 1)):
+        run = subprocess.run([sys.executable, str(validator), *map(str, files)], capture_output=True, text=True, timeout=60)
+        assert run.returncode == code, run.stdout + run.stderr
 
 
 def test_general_cuts_no_tool_his_live_build_offers(monkeypatch: Any) -> None:
@@ -9804,7 +9852,7 @@ def test_a_steps_instructions_name_no_tool_it_does_not_offer(monkeypatch: Any) -
         {"general": found["general"], "narrow": narrow}, [("t.yaml", "n", "narrow", ("C6",)), *(("t.yaml", f"g{n}", "general", (c,)) for n, c in enumerate(found["general"].capabilities))],
         wf.steward_tool_names(), set(), {"C6", *found["general"].capabilities}, ["plan_reached_directly", "run_completed"], routes={}, refusals={},
     )
-    assert problems == ["profiles/narrow.yaml: its instructions name secondbrain_eval_start, which it does not offer (tools)"], problems
+    assert problems == ["profiles/narrow.us: its instructions name secondbrain_eval_start, which it does not offer (tools)"], problems
 
 
 def test_the_eval_runner_profile_is_picked_for_eval_asks_and_its_set_passes_on_a_scripted_client() -> None:
