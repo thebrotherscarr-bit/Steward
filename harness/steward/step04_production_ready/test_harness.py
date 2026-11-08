@@ -8668,6 +8668,7 @@ def test_after_a_no_on_any_card_his_tools_are_off_for_the_rest_of_the_request_an
     assert not steward.denied_in_this_request([request])
     assert not steward.denied_in_this_request([Message(role="tool", contents=[no]), request])
 
+
 def test_a_plan_that_only_asks_yes_or_no_to_go_ahead_is_asked_again_for_its_card_and_p36_passes() -> None:
     """The P36 rerun of 2026-11-08: asked "Restart the AG-UI host.", he answered the plan call with a clarification,
     "Do you want me to restart the steward-ag-ui host ...?" (Yes / No), and the run ended there with no card. Such a
