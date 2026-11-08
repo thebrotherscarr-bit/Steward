@@ -1,11 +1,13 @@
 ---
-status: accepted
+status: accepted; amended in part by ADR-0019
 contact: Kyle
 date: 2026-11-08
 deciders: Kyle
 ---
 
 # Harness profiles per task, tuned by evals
+
+2026-11-08: amended in part by [ADR-0019](0019-steward-implements-stew.md): the formats of specs 002 to 004 become STEW `.us` declarations, by ADR-0019's migration.
 
 Accepted on the operator's word of 2026-11-08 ("plan and harness looks good, proceed"; then "Go"). Supersedes
 nothing. Amends in part [ADR-0012](0012-stewards-bar-is-our-own-capability-evals.md) (every eval case names its

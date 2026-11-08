@@ -1,11 +1,13 @@
 ---
-status: accepted
+status: accepted; amended in part by ADR-0019
 contact: Kyle
 date: 2026-11-05
 deciders: Kyle
 ---
 
 # One model for everything
+
+2026-11-08: amended in part by [ADR-0019](0019-steward-implements-stew.md): one model holds per install; the model is a binding in runtime config (STEW).
 
 Supersedes in part [ADR-0001](0001-steward-is-a-maf-harness-agent.md): the models it names give way to one model, `steward:1`, for every role.
 
