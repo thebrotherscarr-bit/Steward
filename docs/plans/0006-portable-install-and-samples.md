@@ -34,7 +34,36 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
 
 - [x] (2026-11-08) ADR-0020 and this plan written; capabilities O1 to O6 added to the map and spec 001 (untested, not
   required); ARCHITECTURE.md section 6 places this plan after M0 and MP, before M1 to M10's remaining items.
-- [ ] P1 portability fixes from the audit (Lanes A and B; consumes the audit, not yet written).
+- [x] (2026-11-08) P1 step 1: the audit (SecondBrain note `portability-audit-2026-11-08-8af9d1`) read; its Steward
+  entries copied below and into P1, one line each, by the audit's own numbers. Jesster's entries are Lane B's.
+- [ ] P1 portability fixes from the audit (Lanes A and B). Steward's entries, each fixed in P1 or owned by the milestone named:
+  - [ ] A4 `recipe_workflow.estate_repos`: the Estate's repositories hard-wired under the ground (P1: from the ground entry, A7).
+  - [ ] A5 `agent._build_shell`: Git Bash at `C:\Program Files\Git\bin\bash.exe`, hard-coded (P1: a config entry).
+  - [ ] A6 `agent.ARCHIVE_DIR`: the operator's Archive bound inside the product (P8, ADR-0019 step 4: the bounds' paths to runtime config).
+  - [ ] A7 `agent.GROUND_DIR` and `mcp_app.recipe_tools`: the ground inferred from the folder layout (P1: an explicit optional entry).
+  - [ ] A8 `agent._WORKING_DIR`: `STEWARD_WORKSPACE` defaults to the repository, unsaid (P1: said in `.env.example`).
+  - [ ] A14 halo and eval storage paths are repository-relative (no change: already portable).
+  - [ ] B1 the operator's name in model-facing text (`steward.py` INSTRUCTIONS, `agent.SANDBOX_SHELL_REFUSAL`) (P1: an owner entry).
+  - [ ] B6 the operator's name in the improvement loop's review prompt (P1: the owner entry).
+  - [ ] B7 LICENSE names the operator (docs; no change).
+  - [ ] B8 README clones the operator's repository (docs; no change).
+  - [ ] C1, C2 the model's defaults disagree (`steward.py` gpt-oss:20b; `improvement_loop.py`, step02 steward:1) (P2: the binding).
+  - [ ] C3 `steward:1` is built by hand from `steward.Modelfile` (P2 binds it; P4's setup pulls or builds the bound model).
+  - [ ] C4 the context window 65536 in code (`_STEWARD_CONTEXT`, the compaction budget) (P2: the binding).
+  - [ ] C5, C6 the code embedder's name and `num_gpu` 0 in code, code search on by default (P5: an optional piece).
+  - [ ] C7 step02's mem0 embedder `nomic-embed-text-v2-moe` in code (P5: automatic memory is an optional piece).
+  - [ ] C12 the reasoning option (`think`) sent whatever the model offers (P2: only when the binding provides it).
+  - [ ] C13 the VRAM assumption in comments only, never checked (P4: the doctor).
+  - [ ] C15 the eval baselines are measured on `steward:1` only (P8, ADR-0019 step 6: results recorded per binding).
+  - [ ] D1 the Python version said four ways (P3: one version, checked by the installer).
+  - [ ] D2 the README installs unlocked from PyPI (P3: the installer uses the lock).
+  - [ ] D7 `mcp_app.PORT` 43121 cannot be overridden (P1: a config entry).
+  - [ ] D9 the MCP key pasted by hand into `.env` (P4, Lane B: SecondBrain passes it in the child environment).
+  - [ ] D12 Hyperlight's packages imported unconditionally (no change: they are in the lock; opt-in at run time).
+  - [ ] D16 README step 5 starts `hosted.py`, though SecondBrain starts AG-UI itself (P3: the install's README).
+  - [ ] E1 the Charter is not shipped; a missing note runs him without it, silently (P4 and P5: a shipped default).
+  - [ ] E2 SecondBrain's MCP is effectively required yet only warned about (P4: the doctor fails loudly).
+  - [ ] E3 code search on by default needs the embedder pulled (P5, with C5).
 - [ ] P2 the model as a binding (Lane A; O1, O2).
 - [ ] P3 one installer (Lane B).
 - [ ] P4 first-run setup, the doctor, and the one-case proof (Lane B, with Lane A for `steward doctor`; O3, O4).
@@ -49,6 +78,11 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   (2026-11-08)", ADR-0019 decision 5) did not exist when this plan was written.
   Evidence: a search of the notes for "Portability audit" on 2026-11-08 returned no such note. P1 therefore begins by
   reading it once it exists and is left as a placeholder milestone until then.
+  (2026-11-08, later: the audit exists, note `portability-audit-2026-11-08-8af9d1`; P1's entries are copied from it.)
+- Observation: the audit found very few literal host paths in Steward. Most of the risk is in layout assumptions (the
+  ground beside him, Git Bash's folder), the model named in code, and steps done by hand.
+  Evidence: the audit's sections A to E; `git grep` for the operator's user folder and `Desktop\Research` in Steward's
+  code finds only comments, docstrings, tests and one bound (`ARCHIVE_DIR`, A6).
 - Observation: MAF's Python samples are no longer under `python/samples/getting_started/`; they are a numbered ladder.
   Evidence: microsoft/agent-framework at commit `924a6e5`, `python/samples/`: `01-get-started/`, `02-agents/`,
   `03-workflows/`, `04-hosting/`, `05-end-to-end/`; `01-get-started/` holds `01_hello_agent.py` to
@@ -69,6 +103,12 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
 - Decision: the samples ladder cites MAF's current layout, `python/samples/01-get-started/`.
   Rationale: the older `getting_started/` path no longer exists upstream.
   Date/Author: 2026-11-08, in the plan.
+- Decision: P1 takes only the audit's entries that are a value moved to config or a path computed from the install
+  folder (A4, A5, A7, A8, B1, B6, D7). Every other Steward entry is owned by the milestone named on its line in
+  `Progress`. Comments and docstrings that quote a dated ruling by the operator's name stay: they are the record.
+  Rationale: the plan's P1 is "each value moves to a config entry or a computed path"; the others are an installer,
+  a doctor, an optional piece or a format migration, which are P2 to P8.
+  Date/Author: 2026-11-08, Lane A.
 
 ## Outcomes & Retrospective
 
@@ -117,6 +157,38 @@ its own small pull request: the value moves to a config entry (with today's valu
 computed from the install folder. Lane A takes Steward's entries, Lane B Jesster's. Acceptance: a search of both
 repositories for the audit's strings (for example the operator's user folder, `Desktop\\Research`, a host name) finds
 none outside the config's defaults, tests and docs; every gating eval set still passes on this PC.
+
+The audit's Steward entries (2026-11-08, note `portability-audit-2026-11-08-8af9d1`, by its own numbers; the milestone
+that fixes each is on its line in `Progress`):
+
+- A4: `recipe_workflow.py` `estate_repos`: the Estate's repositories hard-wired as `<ground>/worlds/steward` and the rest.
+- A5: `agent.py` `_build_shell`: Git Bash at `C:\Program Files\Git\bin\bash.exe`, hard-coded.
+- A6: `agent.py` `ARCHIVE_DIR`: `~/Desktop/Archive`, the operator's own bound, inside the product.
+- A7: `agent.py` `GROUND_DIR` and `mcp_app.py` `recipe_tools`: the ground inferred from a parent folder named `worlds`
+  or a `manjuel.py` two levels up.
+- A8: `agent.py` `STEWARD_WORKSPACE` defaults to this repository; `.env.example` does not say so.
+- A14: the halo and eval storage paths use `parents[N]` inside the repository (portable already).
+- B1: the operator's name in text the model reads: `steward.py` INSTRUCTIONS and `agent.py` `SANDBOX_SHELL_REFUSAL`.
+- B6: the operator's name in the improvement loop's review prompt (`improvement_loop_workflow.py`).
+- B7: LICENSE names the operator (a document).
+- B8: the README's install clones the operator's repository (a document).
+- C1, C2: the model's defaults disagree: `steward.py` gpt-oss:20b; `improvement_loop.py` and step02 steward:1.
+- C3: `steward:1` must be built by hand (`ollama create steward:1 -f steward.Modelfile`).
+- C4: the context window 65536 in code (`_STEWARD_CONTEXT`, the options and the compaction budget).
+- C5, C6: the code embedder `embeddinggemma-2:270m` and its `num_gpu` 0 in code; code search on by default.
+- C7: step02's mem0 embedder `nomic-embed-text-v2-moe` in code.
+- C12: gpt-oss's reasoning option (`think`) is sent whatever the model offers.
+- C13: the 16 GB card is assumed in comments only; nothing checks VRAM.
+- C15: the eval baselines are measured on `steward:1`.
+- D1: the Python version is said four ways (`.python-version`, CI, `pyproject.toml`, the README).
+- D2: the README's `pip install -e .` resolves from PyPI; the gate installs the lock.
+- D7: `mcp_app.py` `PORT` 43121 cannot be overridden.
+- D9: SecondBrain's MCP key is pasted into `.env` by hand.
+- D12: Hyperlight's packages are imported unconditionally (they are in the lock; the sandbox is opt-in).
+- D16: README step 5 starts `hosted.py`, though SecondBrain starts the AG-UI host itself.
+- E1: the Charter is not shipped; without the note he runs without it, with only a warning.
+- E2: SecondBrain's MCP is effectively required, yet he starts without it and only warns.
+- E3: code search is on by default and needs the embedder pulled.
 
 ### P2. The model as a binding
 
