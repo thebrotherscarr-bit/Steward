@@ -185,6 +185,19 @@ PLAN_IS_APPROVAL = (
     "question, and your steps. If you need an answer first, reply with a clarification whose question lists the "
     "choices."
 )
+# Sent to PLAN once when its reply was a clarification whose only choices are a yes and a no (asks_only_to_go_ahead).
+# The P36 rerun of 2026-11-08 (transcript bounds-review-p36): asked "Restart the AG-UI host.", he found steward-ag-ui,
+# reasoned "we still need confirmation. So type clarification", and the run ended on "Do you want me to restart the
+# steward-ag-ui host ...? (Yes / No)", with no plan card. The plan card is that question.
+PLAN_CARD_IS_THE_YES = (
+    "Your reply was a clarification asking whether to go ahead, yes or no. The plan card is that question: nothing runs "
+    "before the user's Approve on it, and his Approve is the yes. Reply with type approval, a summary of the plan as its "
+    "one question, and your steps."
+)
+_GO_AHEAD_CHOICES = frozenset({
+    "yes", "no", "y", "n", "ok", "okay", "proceed", "go ahead", "approve", "deny", "cancel", "stop", "abort", "confirm",
+    "yes, proceed", "no, cancel", "yes, restart", "no, don't",
+})
 # Sent to PLAN once when its reply was (or ended with) a JSON object that is no plan: a tool call's arguments written
 # as text (the bar at 0016cf4, 2026-11-04: '{"query":"pytest"}' in the README ask, the discount fix's
 # '{"edits": [...], "file_name": ".../inventory.py"}' in the steps set). recover_text_tool_calls already runs such a
@@ -589,6 +602,19 @@ def ends_with_a_json_object(text: str) -> bool:
 def offers_no_choices(plan: StewardPlan) -> bool:
     """A clarification none of whose questions offers a choice: by the guide's definition it presents options."""
     return plan.type == PlanningResponseType.CLARIFICATION and not any(q.choices for q in plan.questions)
+
+
+def asks_only_to_go_ahead(plan: StewardPlan) -> bool:
+    """A clarification every question of which offers only a yes and a no (_GO_AHEAD_CHOICES): it asks to go ahead,
+    which is the plan card's own question."""
+    def plain(choice: str) -> str:
+        return " ".join(re.sub(r"[^\w,' ]", " ", str(choice).lower()).split()).strip(" ,")
+
+    return (
+        plan.type == PlanningResponseType.CLARIFICATION
+        and bool(plan.questions)
+        and all(q.choices and all(plain(c) in _GO_AHEAD_CHOICES for c in q.choices) for q in plan.questions)
+    )
 
 
 def _last_text(response: AgentExecutorResponse) -> str:
@@ -1138,7 +1164,9 @@ class ReadPlan(Executor):
         if not last.strip():
             again = PLAN_AGAIN
         elif plan is not None:
-            again = PLAN_IS_APPROVAL if offers_no_choices(plan) else None
+            again = (
+                PLAN_IS_APPROVAL if offers_no_choices(plan) else PLAN_CARD_IS_THE_YES if asks_only_to_go_ahead(plan) else None
+            )
         else:
             again = PLAN_NOT_A_CALL if ends_with_a_json_object(last) else None
         if again and not ctx.get_state(_PLAN_ASKED_AGAIN_KEY, False):
