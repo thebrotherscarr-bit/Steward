@@ -143,6 +143,8 @@ import httpx2
 _STEWARD_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_STEWARD_DIR))
 from subprocess_script_runner import subprocess_script_runner  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import profiles as _profiles  # noqa: E402 - the harness profiles' allow-list (StewardMemoryProvider)
 
 load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
@@ -3329,11 +3331,31 @@ def plain_tool_results(message: Message) -> Message:
     return message
 
 
+class StewardMemoryProvider(MemoryContextProvider):
+    """MAF's MemoryContextProvider, its tools and their instruction lines kept to the picked harness profile's
+    allow-list (ADR-0018). MAF runs a history provider once per service call, inside its own chat middleware, which it
+    appends last (agent_framework/_agents.py, PerServiceCallHistoryPersistingMiddleware: _merge_provider_context), so
+    its tools reach the call after the workflow's per-step cut (steward_workflow.step_tools_turn): the eval-runner
+    profile's first answer call was offered all six (2026-11-08). The provider itself leaves out what the profile does
+    not name; a session with no profile (or general, which names them all) is given them as before."""
+
+    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
+        await super().before_run(agent=agent, session=session, context=context, state=state)
+        allowed = _profiles.allowed_tools(session)
+        if allowed is None:
+            return
+        left_out = {getattr(t, "name", None) for t in context.tools} & (_profiles.MEMORY_TOOLS - allowed)
+        if left_out:
+            context.tools[:] = [t for t in context.tools if getattr(t, "name", None) not in left_out]
+            context.instructions[:] = [_profiles.without_lines_naming(text, left_out) for text in context.instructions]
+
+
 def steward_memory(memory_store: Any) -> MemoryContextProvider:
-    """His memory: MAF's MemoryContextProvider on memory_store, holding what he saves with write_memory; no automatic
-    extraction (max_extractions=0 skips it, _harness/_memory.py _extract_memories). His transcripts go through MAF's
-    history_message_filter ("rewrite or drop messages before transcript save"), plain_tool_results."""
-    return MemoryContextProvider(store=memory_store, max_extractions=0, history_message_filter=plain_tool_results)
+    """His memory: MAF's MemoryContextProvider on memory_store (StewardMemoryProvider: kept to the picked profile),
+    holding what he saves with write_memory; no automatic extraction (max_extractions=0 skips it, _harness/_memory.py
+    _extract_memories). His transcripts go through MAF's history_message_filter ("rewrite or drop messages before
+    transcript save"), plain_tool_results."""
+    return StewardMemoryProvider(store=memory_store, max_extractions=0, history_message_filter=plain_tool_results)
 
 
 async def memory_owner(context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:

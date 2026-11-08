@@ -51,6 +51,9 @@ door was restarted and that `estate_status` now shows it up.
     `estate-keeper`, `github-review`) and the bounds run.
 - [ ] MP the profile mechanism complete, with `eval-runner` as profile 1 (the operator's example). (2026-11-08: the
   card, `name@version` recorded and validate reading `profile:` landed with M0's mechanism, above.)
+  - [x] (2026-11-08) Lane A: `eval-runner` v1, its route and its one-set refusal in code, T3 `eval-runner` v1 (two
+    standins cases) with T0 direct's case naming it; N8 required. Remaining: the set's bar (overnight) and the phone
+    test.
 - [ ] M1 the away loop and phone summaries (N1 to N4), profile `away-loop`.
   - [x] (2026-11-08) Lane B, Jesster: the summary to the phone when a phone or automation run ends (done, No, no
     answer, refused, /stop, failed; `electron/agent/summary.cjs`), and `away.test.cjs`, the loop with no phone (a fake
@@ -118,11 +121,22 @@ door was restarted and that `estate_status` now shows it up.
   The single-case check after it (`profile-check-away`, 68f970c, `telegram_denied`) passed with no todo call, and one
   `mode_get` "not found" in the plan call: the filter now covers every tool of his harness a step does not offer, in
   `step_tools_turn`, since his own instructions reach the call outside the context providers (Lane A).
+- Observation (2026-11-08, Lane A): MAF merges a history provider's tools and instructions once per service call,
+  inside `PerServiceCallHistoryPersistingMiddleware`, which it appends after every other chat middleware
+  (`agent_framework/_agents.py`, `_sessions.py` `_merge_provider_context`), so `MemoryContextProvider`'s six tools
+  reach a run's first call after the per-step cut. Evidence: the eval-runner test's first answer call offered
+  `list_memory_topics` and five more. The provider itself now keeps to the profile (`StewardMemoryProvider`).
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
 
 ## Decision Log
+
+- Decision: `eval-runner`'s deterministic success is `tool_call_args_match` (eval_start planned with the set and tag;
+  in an eval its card is denied, so a start cannot be verified there). The live "start verified, then BAR DONE" is the
+  run's own: its instructions read `eval_status` once after the start, and the phone summary names the counts. Its
+  "one set per request" is held in code (`profiles.PROFILE_REFUSALS`), as ADR-0014 holds the bounds, not left to the
+  model. Date/Author: 2026-11-08, Lane A.
 
 - Decision: every existing non-ext case starts on one `general` profile, today's whole harness unchanged (its tools are
   every tool the build offers, its read budget EXPLORE's 8, its reasoning gpt-oss's own medium, no instructions); the

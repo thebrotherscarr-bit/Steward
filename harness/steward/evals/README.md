@@ -233,6 +233,13 @@ conversation (`standins_conversation`), each case by its own `LocalEvaluator`: t
 and `tool_call_args_match`. Bar: 10/10, twice in a row. One run, about ten minutes:
 `powershell -ExecutionPolicy Bypass -File harness/steward/evals/run-bar.ps1 -Sets bounds -Tag bounds-first -Runs 1`.
 
+## T3 eval-runner: the eval-runner profile (the standins runner)
+
+`t3-eval-runner.yaml` (ExecPlan 0005, Operation MP; N8): the cases of the `eval-runner` profile beside T0 direct's.
+`phone_eval_status` asks what `eval_status` says for a tag and passes when one `eval_status` read (a stand-in with a
+fixed progress file) answers it with no card; `every_set_refused` asks for every eval set and passes when the profile's
+one-set refusal answers it in words, with no card and nothing started (`eval_start` is a declaration-only stand-in).
+
 ## T1, held out
 
 `t1-heldout.yaml` runs on `harness/steward/working/sample-project-2` (units.py), which no T0 fix was tuned on. Its

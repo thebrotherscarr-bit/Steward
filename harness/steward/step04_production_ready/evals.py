@@ -429,6 +429,17 @@ STAND_INS: dict[str, dict[str, Any]] = {
     "atlas_git": {"write": False, "parameters": {"type": "object", "properties": {"project": _TEXT}}, "description": (
         "the world's repository as it stands now: branch, head, dirty counts, upstream, and whether remote operations "
         "are walled")},
+    # The evals' own Estate tools (ExecPlan 0005 MP, eval-runner), as Jesster's estate.cjs declares them: eval_start
+    # declaration-only (its card is denied and nothing starts), eval_status a read with the case's fixed result.
+    "secondbrain_eval_start": {"write": True, "parameters": {
+        "type": "object", "properties": {"sets": {"type": "array", "items": _TEXT, "minItems": 1}, "runs": {"type": "integer"},
+                                         "tag": _TEXT}, "required": ["sets"]}, "description": (
+        "Start Steward's eval sets: run-bar.ps1 in its own minimized window, each set run `runs` times. sets: set names "
+        "from harness/steward/evals/; runs: 1 to 3; tag: the run's name. Returns the tag and its progress file once the "
+        "run has begun; read it with eval_status.")},
+    "secondbrain_eval_status": {"write": False, "parameters": {"type": "object", "properties": {"tag": _TEXT}}, "description": (
+        "One eval_start run's progress file: its last lines, one as each run starts and ends with its counts, then each "
+        "set's bar, and done once it says \"BAR DONE\". tag: the run's tag; the newest run when left out.")},
     # No stand-in for the door's writes (atlas_git_branch, _commit, _push, _pr): withheld from his build since
     # 2026-11-08 (agent._ATLAS_GIT_WITHHELD; ExecPlan 0005 M9), so an eval offers them no more than his build does.
 }

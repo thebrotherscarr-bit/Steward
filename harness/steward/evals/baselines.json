@@ -94,5 +94,11 @@
     "1": {
       "cases": "c3ee3635207160c15cc14c14b306f43373c418e30a1eebe7545a103da49eb1c8"
     }
+  },
+  "eval-runner": {
+    "1": {
+      "cases": "2ec6ee4993db29f7f8422feab604921586db2288298cd568f2a4126850add9d1",
+      "note": "2026-11-08: ExecPlan 0005 MP, the eval-runner profile's two standins cases (T0 direct's case is the third). Not run as a set yet."
+    }
   }
 }

@@ -15,6 +15,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A narrow profile's run is no longer offered MAF's memory tools: MAF merges a history provider's tools per service
+  call, inside its own chat middleware appended after the workflow's per-step cut, so the eval-runner profile's first
+  answer call was offered all six. `StewardMemoryProvider` (MAF's `MemoryContextProvider`) keeps its tools and their
+  instruction lines to the picked profile's allow-list; `delete_memory_topic` and `consolidate_memories` join
+  `profiles.MAF_HARNESS_TOOLS` and `general`.
 - Each workflow call's whole instructions (his own, the Charter, MAF's todo and mode texts, a profile's) name only the
   tools its step may use: `step_tools_turn` drops each line naming a tool of his harness the step does not offer
   (`step_offers`). In the plan phase (EXPLORE and the plan call) a line may still name a tool the plan can put in its
@@ -30,6 +35,15 @@ was never merged and has no entry.
   offer.
 
 ### Added
+
+- Profile 1, `eval-runner` (ExecPlan 0005, Operation MP; N8 required): `harness/steward/profiles/eval-runner.yaml` (the
+  Estate's reads, `eval_start`, `saved_flow_run`; read budget 2; reasoning low; success `tool_call_args_match`); the
+  router's route for it (`profiles.PROFILE_ROUTES`: an eval, an eval tool, or a set with its tag) and its extra
+  refusal in code (`profiles.PROFILE_REFUSALS`: one set per request). T3 `eval-runner` v1 (`t3-eval-runner.yaml`,
+  standins): an `eval_status` question answered from one read with no card, and "every eval set" refused in words;
+  T0 direct's case now names `eval-runner`. Stand-ins for `secondbrain_eval_start` (declaration-only) and
+  `secondbrain_eval_status`. A refused request now runs under its refusal's profile (`refusal_profile`), picked once
+  the bounds have spoken.
 
 - The harness profile mechanism (ADR-0018, specs 002 and 003; ExecPlan 0005, M0's mechanism): profiles as YAML in
   `harness/steward/profiles/`, read and checked by `harness/steward/step04_production_ready/profiles.py`. The workflow's
