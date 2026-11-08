@@ -78,5 +78,10 @@ own window.
 ## More Information
 
 - `harness/steward/evals/README.md`; the SecondBrain note `steward-s-dev-path-evals-that-grow-with--cb3211`.
+- 2026-11-08: every run keeps each case's transcript, `storage/evals/runs/<tag>/cases/<case id>.jsonl` (the messages
+  as MAF serializes them, the cards and their answers, the warnings logged, the timings), named in the run's log and
+  its history line, so a failing case is reviewed from its steps (the operator: "when reviewing Stewards work, ALWAYS
+  check the traces, output, and steps he took"). `--cases` (run-bar's `-Cases`) reruns some cases to review them;
+  such a run is never counted for a bar. See the evals README, "Per-case transcripts".
 - Open (in the record): whether `plan_step` scores only the plan that reached the card. The dev-path note lists it
   as a T0 scoring change; the overnight note (run 20) leaves it for the operator's word.
