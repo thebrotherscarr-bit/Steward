@@ -3473,7 +3473,9 @@ def test_every_eval_set_run_appends_one_history_line_and_its_report_and_exit_cod
     def small_run() -> tuple[int, str]:
         clients.append(ScriptedChatClient([EVAL_PLAN, EVAL_DONE, README_ANSWER]))
         code = evals.cli(["small", "--options", "plan_t0"])
-        return code, capsys.readouterr().out
+        # each run's transcript is its own file (readme.jsonl, then readme-2.jsonl), so its log line is left out here
+        out = "".join(line for line in capsys.readouterr().out.splitlines(keepends=True) if "transcript: " not in line)
+        return code, out
 
     code, out = small_run()
     assert code == 0, out
