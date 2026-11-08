@@ -9834,5 +9834,5 @@ def test_the_eval_runner_profile_is_picked_for_eval_asks_and_its_set_passes_on_a
     allowed = set(found["eval-runner"].tools)
     assert client.offered and all(o <= allowed for o in client.offered), client.offered
     assert "secondbrain_eval_status" in client.offered[0]
+    assert client.calls[0]["options"].get("think") == "low", "eval-runner's reasoning, low"
     assert len(client.calls) == 2, "one read and its answer; the refusal makes no model call of his"
-    assert client.calls[0]["options"].get("think") == "low"
