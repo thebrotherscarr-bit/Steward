@@ -13,6 +13,13 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Added
+
+- [ADR-0019](docs/decisions/0019-steward-implements-stew.md): Steward implements STEW, the open spec for harnessing
+  agents on local hardware (github.com/thebrotherscarr-bit/STEW). His profiles, tasks, eval sets and records map
+  to STEW `.us` declarations by a seven-step migration, none of it done here; the model becomes a binding in runtime
+  config (ADR-0002's one model holds per install); the next piece is a portability audit of Steward and Jesster.
+
 ### Fixed
 
 - Each workflow call's whole instructions (his own, the Charter, MAF's todo and mode texts, a profile's) name only the
