@@ -115,6 +115,9 @@ door was restarted and that `estate_status` now shows it up.
   todos_add but the tool is not listed". Fixed by `StepInstructions` and the plan-mode text (Lane A); validate now
   refuses a profile whose instructions name a tool it does not offer. One denied case also reasoned "the request is
   from the phone (Telegram) which is allowed to read but not write?": a Charter line (the operator's) is proposed.
+  The single-case check after it (`profile-check-away`, 68f970c, `telegram_denied`) passed with no todo call, and one
+  `mode_get` "not found" in the plan call: the filter now covers every tool of his harness a step does not offer, in
+  `step_tools_turn`, since his own instructions reach the call outside the context providers (Lane A).
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).

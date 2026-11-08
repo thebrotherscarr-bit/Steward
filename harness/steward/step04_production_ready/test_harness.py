@@ -9637,12 +9637,12 @@ class _NamingClient(ScriptedChatClient):
         return super()._inner_get_response(messages=messages, stream=stream, options=options, **kwargs)
 
 
-def _profile_run(request: str, found: Any, replies: list[Any], plan: str) -> tuple[Any, list[Any]]:
+def _profile_run(request: str, found: Any, replies: list[Any], plan: str, routes: list[str] | None = None) -> tuple[Any, list[Any]]:
     """One request through the workflow on a scripted client with the eval tools; its card is left unanswered."""
     import steward_workflow as wf
 
     eval_status, eval_start = _eval_tools()
-    client = _NamingClient(replies, plans=[plan])
+    client = _NamingClient(replies, plans=[plan], routes=routes)
 
     async def _go() -> list[Any]:
         async with AsyncExitStack() as stack:
@@ -9739,12 +9739,13 @@ def test_an_eval_case_passes_only_under_the_profile_it_names(monkeypatch: Any) -
     assert reasons == ["The router picked the profile other@1; the case names general."], line
 
 
-def test_a_steps_instructions_name_no_todo_tool_it_does_not_offer(monkeypatch: Any) -> None:
+def test_a_steps_instructions_name_no_tool_it_does_not_offer(monkeypatch: Any) -> None:
     """t3-away's first run (2026-11-08, storage/evals/runs/away-first, head 095fe12): in plan mode the instructions told
     him to call todos_add, the workflow's EXPLORE offers no todo tool, and the "not found" errors (two or three a case)
-    tripped MAF's three consecutive function-call errors. Now each EXPLORE and ANSWER call's instructions name no todo
-    tool (StepInstructions drops the lines; the plan-mode text and its refusal name none), while a run with no step
-    keeps MAF's todo text. With StepInstructions unplugged the todo provider's todos_add line is back: red. And a
+    tripped MAF's three consecutive function-call errors; after that fix, mode_get in the plan call. Now EXPLORE's
+    instructions name no todo or mode tool (the plan's steps are his todos; Approve switches his mode), and ANSWER's
+    name no tool of his harness it is not offered (step_tools_turn drops the lines, lines_naming_only_offered), while a
+    run with no step keeps MAF's todo text. With the filter unplugged the todos_add line is back: red. And a
     profile whose instructions name a tool it does not offer is refused by validate."""
     import json
 
@@ -9765,17 +9766,35 @@ def test_a_steps_instructions_name_no_todo_tool_it_does_not_offer(monkeypatch: A
     assert client.instructions and all(named <= offered for named, offered in todo_tools_named(client)), todo_tools_named(client)
     assert all(not named for named, _ in todo_tools_named(client)), "EXPLORE offers no todo tool, and names none"
 
-    client, _ = _profile_run("What does inventory.py define?", found, ["It defines order_total."], plan)
+    # Every tool of his harness a call's instructions name is one that call is offered (profile-check-away, 68f970c:
+    # mode_get, named in MAF's mode text and offered in no step, was still called in the plan call).
+    import re
+
+    def named_in(text: str) -> set[str]:
+        return {n for n in wf.harness_tool_names() if re.search(rf"(?<![\w]){re.escape(n)}(?![\w])", text)}
+
+    # In the plan phase a line may name a tool the plan can put in its steps (EXECUTE's), never a todo or mode tool.
+    may_name = wf.harness_tool_names() - wf._MECHANICS_TOOLS
+    assert all(named_in(text) <= offered | may_name for text, offered in zip(client.instructions, client.offered))
+    assert not any(named_in(text) & wf._MECHANICS_TOOLS for text in client.instructions), [sorted(named_in(t) & wf._MECHANICS_TOOLS) for t in client.instructions]
+
+    client, events = _profile_run("What does inventory.py define?", found, ["It defines order_total."], plan, routes=['{"kind": "answer"}'])
+    assert not [e for e in events if e.type == "request_info"], "answered, no card"
     assert client.instructions and all(not named for named, _ in todo_tools_named(client)), "nor does ANSWER"
+    answer_offers = {n for n in wf.harness_tool_names() if wf.offered_in_step(n, wf.ANSWER_STEP)}
+    assert all(named_in(text) <= answer_offers for text in client.instructions), [
+        sorted(named_in(text) - answer_offers) for text in client.instructions
+    ]
 
     # A run with no step (no graph) keeps MAF's todo text, todos_add and all.
     run_client, _, _ = run_steward(["Hello."], "Hello", mode="execute")
     assert "todos_add" in str(run_client.calls[0]["options"].get("instructions") or "")
 
-    monkeypatch.setattr(wf.StepInstructions, "before_run", lambda self, **kwargs: asyncio.sleep(0))  # unplugged
+    monkeypatch.setattr(wf, "lines_naming_only_offered", lambda text, left_out: text)  # unplugged
     client, _ = _profile_run("Start the bfcl eval set.", found, ["I will plan it."], plan)
     assert any("todos_add" in named for named, _ in todo_tools_named(client)), "unplugged, the todo text names todos_add again"
 
+    monkeypatch.undo()
     assert wf.lines_naming_only_offered("a\nuse todos_add now\nb todos_addx", ["todos_add"]) == "a\nb todos_addx"
     narrow = _narrow_profile(instructions="Call eval_start, then read eval_status once.")
     problems = profile_files.profile_problems(

@@ -15,6 +15,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- Each workflow call's whole instructions (his own, the Charter, MAF's todo and mode texts, a profile's) name only the
+  tools its step may use: `step_tools_turn` drops each line naming a tool of his harness the step does not offer
+  (`step_offers`). In the plan phase (EXPLORE and the plan call) a line may still name a tool the plan can put in its
+  steps (EXECUTE's), so a direct ask's hint stays, but never a todo or mode tool (the check after the todo fix,
+  `profile-check-away` at 68f970c, still called `mode_get` in the plan call). This replaces the todo-only
+  `StepInstructions` provider: the agent's own instructions reach the call outside the context providers.
 - A step's instructions name only the todo tools it offers (t3-away's first run, 2026-11-08, `away-first`: in plan mode
   he was told to call `todos_add`, which the workflow's EXPLORE does not offer, and two or three "not found" errors a
   case tripped MAF's three consecutive function-call errors). `StepInstructions` (the workflow's last context provider)

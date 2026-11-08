@@ -79,7 +79,6 @@ from agent_framework import (
     AgentExecutorResponse,
     AgentModeProvider,
     ChatContext,
-    ContextProvider,
     Case,
     Content,
     Default,
@@ -1025,6 +1024,15 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         tools[:] = [t for t, n in zip(tools, names) if n not in cut]
         kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
         session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
+    if step is not None and isinstance(instructions := (context.options or {}).get("instructions"), str):
+        # The call's whole instructions (his own, the Charter, MAF's todo and mode texts, the profile's) name only the
+        # tools the step offers (step_offers): t3-away's first run (2026-11-08, storage/evals/runs/away-first) called
+        # todos_add two or three times a case in plan mode, where no todo tool is offered ("Requested function ... not
+        # found", tripping MAF's three consecutive function-call errors: "the plan mode expects me to create todos via
+        # todos_add but the tool is not listed"), and the check after (profile-check-away, 68f970c) mode_get in the plan
+        # call. Each line naming one he is not offered here is dropped from this call's instructions.
+        left_out = sorted(harness_tool_names() - step_offers(session, step))
+        context.options["instructions"] = lines_naming_only_offered(instructions, left_out)
     await call_next()
 
 
@@ -1104,25 +1112,26 @@ def lines_naming_only_offered(text: str, left_out: Sequence[str]) -> str:
     return "\n".join(line for line in text.split("\n") if not named.search(line))
 
 
-class StepInstructions(ContextProvider):
-    """A step's instructions name only the todo tools the step offers. MAF's TodoProvider and the plan-mode text are the
-    agent's, the same for every step, and told him to call todos_add where the workflow offers no todo tool (t3-away's
-    first run, 2026-11-08, storage/evals/runs/away-first: two or three "Requested function ... not found" a case in plan
-    mode, tripping MAF's three consecutive function-call errors; his reasoning, "the plan mode expects me to create
-    todos via todos_add but the tool is not listed"). Last of his context providers, so it reads what the others added
-    (SessionContext.instructions), and drops each line naming a todo tool offered_in_step leaves out of this step: none
-    in EXPLORE, PLAN and ANSWER, todos_add in EXECUTE (its todos are the approved plan's). A session with no step (a host
-    that runs him without the graph) is left as it was."""
+# The harness's own mechanics: the plan's steps become his todos and the user's Approve switches his mode, so in the
+# plan phase no line may send him to them (t3-away's away-first: todos_add; profile-check-away: mode_get).
+_MECHANICS_TOOLS = frozenset({*_TODO_TOOLS, *_MODE_TOOLS})
 
-    def __init__(self) -> None:
-        super().__init__("steward-step-instructions")
 
-    async def before_run(self, *, agent: Any, session: Any, context: Any, state: dict[str, Any]) -> None:
-        step = (getattr(session, "state", None) or {}).get(STEP_KEY) if session is not None else None
-        if step is None:
-            return
-        left_out = [name for name in TODO_TOOLS if not offered_in_step(name, step)]
-        context.instructions[:] = [lines_naming_only_offered(text, left_out) for text in context.instructions]
+def step_offers(session: Any, step: str) -> frozenset[str]:
+    """The tools of his harness a step's instructions may name: those it offers (offered_in_step, within the picked
+    profile's allow-list), whatever its read budget has spent. EXPLORE and PLAN (the tools-off plan call) also keep the
+    tools the plan may put in its steps, EXECUTE's (a direct ask's hint names the Estate action the plan is for), but
+    never the harness's mechanics (_MECHANICS_TOOLS), which no call of the plan phase can make."""
+    closed = _agent.sandbox_shell_closed(session)
+    direct = bool((getattr(session, "state", None) or {}).get(_agent.DIRECT_ACTION_KEY))
+    allowed = profile_tools(session)
+
+    def offered(at: str) -> set[str]:
+        return {n for n in harness_tool_names() if offered_in_step(n, at, closed, direct) and (allowed is None or n in allowed)}
+
+    if step in (EXPLORE_STEP, PLAN_STEP):
+        return frozenset(offered(EXPLORE_STEP) | (offered(EXECUTE_STEP) - _MECHANICS_TOOLS))
+    return frozenset(offered(step))
 
 
 _CALLS_MADE_KEY = "steward_calls_made"
@@ -1741,9 +1750,6 @@ def build_steward_workflow(
     # The picked profile's instructions, added for the task by MAF's own context-provider seam (ProfileInstructions).
     if not any(isinstance(p, ProfileInstructions) for p in agent.context_providers):
         agent.context_providers.append(ProfileInstructions())
-    # Last: a step's instructions name only the todo tools it offers (StepInstructions reads what the others added).
-    if not any(isinstance(p, StepInstructions) for p in agent.context_providers):
-        agent.context_providers.append(StepInstructions())
     agent.middleware = [
         approved_plan_turn(modes, todos),
         plan_mode_turns(modes, response_format=StewardPlan),
