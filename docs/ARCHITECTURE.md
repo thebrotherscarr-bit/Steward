@@ -88,7 +88,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | 43120 | Steward `hosted.py` | OpenAI Responses (MAF `ResponsesHostServer`) | Jesster, as the fallback transport; evals `--transport responses` |
 | 43121 | Steward `mcp_app.py` | MCP (streamable HTTP) | Manjuel's face (`MANJUEL_MCP_STEWARD`), Aurora's `ask_steward` (atlas-mcp, Atlas #42), Jesster's `run_recipe` / `recipe_status`, and the Flows shelf's `recipe_graph` / `recipe_runs` (read-only) |
 | 43122 | Steward `ag_ui_app.py` | AG-UI (MAF `agent_framework_ag_ui`) | Jesster's Agent tab, phone and automation turns (default, [ADR-0003](decisions/0003-ag-ui-is-the-default-transport.md)); evals `--transport ag-ui` |
-| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`; and `approval_ask`), and other MCP clients with a share key |
+| 43110 | Jesster (SecondBrain) | MCP, HTTP | Steward (notes, web search and fetch, skills, the Estate's tools: the reads, `service_control`, `ollama_unload`, `app_update`, `eval_start`, `saved_flows` and `saved_flow_run` (the Flows shelf's Run now); and `approval_ask`), and other MCP clients with a share key |
 | 43111 | Jesster (`door/listen.cjs`) | MCP (the door) | Steward's door tools (git, branches, PRs, records; writes park as Kyle's cards) |
 | stdio | the notes kernel's notes-only adapter, `cli.py --vault worlds/notes mcp --only notes` (Jesster #90) | MCP | Claude Code in the ground (its `.mcp.json`, Manjuel #101) and IDEs in the Jesster repository (Jesster #91): notes, `index.search`, `context.for` and `context.now` only (11 tools), on the same vault; no other kernel method group is served anywhere ([ADR-0010](decisions/0010-notes-are-central-in-jesster.md)) |
 | 8091 | Aurora glass (`atlas-webapp.exe`, run by Jesster) | HTTP | Kyle's browser; parked |
@@ -192,7 +192,8 @@ a run going now is followed by reading `recipe_status` every few seconds until i
 The steps come from a fixed list (repo_log, merged_prs, releases, eval_bars, plan_left, versions, pull_ff,
 eval_start, eval_wait). **A flow runs unattended by design:** the saved flow is the operator's approved plan, so no
 step raises a card, and a step that could do harm is made safe in its own code (`pull_ff`: main only, a clean tree,
-never during a sitting; `eval_start`: eval sets only, one at a time). There is no open-ended prompt type; prompt-only
+never during a sitting; `eval_start`: eval sets only, one at a time). Run now is held only while that flow runs;
+never by a conversation with Steward (ADR-0009, dated note 2026-11-08). There is no open-ended prompt type; prompt-only
 schedules saved before 2026-11-05 keep running and are shown as legacy. Startup (weekdays 06:00) is the baseline.
 
 ### An eval
@@ -215,7 +216,7 @@ schedules saved before 2026-11-05 keep running and are shown as legacy. Startup 
   carded). One at a time, each set in its own window (`run-bar.ps1`), never two at once.
 - An eval flow is `eval_start` then `eval_wait`. `eval_start` opens `run-bar.ps1` in its own window with
   Start-Process and verifies that the run began, and sends a host transport (AG-UI) only when every set is an asks set
-  (Jesster #92); `eval_wait` waits for the run to begin, and a run that never began fails the flow and is not
+  (Jesster #92; since 2026-11-08 Steward's step chooses it by set and sets aside a stale stored one); `eval_wait` waits for the run to begin, and a run that never began fails the flow and is not
   summarized (Steward #161).
 - Outside sets are read for calibration only. BFCL's first run, 2026-11-05 at `d71fb78` (in-process, `steward:1`):
   36/80 (24/65 AST, 12/15 irrelevance). Never a gate, never tuned on.

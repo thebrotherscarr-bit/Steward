@@ -112,4 +112,14 @@ is a flow plus when, one create button for flows, no daytime prompt on an eval f
   and daytime question removed).
 - Built (2026-11-05): all of the above. Each run now keeps the flow it ran and whether Run now or its automation
   started it (`run_recipe`'s `flow` and `trigger`), for the Flows shelf's run history ([ADR-0008](0008-the-flows-shelf.md)).
+- 2026-11-08 (the operator: "NONE of the flows started"): on 2026-11-06 the three eval examples that reached Steward
+  were refused for a stale `transport: ag-ui`, and every other Run now never reached SecondBrain's `schedules:run`
+  (their `lastRun` stayed empty): the shelf held Run now on every flow while any conversation with Steward was
+  mid-turn or a card waited, and said so only in a grey word at the end of its bar. Now: Run now is held only while
+  that flow itself runs or waits on its run; a scheduled eval still gives way to his conversation, Run now never does
+  ("run it whenever i say"); a failed run's reason is shown on the flow in plain words; a `running` left by a quit is
+  cleared as SecondBrain starts; the stale transport is taken off saved eval flows once (Jesster `flowExamples.cjs`
+  `dropStaleTransports`), and Steward's `eval_start` step sets aside any stale one it still meets ([ADR-0003](0003-ag-ui-is-the-default-transport.md)).
+  Run now is also served over SecondBrain's MCP, `saved_flows` and `saved_flow_run` (the shelf's own path,
+  `schedules.cjs runNow`), so a flow can be started and read to its end without the window.
 - Open: `automation_save`.
