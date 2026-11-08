@@ -58,6 +58,12 @@ was never merged and has no entry.
 
 ### Changed
 
+- GitHub writes withheld from Steward's build (2026-11-08, the operator: "when he has passed reliably, he can gain the
+  tools to control github"; ADR-0016, ExecPlan 0005 M9): the door offers him only `atlas_git`, `atlas_git_diff` and
+  `atlas_records` (agent.py `_ATLAS_GIT_TOOLS`; the writes are `_ATLAS_GIT_WITHHELD`), with `pr_checks` and his own
+  `git_commit` kept. The router answers a GitHub-write task in words before any plan (`GITHUB_WRITE_REFUSAL`). The
+  `github` skill is reads and the withholding; capabilities.yaml marks F2 `withheld` (validate refuses a build or a
+  stand-in that offers a withheld tool) and N17 required; t3-bounds v2 drops the write stand-ins and P58 measures N17.
 - The record brought current, with dated notes, nothing removed (2026-11-08): ADR-0003 (the AG-UI 3/3 run is at
   `a8627e2`, not `6401b56`; the comparison rule printed "keep AG-UI off", and still does on the same history), ADR-0012
   and ExecPlan 0001 (T0's `direct` never run yet; Milestone 2's bounds runs, 4/10 then 7/10, and the three fixed),
