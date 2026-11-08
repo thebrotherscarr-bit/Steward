@@ -1,0 +1,29 @@
+# Binding: this install's model (ExecPlan 0006 P2)
+
+The install's one binding (STEW `spec/binding.md`; ADR-0019 migration step 5, ADR-0020 decision 3): the model every
+call uses, the server it is on, and the options it is loaded with. It is the only place Steward's model is named.
+Change the model here, not in code. Another install binds the model its hardware runs; this one binds `steward:1`,
+STEW's reference binding (`examples/bindings/steward-gpt-oss-20b.us`). `provides` is what the model offers; a profile
+whose `requires` it does not meet is refused with what is missing.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "binding",
+  "name": "steward-gpt-oss-20b",
+  "api": "ollama",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "steward:1",
+  "provides": {
+    "tool_calling": true,
+    "context": 65536,
+    "structured_output": true,
+    "reasoning_effort": true
+  },
+  "hardware": "one 16 GB GPU",
+  "options": {
+    "num_ctx": 65536,
+    "keep_alive": "30m"
+  }
+}
+```

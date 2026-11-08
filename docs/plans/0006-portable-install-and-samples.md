@@ -47,12 +47,12 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   - [x] (2026-11-08, p1-config-entries: `STEWARD_OWNER`) B6 the operator's name in the improvement loop's review prompt (P1: the owner entry).
   - [x] B7 LICENSE names the operator (docs; no change).
   - [x] B8 README clones the operator's repository (docs; no change).
-  - [ ] C1, C2 the model's defaults disagree (`steward.py` gpt-oss:20b; `improvement_loop.py`, step02 steward:1) (P2: the binding).
+  - [x] (2026-11-08, p2-binding) C1, C2 the model's defaults disagree (`steward.py` gpt-oss:20b; `improvement_loop.py`, step02 steward:1) (P2: the binding).
   - [ ] C3 `steward:1` is built by hand from `steward.Modelfile` (P2 binds it; P4's setup pulls or builds the bound model).
-  - [ ] C4 the context window 65536 in code (`_STEWARD_CONTEXT`, the compaction budget) (P2: the binding).
+  - [x] (2026-11-08, p2-binding) C4 the context window 65536 in code (`_STEWARD_CONTEXT`, the compaction budget) (P2: the binding).
   - [ ] C5, C6 the code embedder's name and `num_gpu` 0 in code, code search on by default (P5: an optional piece).
   - [ ] C7 step02's mem0 embedder `nomic-embed-text-v2-moe` in code (P5: automatic memory is an optional piece).
-  - [ ] C12 the reasoning option (`think`) sent whatever the model offers (P2: only when the binding provides it).
+  - [x] (2026-11-08, p2-binding) C12 the reasoning option (`think`) sent whatever the model offers (P2: only when the binding provides it).
   - [ ] C13 the VRAM assumption in comments only, never checked (P4: the doctor).
   - [ ] C15 the eval baselines are measured on `steward:1` only (P8, ADR-0019 step 6: results recorded per binding).
   - [ ] D1 the Python version said four ways (P3: one version, checked by the installer).
@@ -64,7 +64,11 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   - [ ] E1 the Charter is not shipped; a missing note runs him without it, silently (P4 and P5: a shipped default).
   - [ ] E2 SecondBrain's MCP is effectively required yet only warned about (P4: the doctor fails loudly).
   - [ ] E3 code search on by default needs the embedder pulled (P5, with C5).
-- [ ] P2 the model as a binding (Lane A; O1, O2).
+- [ ] P2 the model as a binding (Lane A; O1, O2). Built 2026-11-08 (Steward PR p2-binding): `binding.us`, read by
+  `install.py`; `requires` on every profile; the router's refusal; T3 `install` v1 with O1 and O2 required.
+  Pending the operator's approval: the live run of T3 `install` (`evals.py install`), and the gating sets on
+  `steward:1` after the change; each `min_context` measured (it is null, "to be measured", until then); a restart
+  of Steward's hosts to load it.
 - [ ] P3 one installer (Lane B).
 - [ ] P4 first-run setup, the doctor, and the one-case proof (Lane B, with Lane A for `steward doctor`; O3, O4).
 - [ ] P5 optional pieces off by default (Lane B; O5).
@@ -117,6 +121,29 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   "Kyle", today's value, so nothing changes on this PC; P4's setup asks a new install for its owner.
   Rationale: `.env` is the one config Steward reads today; STEW has no `install` kind yet, so P4 folds these entries
   into the install's `.us` declaration when it has one. One module is the one place each is read.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: the binding is `binding.us` at the install folder's root (a STEW `kind: binding` declaration, STEW's
+  reference binding for this PC), or the file `STEWARD_BINDING` names. It is tracked: on this PC it is the config, and
+  P4's setup rewrites it in a new install. When a host starts, the binding's model and endpoint replace
+  `OLLAMA_MODEL` and `OLLAMA_HOST` in the process (MAF's Ollama clients read those), so the binding wins over an
+  older `.env`; a different value is logged once. `api: openai-compatible` is refused by name until Steward has that
+  client (P4).
+  Rationale: O1, the binding is the only place the model is named; one file, read in one place, with no code change
+  to change the model. MAF's clients already read the environment, so no client construction changes.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: every profile gains `requires: {tool_calling, min_context, reasoning_effort}`. `tool_calling` is true
+  when it offers tools (STEW spec/profile.md 7a); `min_context` is null, "to be measured" (no number guessed, and
+  nothing is checked for it until it is measured); `reasoning_effort` is false, since a profile's `reasoning` is
+  sent only when the binding provides the knob (STEW spec/binding.md rule 3). The profiles keep version 1: adding
+  the member is a schema step that changes no run on this PC's binding, and their histories continue.
+  Rationale: the operator's word to use a placeholder for context and not guess; spec 002's "any change is a new
+  version" is for a change to what a profile does, and this one does nothing on `steward:1`.
+  Date/Author: 2026-11-08, Lane A.
+- Decision: O1 and O2's eval cases are T3 `install` v1 (standins runner). A standins case may name a `binding:`
+  file to run under (evals.py, `install.using_binding`), so the O1 case measures the refusal on a binding without
+  tool calling. Both capabilities are required; the set's live run waits for the operator's word.
+  Rationale: ADR-0012 (every capability ships with its case); the operator's instruction that no live run is made
+  while he is using the PC.
   Date/Author: 2026-11-08, Lane A.
 
 ## Outcomes & Retrospective

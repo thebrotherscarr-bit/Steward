@@ -32,10 +32,16 @@ from typing import Any
 
 from agent_framework import ContextProvider, FileAccessProvider
 
+import sys  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import install as _install  # noqa: E402 - a profile's requires, checked against the binding (ExecPlan 0006 P2)
+
 PROFILES_DIR = Path(__file__).resolve().parents[1] / "profiles"
 GENERAL = "general"
 PROFILE_KEYS = (
-    "name", "version", "for", "tools", "instructions", "read_budget", "reasoning", "gates", "card", "success", "summary",
+    "name", "version", "for", "tools", "instructions", "read_budget", "reasoning", "requires", "gates", "card", "success",
+    "summary",
 )
 REASONING = ("low", "medium", "high")
 MAX_INSTRUCTION_LINES = 8
@@ -126,6 +132,9 @@ class Profile:
     instructions: str
     read_budget: int
     reasoning: str
+    # What a model must offer to wear it (ExecPlan 0006 P2): {tool_calling, min_context (None: to be measured),
+    # reasoning_effort}; the run refuses it on a binding that does not (install.binding_refusal).
+    requires: Mapping[str, Any] = field(default_factory=dict)
     gates: Mapping[str, Any] = field(default_factory=dict)
     card: bool = True
     success: str = ""
@@ -215,6 +224,9 @@ def _problems(raw: Any, path: Path) -> list[str]:
         problems.append(f"read_budget {budget!r} is not a whole number from 0")
     if raw["reasoning"] not in REASONING:
         problems.append(f"reasoning {raw['reasoning']!r} is not one of {list(REASONING)}")
+    problems += _install.requires_problems(raw["requires"])
+    if isinstance(raw["requires"], dict) and isinstance(tools, list) and tools and raw["requires"].get("tool_calling") is not True:
+        problems.append("it offers tools, so requires.tool_calling is true (STEW spec/profile.md 7a)")
     gates = raw["gates"]
     if not (isinstance(gates, dict) and set(gates) <= {"bounds", "extra"}
             and all(isinstance(v, list) and all(isinstance(i, str) and i.strip() for i in v) for v in gates.values())):
@@ -240,7 +252,8 @@ def load_profile(path: Path) -> Profile:
     return Profile(
         name=raw["name"], version=raw["version"], task=" ".join(raw["for"]["task"].split()),
         capabilities=tuple(raw["for"]["capability"]), tools=tuple(raw["tools"]), instructions=raw["instructions"].strip(),
-        read_budget=raw["read_budget"], reasoning=raw["reasoning"], gates=dict(raw["gates"]), card=raw["card"],
+        read_budget=raw["read_budget"], reasoning=raw["reasoning"], requires=dict(raw["requires"]),
+        gates=dict(raw["gates"]), card=raw["card"],
         success=raw["success"].strip(), summary=" ".join(raw["summary"].split()), path=path,
     )
 

@@ -39,6 +39,7 @@ A profile is `harness/steward/profiles/<name>.yaml`. Its fields, and only these:
 | `instructions` | at most 8 lines, added to the Charter for this task; never contradicting it |
 | `read_budget` | the most reads (file, note, search) before the plan card; 0 for a refusal |
 | `reasoning` | gpt-oss's reasoning effort: `low`, `medium` or `high` |
+| `requires` | (2026-11-08, ExecPlan 0006 P2; STEW `spec/profile.md`) what a model must offer to wear it: `tool_calling` (true when it offers tools), `min_context` (tokens; `null` until measured, the smallest window its cases pass with) and `reasoning_effort`. The run refuses it, in one line naming what is missing, on a binding that does not meet it; `reasoning` is sent only when the binding provides the knob |
 | `gates` | the ADR-0014 gates this task touches (all are always on; listing them is for the card and the cases) and any `extra` refusals, each in words |
 | `card` | `yes` (a plan card showing plan and profile) or `no` (a read or a refusal) |
 | `success` | the deterministic check that says done: a check name `evals.py` knows (`STANDINS_OWN_CHECKS`, MAF's checks, or a RESULT check) |

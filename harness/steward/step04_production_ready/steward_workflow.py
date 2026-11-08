@@ -515,7 +515,11 @@ class Router(Executor):
         # its refusal belongs to: refusal_profile), and a profile's own extra refusal (profiles.PROFILE_REFUSALS).
         profile = await self._pick(request, ctx, refusal)
         if refusal is None and profile is not None:
-            refusal = _profiles.profile_refusal(profile.name, request_body(request))
+            # ExecPlan 0006 P2 (STEW spec/binding.md rule 2): a profile the install's binding does not fit is refused,
+            # naming what is missing; then the profile's own extra refusal.
+            refusal = _agent._install.binding_refusal(profile.name, profile.requires) or _profiles.profile_refusal(  # noqa: SLF001
+                profile.name, request_body(request)
+            )
         if refusal is not None:
             await ctx.send_message(RoutedRequest(messages=messages, kind=REFUSE_STEP, reason=refusal))
             return
@@ -1197,7 +1201,9 @@ async def profile_options_turn(context: AgentContext, call_next: Callable[[], Aw
     profile = session_profile(session)
     step = session.state.get(STEP_KEY) if session is not None else None
     effort = profile.get("reasoning") if profile is not None else None
-    if step in _REASONING_STEPS and effort in _profiles.REASONING and effort != MODEL_REASONING:
+    # Sent only when the binding provides the knob (STEW spec/binding.md rule 3; the portability audit's C12).
+    offered = _agent._install.current_binding().offers("reasoning_effort")  # noqa: SLF001
+    if step in _REASONING_STEPS and effort in _profiles.REASONING and effort != MODEL_REASONING and offered:
         context.options = {**(context.options or {}), "think": effort}
     await call_next()
 

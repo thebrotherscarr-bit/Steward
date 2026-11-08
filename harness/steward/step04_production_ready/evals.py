@@ -81,6 +81,7 @@ import eval_transports  # noqa: E402
 from halo_traces import HaloJsonlSpanExporter  # noqa: E402
 from steward_workflow import APPROVE_PLAN, build_steward  # noqa: E402
 import ext_sets  # noqa: E402 - the outside sets' own (tier ext): pinned data, their runners and checks
+import install as _install  # noqa: E402 - the install's binding; a standins case may run under another (ExecPlan 0006 P2)
 
 # Versioned eval sets (the plan "Steward's dev path: evals that grow with his skills", 2026-11-05, step 1): each set is
 # one file in harness/steward/evals/, <tier>-<name>.yaml, holding its name, tier, version, owner, runner, bar, the
@@ -153,7 +154,11 @@ STANDINS_OWN_CHECKS = (
 )
 STANDINS_MAF_CHECKS = {"keyword_check": "keywords", "tool_called_check": "tools_called", "tool_call_args_match": "expected_tool_calls"}
 _STANDINS_CASE_KEYS = {"id", "capability", "profile", "ask", "checks"}
-_STANDINS_OPTIONAL = {"fixture", "stand_ins", "approve", "keywords", "tools_called", "expected_tool_calls", "precondition"}
+# binding (ExecPlan 0006 P2): a binding file, relative to the repository, the case runs under instead of the install's
+# (install.using_binding), so a profile's requires can be measured against a binding that does not meet them.
+_STANDINS_OPTIONAL = {
+    "fixture", "stand_ins", "approve", "keywords", "tools_called", "expected_tool_calls", "precondition", "binding",
+}
 # The result checks the asks runner scores (steps_overall is the steps runner's).
 ASKS_RESULT_CHECKS = tuple(name for name in RESULT_CHECKS if name not in STEPS_CHECKS)
 
@@ -184,6 +189,7 @@ class EvalCase:
     approve: tuple[str, ...] = ()
     keywords: tuple[str, ...] = ()
     tools_called: tuple[str, ...] = ()
+    binding: str = ""  # a standins case's: the binding file it runs under (relative to the repository), or the install's
 
 
 @dataclass(frozen=True)
@@ -519,6 +525,11 @@ def _standins_case_problems(cases: list[Any]) -> list[str]:
                 problems.append(f"{where}: fixture is not {{project, plant}}")
             elif fixture["project"] not in SAMPLE_PROJECTS or (fixture["plant"] is not None and fixture["plant"] not in PLANTS):
                 problems.append(f"{where}: fixture {fixture!r} names no sample project or plant of evals.py")
+        if "binding" in case:
+            try:
+                _install.load_binding(_REPO / str(case["binding"]))
+            except (_install.BindingError, TypeError) as error:
+                problems.append(f"{where}: binding: {error}")
     return problems
 
 
@@ -569,6 +580,7 @@ def load_eval_set(path: Path) -> EvalSet:
                 capabilities=tuple(c["capability"]), profile=c["profile"],
                 stand_ins=tuple((s["name"], s.get("result")) for s in c.get("stand_ins", [])),
                 approve=tuple(c.get("approve", [])), keywords=tuple(c.get("keywords", [])), tools_called=tuple(c.get("tools_called", [])),
+                binding=c.get("binding", ""),
             )
             for c in raw["cases"]
         )
@@ -2345,6 +2357,8 @@ async def standins_case_run(case: EvalCase, set_name: str | None = None, **build
             fixtures.callback(  # last out: after the fixture is put back, so its warnings are the case's too
                 lambda: keep_case_transcript(set_name, case.ask, event_records(list(RUN_EVENTS)), logs=logs, case_id=case.id)
             )
+            if case.binding:  # ExecPlan 0006 P2: the case's own binding, for this run only
+                fixtures.enter_context(_install.using_binding(_REPO / case.binding))
             if project is not None:
                 sample_project_as_committed(case.project)
                 fixtures.callback(sample_project_as_committed, case.project)

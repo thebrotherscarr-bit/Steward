@@ -24,6 +24,10 @@ instructions: |
   Asked how a run did, read eval_status for its tag once, and give the pass count and each failed case.
 read_budget: 2
 reasoning: low
+# What a model must offer to wear it (STEW spec/profile.md; ExecPlan 0006 P2): tool calling when it offers tools;
+# min_context is to be measured (the smallest window its cases pass with), null until it is; its reasoning
+# effort is sent only when the binding offers the knob, so it does not require it.
+requires: {tool_calling: true, min_context: null, reasoning_effort: false}
 gates:
   bounds: [keys, archive, untrusted-shell, sitting, whatsapp]
   extra: ["one eval set per request: a request for every set, or several at once, is refused in words"]

@@ -27,6 +27,14 @@ was never merged and has no entry.
   (the ground, else inferred as before; the recipes' repositories under it) and `STEWARD_MCP_PORT` (43121). The door's
   description of the ground no longer names its folder. A test scans his code's strings for the operator's user folder,
   his ground's folder and his name outside the install's defaults. Restart required.
+- ExecPlan 0006 P2 (ADR-0019 migration step 5, ADR-0020 decision 3): the model is a binding. `binding.us` (a STEW
+  `kind: binding` declaration; `STEWARD_BINDING` names another) holds the model, endpoint and options; `install.py`
+  reads it once and puts its model and endpoint in `OLLAMA_MODEL` and `OLLAMA_HOST`, so the binding wins over
+  `.env`. His options and compaction budget are the binding's; `steward.py`, step02 and the improvement loop name no
+  model of their own. Every profile declares `requires` (tool calling; `min_context` null, to be measured; reasoning
+  effort), validate checks it, and the router refuses a profile the binding does not fit in one line naming what is
+  missing. The reasoning option is sent only when the binding provides it. A standins case may run under its own
+  `binding:`; T3 `install` v1 holds O1 and O2's cases (both required; not run yet). Restart required.
 
 ### Fixed
 
