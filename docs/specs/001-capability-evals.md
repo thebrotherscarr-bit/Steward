@@ -110,6 +110,9 @@ there in the same pull request.)_
 | D1 | Explain a flow or an automation as they are: a flow is ordered steps from the fixed list; an automation is a saved flow, when, on or off | Charter, Your tools (Flows and automations); ADR-0009 | untested | none |
 | D2 | A new or changed flow: proposed in words, from the fixed step list only, and left to Kyle's request and card; no save tool yet | Charter, Your tools (Flows and automations); ADR-0009; ARCH 6.1 | untested | none |
 | D3 | A recipe run (`run_recipe`, `recipe_status`, `recipe_runs`, served by his MCP host to Jesster, not offered to the agent): one executor per step, no card, the run's state recorded | ARCH 2 and 4; ADR-0005, ADR-0008, ADR-0009 | untested | gate tests `test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him` and the recipe tests; no `evaluate_workflow` on a run (ADR-0008 piece 5) |
+| D4 | `saved_flows` read freely: a flow asked for by its name is found by its id in the shelf's list | ADR-0016; the automations skill | covered | `flows` (t3-flows v1: run_drift_check_by_name, startup_this_morning) |
+| D5 | `saved_flow_run` in chat: a saved flow asked for by name is planned first, then run on its own card with the right id; a No ends it | ADR-0016; ADR-0009 | covered | `flows` (t3-flows v1: run_drift_check_by_name); gate test `test_saved_flow_run_in_chat_is_planned_and_carded_and_the_flow_reads_never_ask` |
+| D6 | `saved_flow_status` read freely: how a flow's run went is answered from its steps and reason, with no plan and no card | ADR-0016; the automations skill | covered | `flows` (t3-flows v1: startup_this_morning) |
 
 ### E. Notes through Jesster
 
@@ -209,7 +212,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | A. How a request runs | 18 | 9 | 5 | 4 |
 | B. Sources and time | 6 | 0 | 1 | 5 |
 | C. The Estate's tools | 10 | 0 | 2 | 8 |
-| D. Flows and automations | 3 | 0 | 0 | 3 |
+| D. Flows and automations | 6 | 3 | 0 | 3 |
 | E. Notes | 2 | 0 | 0 | 2 |
 | F. The door | 4 | 0 | 0 | 4 |
 | G. Skills | 15 | 0 | 1 | 14 |
@@ -219,7 +222,7 @@ it"); ARCH 1. The check for each is `load_skill` called with that name (MAF `too
 | K. Improvement rounds | 1 | 0 | 0 | 1 |
 | L. Bounds | 4 | 0 | 0 | 4 |
 | M. How he works | 5 | 0 | 0 | 5 |
-| **Total** | **80** | **11** | **14** | **55** |
+| **Total** | **83** | **14** | **14** | **55** |
 
 ## The proposed cases
 

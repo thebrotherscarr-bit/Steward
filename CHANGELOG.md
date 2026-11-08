@@ -15,6 +15,14 @@ was never merged and has no entry.
 
 ### Added
 
+- The Flows shelf's tools are his (ADR-0016: every Flows-shelf action has a matching tool on Jesster's MCP):
+  `secondbrain_saved_flows` and `secondbrain_saved_flow_status` are Estate reads, with no card;
+  `secondbrain_saved_flow_run` (the shelf's Run now, on its own path in SecondBrain) is an Estate action like
+  `eval_start`: on the plan in plan mode, then its own card. The `automations`, `bar-runner` and `estate` skills
+  send a saved flow asked for by name, an eval flow included, to `saved_flow_run`, not `eval_start`, and say the
+  door's `flow_*` are another system. Capabilities D4, D5 and D6 (required) and the T3 `flows` eval set
+  (`t3-flows.yaml` v1: run_drift_check_by_name, startup_this_morning), with their stand-ins in `evals.STAND_INS`.
+  Jesster serves `saved_flow_status` and a start-verified `saved_flow_run` (Jesster's pull request with it).
 - Every eval run keeps each case's transcript, `storage/evals/runs/<tag>/cases/<case id>.jsonl`: the ask, every
   message as MAF serializes it (`Message.to_dict`: text, `text_reasoning`, each call with its arguments, each result
   and any exception), each card with its answer, the steps' output and progress, every warning logged during the case

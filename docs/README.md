@@ -43,6 +43,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0013](decisions/0013-a2ui-pilot-plan-card.md) | A2UI pilot: the plan's approval card as an A2UI surface, sent beside its AG-UI interrupt | accepted (pilot scope) |
 | [0014](decisions/0014-the-bounds-are-gates-in-code.md) | The bounds are gates in code: refused at the call, and at the plan | accepted |
 | [0015](decisions/0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
+| [0016](decisions/0016-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
 
 ## Specs
 
