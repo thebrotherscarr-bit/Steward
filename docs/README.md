@@ -29,7 +29,7 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | ADR | Title | Status |
 |---|---|---|
 | [0001](decisions/0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0002, 0003 and 0004 |
-| [0002](decisions/0002-one-model-for-everything.md) | One model for everything | accepted |
+| [0002](decisions/0002-one-model-for-everything.md) | One model for everything | accepted; amended in part by 0019 (one model per install, as a binding) |
 | [0003](decisions/0003-ag-ui-is-the-default-transport.md) | AG-UI is the default transport, Responses the fallback | accepted |
 | [0004](decisions/0004-jesster-is-the-center.md) | Jesster is the center; Neiro retired as a gate; Aurora parked | accepted |
 | [0005](decisions/0005-automations-are-recipes-run-as-maf-workflows.md) | Automations are recipes run as MAF workflows | accepted; superseded in part by 0009 |
@@ -45,7 +45,9 @@ Copilot, which points to each `AGENTS.md` and to the ADR process). Our `AGENTS.m
 | [0015](decisions/0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
 | [0016](decisions/0016-steward-is-the-brain-of-the-pc.md) | Steward is the brain of the PC: what he runs while Kyle is away | accepted; amended in part by 0018 |
 | [0017](decisions/0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
-| [0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted |
+| [0018](decisions/0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted; amended in part by 0019 |
+| [0019](decisions/0019-steward-implements-stew.md) | Steward implements STEW: profiles, tasks, evals and records become STEW `.us` declarations; the model is a binding in config | accepted |
+| [0020](decisions/0020-portable-by-design.md) | Portable by design: one installer, one config, the model as a binding, a doctor, and a clean-machine test | accepted |
 
 ## Specs
 
@@ -69,6 +71,7 @@ ExecPlan here, kept living to [`.agent/PLANS.md`](../.agent/PLANS.md). The index
 | [0003](plans/0003-ag-ui-step-3.md) | AG-UI step 3: show Steward's workflow steps live in the Agent tab's console and the Phone view | ADR-0003 |
 | [0004](plans/0004-a2ui-pilot-plan-card.md) | A2UI pilot: draw Steward's plan card from an A2UI surface he sends | ADR-0013 |
 | [0005](plans/0005-steward-runs-the-pc-from-the-phone.md) | Steward runs the PC from the phone (frozen 2026-11-08; one operation per milestone) | ADR-0016, ADR-0018 |
+| [0006](plans/0006-portable-install-and-samples.md) | Portable install and samples: one installer, the model as a binding, a doctor, the friend test, STEW samples | ADR-0020, ADR-0019 |
 
 Steward's own guides stay beside his code: `harness/steward/README.md` (the harness, step by step) and
 `harness/steward/evals/README.md` (the eval sets).

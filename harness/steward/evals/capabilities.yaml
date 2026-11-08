@@ -489,3 +489,29 @@ capabilities:
     title: "Anything at the keyboard: an operation no tool covers is one `run_shell` on his card with the command in full; no screen control; after untrusted content the shell stays refused and he says a new session is needed"
     source: "ADR-0016; ExecPlan 0005 M10"
     tier: T3
+  # O. Portable install (ADR-0020, 2026-11-08; ExecPlan 0006). Not required until each case lands: each gets
+  # required: true in the pull request that lands its case.
+  - id: O1
+    title: "The model is a binding: model, endpoint and context window come from the install's config, never from code; a profile whose `requires` the binding does not meet is refused by name with what is missing"
+    source: "ADR-0020; ADR-0019; ExecPlan 0006 P2"
+    tier: T3
+  - id: O2
+    title: "One config: the install's one STEW `.us` declaration, written at first run; its paths relative to the install folder, no host name, user or account in it, no key in it"
+    source: "ADR-0020; ExecPlan 0006 P1, P2"
+    tier: T3
+  - id: O3
+    title: "The doctor: the runtime reachable, the model bound and pulled, the ports free, the config valid, the keys of the pieces turned on present; every failure one line saying what failed and how to fix it; exit code 0 only when all pass"
+    source: "ADR-0020; ExecPlan 0006 P4"
+    tier: T3
+  - id: O4
+    title: "First run ends with one proof: one small gating eval case run once on the bound model, its pass and its binding shown"
+    source: "ADR-0020; ExecPlan 0006 P4"
+    tier: T3
+  - id: O5
+    title: "Optional pieces (Telegram, WhatsApp, the sandbox, Aurora, the door's forwarded tools, the notes kernel) are off in a new install; one that is off never fails the doctor or a run"
+    source: "ADR-0020; ExecPlan 0006 P5"
+    tier: T3
+  - id: O6
+    title: "The friend test: a clean Windows runner installs from the release zip, passes the doctor and the proof case on a small CPU model; a red blocks the release"
+    source: "ADR-0020; ExecPlan 0006 P6"
+    tier: T3

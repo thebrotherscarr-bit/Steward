@@ -59,7 +59,7 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-steward-is-a-maf-harness-agent.md) | Steward is a MAF harness agent; the local stack is its platform | accepted; superseded in part by 0002, 0003 and 0004 |
-| [0002](0002-one-model-for-everything.md) | One model for everything | accepted |
+| [0002](0002-one-model-for-everything.md) | One model for everything | accepted; amended in part by 0019 (one model per install, as a binding) |
 | [0003](0003-ag-ui-is-the-default-transport.md) | AG-UI is the default transport, Responses the fallback | accepted |
 | [0004](0004-jesster-is-the-center.md) | Jesster is the center; Neiro retired as a gate; Aurora parked | accepted |
 | [0005](0005-automations-are-recipes-run-as-maf-workflows.md) | Automations are recipes run as MAF workflows | accepted; superseded in part by 0009 |
@@ -75,4 +75,6 @@ MAF's records and templates are followed as they ship, with these adaptations, e
 | [0015](0015-his-judgment-in-the-workflow.md) | His judgment in the workflow: a request already done, a step that would spoil it, a docs change's commit card, a reading budget | accepted |
 | [0016](0016-steward-is-the-brain-of-the-pc.md) | Steward is the brain of the PC: what he runs while Kyle is away | accepted; amended in part by 0018 |
 | [0017](0017-every-flows-shelf-action-has-a-tool-on-jessters-mcp.md) | Every Flows-shelf action has a matching tool on Jesster's MCP: `saved_flows`, `saved_flow_run` (carded in chat), `saved_flow_status`, named apart from the door's `flow_*` | accepted |
-| [0018](0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted |
+| [0018](0018-harness-profiles-per-task-tuned-by-evals.md) | Harness profiles per task, tuned by evals | accepted; amended in part by 0019 |
+| [0019](0019-steward-implements-stew.md) | Steward implements STEW: profiles, tasks, evals and records become STEW `.us` declarations; the model is a binding in config | accepted |
+| [0020](0020-portable-by-design.md) | Portable by design: one installer, one config, the model as a binding, a doctor, and a clean-machine test | accepted |
