@@ -1622,9 +1622,33 @@ def asks_to_answer_now(messages: Sequence[Any]) -> bool:
     return bool((getattr(last, "additional_properties", None) or {}).get(ANSWER_NOW_KEY))
 
 
+# ADR-0015 and spec 001's A6: the user's No ends the run. denied_by_user stopped only the harness loop between passes;
+# inside a pass, MAF's function loop answers a denied card with "Error: Tool call invocation was rejected by user." (its
+# result marked APPROVAL_REJECTION_RESULT_KEY, _tools.py:4572-4581) and asks the model again with his tools on. The P58
+# rerun of 2026-11-08 (transcript bounds-review-p58): after the No on atlas_git_branch he reasoned "Likely because the
+# user didn't approve each step?", called atlas_git_branch again (a second card), then atlas_git and todos_add. So once a
+# card is answered No in this request, every later model call in it has its tools off (tool_choice "none", the same
+# call MAF makes when a limit trips), and answer_when_tools_are_off asks him to say what is done and what is left.
+def denied_in_this_request(messages: Sequence[Any]) -> bool:
+    """Whether a card was answered No since the last user message holding text (the request, or a loop's turn): a
+    denied approval response, or MAF's rejection result standing for one."""
+    from agent_framework._types import APPROVAL_REJECTION_RESULT_KEY  # noqa: PLC0415 - MAF's own marker of a No
+
+    for message in reversed(messages or []):
+        for content in getattr(message, "contents", None) or []:
+            if content.type == "function_approval_response" and not content.approved:
+                return True
+            if content.type == "function_result" and (content.additional_properties or {}).get(APPROVAL_REJECTION_RESULT_KEY):
+                return True
+        if message.role == "user" and (message.text or "").strip():
+            return False
+    return False
+
+
 async def tools_off_to_answer_now(context: ChatContext, call_next: Callable[[], Awaitable[None]]) -> None:
-    """Chat middleware: the answer-now turn (asks_to_answer_now) is a call with tool_choice "none"."""
-    if asks_to_answer_now(context.messages):
+    """Chat middleware: the answer-now turn (asks_to_answer_now), and every call after a No in this request
+    (denied_in_this_request), is a call with tool_choice "none"."""
+    if asks_to_answer_now(context.messages) or denied_in_this_request(context.messages):
         context.options = {**(context.options or {}), "tool_choice": "none"}
     await call_next()
 
