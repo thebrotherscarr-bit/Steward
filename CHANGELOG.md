@@ -15,6 +15,8 @@ was never merged and has no entry.
 
 ### Added
 
+- The card wait is 30 minutes (the operator, 2026-11-08: "30 minutes"): a dated note in ADR-0016 and ExecPlan 0005's
+  Decision Log (the 60 minutes proposed there annotated as superseded); Jesster #105 makes it one value.
 - T3 `away` (`harness/steward/evals/t3-away.yaml` v1, standins, ExecPlan 0005 M1): telegram_approved (N1, N3: a
   change from Telegram planned first, made once approved, named in the reply), telegram_denied (N2, N4: a denied or
   unanswered card ends the run, nothing after it) and telegram_read_fails (N3: a failed read named in the reply, no
