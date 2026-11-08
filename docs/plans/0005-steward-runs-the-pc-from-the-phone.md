@@ -41,6 +41,13 @@ door was restarted and that `estate_status` now shows it up.
   of 10 twice in a row.
 - [ ] MP the profile mechanism complete, with `eval-runner` as profile 1 (the operator's example).
 - [ ] M1 the away loop and phone summaries (N1 to N4), profile `away-loop`.
+  - [x] (2026-11-08) Lane B, Jesster: the summary to the phone when a phone or automation run ends (done, No, no
+    answer, refused, /stop, failed; `electron/agent/summary.cjs`), and `away.test.cjs`, the loop with no phone (a fake
+    Telegram, the real bridge and service, the real AG-UI client on a fake Steward host): Yes resumes the same run
+    from the card's checkpoint, No, no answer, a failure (Jesster #104).
+  - [x] (2026-11-08) Lane B, Steward: T3 `away` (`t3-away.yaml` v1, three standins cases), N1 to N4 required.
+  - [ ] T3 `away` run once on the operator's word; the profile `away-loop` (Lane A, after MP); the live-host
+    acceptance from the phone (Yes, No, no answer).
 - [ ] M2 keep the Estate running (N5, N6), profile `estate-keeper`.
 - [ ] M3 research and notes from the phone (N7), profile `research-note`.
 - [ ] M4 flows and programs from the phone (N9, N10), profiles `flow-runner`, `program` (N8 is MP's `eval-runner`).
@@ -71,6 +78,17 @@ door was restarted and that `estate_status` now shows it up.
   map (`_CAPABILITY_KEYS`), so `profile:` cannot be written before the mechanism teaches validate to read it.
 - Observation: P58 (`t3-bounds.yaml` v1) expects door writes on cards; once M9a takes the write tools out of his
   build, the case must become a refusal (N17) in `t3-bounds.yaml` v2, a new version whose bar starts over.
+- Observation (2026-11-08, Lane B): the away loop's card answer already continued the same run before M1: Jesster's
+  AG-UI client resumes on the same thread with the interrupt's id and `forwardedProps.checkpointId`, whoever answers
+  (the Agent tab, a Telegram button, the timeout). Evidence: `worlds/jesster/secondbrain/electron/agent/agui.cjs`
+  `turn`, and `away.test.cjs` asserting the resume body. What was missing was the end of the run on the phone.
+- Observation (2026-11-08, Lane B): Jesster's card wait is 10 minutes today, not the 60 the Decision Log below names:
+  Telegram's `CARD_TIMEOUT_MS` (`telegram.cjs`, and its "No answer in 10 minutes: denied" line) and an automation's
+  (`service.cjs`). The summary names the wait it was given; changing it to 60 is one constant in each file and was
+  not made here.
+- Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
+  set has no automation card case; the automation's end reaches the phone by Jesster's summary
+  (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
 
 ## Decision Log
 
@@ -109,6 +127,16 @@ door was restarted and that `estate_status` now shows it up.
   and summary path, M1's live host). Lane C, the plan keeper (this plan, the ADRs, the specs, the capability map;
   no harness code). The lead reviews every pull request, installs builds, and runs one eval at a time. Date/Author:
   2026-11-08, Kyle.
+- Decision: the phone's summary is Jesster's, sent after Steward's own report, not in place of it: one short message
+  built from what the run did (its tool calls, its cards and their answers, its error), so a run whose report is empty,
+  cut short by a No, a timeout, /stop or a failure still ends on the phone. A plain chat answer with no tool, card or
+  error gets none (the answer is that run's end); a Steward automation's run always gets one on Telegram; a WhatsApp
+  turn's goes to WhatsApp. Rationale: the lead's M1 order to Lane B ("Jesster sends one short summary to Telegram ...
+  never silent"); the M1 text above ("the summary is Steward's report") holds for what he says, and Jesster's summary
+  does not depend on what he says. Date/Author: 2026-11-08, Lane B.
+- Decision: no Steward code change for M1's Steward side: an unanswered card reaches him as the same No as a denied
+  one (Jesster resumes with `approved: false`), so N2 and N4's card wait are one case (`telegram_denied`). Date/Author:
+  2026-11-08, Lane B.
 
 ## Outcomes & Retrospective
 

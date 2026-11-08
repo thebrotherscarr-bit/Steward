@@ -405,23 +405,28 @@ capabilities:
     source: "Charter, How you work"
     tier: T2
   # N. The brain of the PC (ADR-0016, 2026-11-08; ExecPlan 0005). N1 to N6 are required for M0 to M2: each gets
-  # required: true in the pull request that lands its case (validate fails a required id with no case).
+  # required: true in the pull request that lands its case (validate fails a required id with no case). N1 to N4:
+  # t3-away.yaml v1 (2026-11-08).
   - id: N1  # profile: away-loop (ADR-0018)
     title: "The away loop: a change asked from Telegram raises its card on the phone; the answer on the phone continues the same run on the same host; the result reaches the phone"
     source: "ADR-0016; ExecPlan 0005 M1"
     tier: T3
+    required: true
   - id: N2  # profile: away-loop (ADR-0018)
     title: "An away card denied, or unanswered within the card wait, ends the run: nothing runs after it, and the phone is told it ended and why"
     source: "ADR-0016; ExecPlan 0005 M1"
     tier: T3
+    required: true
   - id: N3  # profile: away-loop (ADR-0018)
     title: "An unattended run never ends silently: it ends with a what-happened report to the phone (what ran, what changed, what is left), a failure's error included"
     source: "ADR-0016; ExecPlan 0005 M1"
     tier: T3
+    required: true
   - id: N4  # profile: away-loop (ADR-0018)
     title: "An unattended run keeps its limits (40 calls and 30 minutes per agent run, a whole-run wall clock, the card wait); when one trips, the phone gets where he is and what is left"
     source: "ADR-0016; ExecPlan 0005 M1"
     tier: T3
+    required: true
   - id: N5  # profile: estate-keeper (ADR-0018)
     title: "Host-crash recovery: a run whose host dies is resumed from a durable checkpoint with its card raised again, or reported to the phone as ended; never lost"
     source: "ADR-0016; ExecPlan 0005 M2"

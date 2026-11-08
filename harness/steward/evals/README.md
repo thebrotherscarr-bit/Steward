@@ -13,6 +13,7 @@ it (test_harness.py and the `validate` step of `.github/workflows/gate.yml`). A 
 | `t2-judgment.yaml` | T2, his judgment (ADR-0015) | judgment | `evals.py judgment` |
 | `t3-bounds.yaml` | T3, the bounds and the Estate's cards (spec 001's first ten) | bounds | `evals.py bounds` |
 | `t3-flows.yaml` | T3, the Flows shelf's tools: a saved flow run by name on its card, a run's status read (ADR-0017) | flows | `evals.py flows` |
+| `t3-away.yaml` | T3, the away loop: a change from the phone or an automation planned and carded, a No or no answer ends it, a failure named (ADR-0016, ExecPlan 0005 M1) | away | `evals.py away` |
 | `ext-bfcl.yaml` | ext, calibration (outside, pinned) | bfcl | `evals.py bfcl` |
 | `ext-aider-py.yaml` | ext, calibration (outside, pinned) | aider-py | `evals.py aider-py` |
 
