@@ -15,6 +15,10 @@ was never merged and has no entry.
 
 ### Added
 
+- A plans or standins case may name a `precondition` (a RESULT check that must fail on its fixture), and `evals.py
+  validate` measures it as it does an asks case's; new result check `celsius_to_kelvin_works`. `t2-cards.yaml` v2:
+  v1 asked for a docstring `convert_length` already had (`units.py` line 8); v2 asks for `celsius_to_kelvin` and names
+  its precondition. (ADR-0012, evals/README.md.)
 - Every eval run keeps each case's transcript, `storage/evals/runs/<tag>/cases/<case id>.jsonl`: the ask, every
   message as MAF serializes it (`Message.to_dict`: text, `text_reasoning`, each call with its arguments, each result
   and any exception), each card with its answer, the steps' output and progress, every warning logged during the case
@@ -25,6 +29,11 @@ was never merged and has no entry.
 
 ### Changed
 
+- The record brought current, with dated notes, nothing removed (2026-11-08): ADR-0003 (the AG-UI 3/3 run is at
+  `a8627e2`, not `6401b56`; the comparison rule printed "keep AG-UI off", and still does on the same history), ADR-0012
+  and ExecPlan 0001 (T0's `direct` never run yet; Milestone 2's bounds runs, 4/10 then 7/10, and the three fixed),
+  ARCHITECTURE.md (as of 2026-11-08; §6's built and next), spec 001 (A4, B3 to B5, C7, F2, F4, I6, L1 to L3 covered by
+  `bounds`), `baselines.json` (small v2 measured 17/17 on three runs; its gate bar unchanged).
 - ADR-0011 (the harness parity set) is `rejected`, its text kept, with the operator's words of 2026-11-05: "ok, so
   that all seems kind of useless for our system then, seeing as our evals are literally "can he do what is needed for
   the system reliably" therefore, we need to make custom evals to make sure steward is using everything as expected

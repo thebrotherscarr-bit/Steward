@@ -32,6 +32,8 @@ difference. Having read it, the operator ruled, 2026-11-05:
 > expected within our harness."
 
 Steward's evals so far are T0 (regression: small, steps, direct) and T1 (held out), both met, plus the `ext`
+_(2026-11-08: "T0 met" holds for `small` and `steps`; T0's `direct` (t0-direct v1) has never been run, so T0 as a
+whole is not yet met. Its first run is planned with cards, judgment and aider-py.)_
 calibration sets (BFCL, Aider Python). They measure the plan-and-card workflow on sample projects. Most of what the
 Charter, [ARCHITECTURE.md](../ARCHITECTURE.md) and the ADRs ask him to use (the Estate's tools, the door, the notes,
 the source rules, the skills, memory, the team, the bounds) has no eval case at all. What is Steward's bar, and how
@@ -74,7 +76,8 @@ a fact the run left (a tool called, a card raised, a rule kept, a file's state),
   untested) and proposes a case for every gap. A change to the Charter, the architecture or an ADR that adds or moves a
   capability updates the map in the same pull request.
 - **Grouped into the dev-path tiers** (ADR-0006, and the SecondBrain note
-  `steward-s-dev-path-evals-that-grow-with--cb3211`): T0 regression and T1 held out (both met), T2 his own work in his
+  `steward-s-dev-path-evals-that-grow-with--cb3211`): T0 regression and T1 held out (both met; _2026-11-08: T0's
+  small and steps, `direct` never run yet_), T2 his own work in his
   repository, T3 Estate operations (with the source rules and the safety bounds), T4 GitHub, then T5 (still to be
   restated now that Neiro is retired), T6 Estate iteration, T7 generalist.
 - **A tier's bar is all of its cases passing, twice in a row**, which is how T0 and T1 were met (T1 at v2: 5/5 and
