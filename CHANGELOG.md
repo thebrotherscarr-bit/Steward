@@ -19,6 +19,8 @@ was never merged and has no entry.
   agents on local hardware (github.com/thebrotherscarr-bit/STEW). His profiles, tasks, eval sets and records map
   to STEW `.us` declarations by a seven-step migration, none of it done here; the model becomes a binding in runtime
   config (ADR-0002's one model holds per install); the next piece is a portability audit of Steward and Jesster.
+- ExecPlan 0006 P1, step 1: the portability audit's Steward entries (note `portability-audit-2026-11-08-8af9d1`)
+  copied into the plan's P1 section and Progress, one line each, each with the milestone that fixes it (ADR-0020).
 
 ### Fixed
 
