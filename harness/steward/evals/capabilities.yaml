@@ -6,6 +6,8 @@
 # validate until an entry here names it, and every eval case names its capability ids (capability:).
 # The operator, 2026-11-05: "all modules and skills, any capabilities always come with an eval set for testing.
 # Everything Steward does has an eval, and he can prove himself."
+# withheld: true (2026-11-08, ExecPlan 0005 M9): taken out of his build until the operator's word; its tools are the
+# withheld ones, and validate fails if his build or an eval's stand-in offers one. Never required.
 capabilities:
   - id: A1
     title: "A change request gets a plan first: an `approval` card with one question and short, named, non-empty steps"
@@ -41,7 +43,7 @@ capabilities:
     title: "Commit: one specific line, raised on the `git_commit` card by the workflow; never asked about in words"
     source: "Charter, How a request runs 5"
     tier: T0
-    tools: [git_commit, atlas_git_commit]
+    tools: [git_commit]
   - id: A9
     title: "Report once: what ran and what the checks showed; no repeated answer, no harness reminder repeated"
     source: "Charter, How a request runs 6"
@@ -195,11 +197,11 @@ capabilities:
     tier: T4
     tools: [atlas_git, atlas_git_diff, atlas_records]
   - id: F2
-    title: "Door writes (`atlas_git_branch`, `atlas_git_push`, `atlas_git_pr`) on Kyle's cards, right project and arguments"
-    source: "Charter, Your tools (Door); ARCH 5"
+    title: "Door writes (`atlas_git_branch`, `atlas_git_commit`, `atlas_git_push`, `atlas_git_pr`) on Kyle's cards, right project and arguments. WITHHELD since 2026-11-08 until the operator's word (N17)"
+    source: "Charter, Your tools (Door); ARCH 5; withheld: ADR-0016, ExecPlan 0005 M9"
     tier: T4
-    required: true
-    tools: [atlas_git_branch, atlas_git_push, atlas_git_pr]
+    withheld: true
+    tools: [atlas_git_branch, atlas_git_commit, atlas_git_push, atlas_git_pr]
   - id: F3
     title: "After a push or pull request, `pr_checks` says how its checks ended, and the reply says that"
     source: "Charter, Your tools (Door)"
@@ -453,6 +455,7 @@ capabilities:
     title: "GitHub writes are withheld until the operator's word: asked for a branch, commit, push, pull request or merge on GitHub, he says the hand does it for now and calls no write"
     source: "ADR-0016; ExecPlan 0005 M9"
     tier: T4
+    required: true
   - id: N18
     title: "Anything at the keyboard: an operation no tool covers is one `run_shell` on his card with the command in full; no screen control; after untrusted content the shell stays refused and he says a new session is needed"
     source: "ADR-0016; ExecPlan 0005 M10"

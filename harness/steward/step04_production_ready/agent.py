@@ -809,7 +809,14 @@ def code_search_tool(index: CodeIndex | None = None) -> FunctionTool:
 # The door's git tools and record that Steward may call (ADR-0001 items 5 and 6), by their names on the door.
 # git_pr since 2026-10-31 (Kyle: "Yes, give it to him"): SecondBrain's door parks his open and merge for
 # Kyle's Approve like every other write, so a change goes from his line to main through the door alone.
-_ATLAS_GIT_TOOLS = ("git", "git_branch", "git_diff", "git_commit", "git_push", "git_pr", "records")
+# Withdrawn 2026-11-08 (ADR-0016, ExecPlan 0005 M9, N17; the operator: "when he has passed reliably, he can gain the
+# tools to control github"): the door's writes are not offered to him until then. He keeps the door's reads and
+# pr_checks (which reads git_pr's list through the door object, not as a tool of his); his own workspace's commit
+# (git_commit, the commit step of his own work) is not the door's and stays. The withheld names are kept here so the
+# gates below still refuse or card them if a later change offered one, and validate refuses a build that does
+# (capabilities.yaml's withheld entry, evals.capability_problems).
+_ATLAS_GIT_TOOLS = ("git", "git_diff", "records")
+_ATLAS_GIT_WITHHELD = ("git_branch", "git_commit", "git_push", "git_pr")
 _STEWARD_WORLD = "steward"
 # The Estate's repositories, by the names the door addresses them (2026-11-04, Kyle: Steward is the agent of the Estate).
 # The door carries research, atlas, secondbrain and steward (SecondBrain electron/door/index.cjs worldsFor). Neiro, the
@@ -853,7 +860,7 @@ def estate_approval(tools: Sequence[str]) -> dict[str, Any]:
 # plain str: MAF compiles it on the regex engine, case-insensitively, with a one-second bound (ShellPolicy, _policy.py).
 ARCHIVE_PATH = r"(?:Desktop[\\/]+Archive|(?:\.\.[\\/]+)+Archive)(?![\w-])"
 ESTATE_GIT_REFUSALS: tuple[tuple[str, str], ...] = (
-    (r"\bgit\s+push\b", "a push outside the door (pushes go through atlas_git_push, on the user's card)"),
+    (r"\bgit\s+push\b", "a push (GitHub writes are withheld from you for now; the hand does them: say so)"),
     (r"\bgit\s+tag\b|\bgit_tag\b", "a tag (tags are the user's)"),
     (r"\bgh\s+release\b|\brelease_step\b", "a release (releases are the user's)"),
     (r"\bgit\s+(?:rebase|filter-branch|filter-repo|replace|update-ref)\b|\bgit\s+commit\b[^|;&]*--amend\b", "a history rewrite"),
@@ -1023,7 +1030,7 @@ _CHANGES_THINGS = frozenset({
     "run_shell",
     # Skill scripts are not here (Kyle, 2026-10-31: "unless he has an actual skill he is calling, there is no
     # simple task"): a matching skill is followed directly, and its scripts keep their own approval card.
-    *(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr")),
+    *(f"atlas_{name}" for name in _ATLAS_GIT_WITHHELD),  # withheld from his build (M9); kept so the gate holds
     # His notes' writes (the secondbrain-notes skill, 2026-11-02): they ask too, so plan mode leaves them alone.
     *(f"secondbrain_{name}" for name in ("write_note", "append_to_note")),
     # The Estate's writes (2026-11-04): a server started, stopped or restarted, a model unloaded, SecondBrain updated.
@@ -2278,7 +2285,7 @@ ARCHIVE_DIR = Path.home() / "Desktop" / "Archive"
 GROUND_DIR: Path | None = _STEWARD_DIR.parents[2] if _STEWARD_DIR.parents[1].name.lower() == "worlds" else None
 # The ground's repository, as the door names it (ESTATE_WORLDS), and the door's writes (_CHANGES_THINGS names them too).
 _GROUND_WORLD = "research"
-_DOOR_WRITES = frozenset(f"atlas_{name}" for name in ("git_branch", "git_commit", "git_push", "git_pr"))
+_DOOR_WRITES = frozenset(f"atlas_{name}" for name in _ATLAS_GIT_WITHHELD)
 # One shell or argument word: what is between spaces, quotes and the shell's operators.
 _WORD = re.compile(r"""[^\s"'`;|&<>()=,]+""")
 # Session state: an untrusted source was called in this session (or before the plan, carried by the workflow), and the
@@ -3687,7 +3694,7 @@ async def tool_policy(agent: Agent[Any], rules: Sequence[Any], scratch: Path) ->
         notes = []
         if name in _CHANGES_THINGS:
             notes.append("refused without a card in plan mode (the plan-mode gate)")
-        if source == "mcp:door" and name != PR_CHECKS_TOOL:
+        if source == "mcp:door" and name in _DOOR_WRITES:
             notes.append("SecondBrain's door holds its writes for approval there")
         if name in {f"secondbrain_{t}" for t in ESTATE_ACTIONS}:
             notes.append("a bounded Estate action: in chat it is planned and asks a card (ADR-0009); a saved flow runs it with none")
@@ -3904,12 +3911,12 @@ async def build_steward_agent(
         # client Steward already holds (its share key, as a client: reads run, writes park as holds for
         # the operator), and the door carries his repository as the world `steward`. So the door is one
         # more MCPStreamableHTTPTool on that client, with allowed_tools, as MAF's local-MCP page shows.
-        # The door keeps its own authorization, as MAF says host tools must. Only the git tools and the
-        # record are offered, the pieces of the branch-check-keep loop; estate_door_gate keeps every
+        # The door keeps its own authorization, as MAF says host tools must. Only the git reads and the
+        # record are offered since 2026-11-08 (_ATLAS_GIT_TOOLS; the writes withheld, M9); estate_door_gate keeps every
         # call on an Estate repository (ESTATE_WORLDS) and refuses what is never his. An eval's build has no door (eval_build): live 2026-11-04 an eval's commit through
         # it parked a real hold card in the user's SecondBrain.
         if secondbrain_client is not None and not eval_build:
-            # His own door: trusted reads; its branch, commit, push and PR are FIDES sinks (labelled_mcp_tool).
+            # His own door: trusted reads (its writes, FIDES sinks if ever offered, are withheld: _ATLAS_GIT_WITHHELD).
             door = await labelled_mcp_tool(
                 stack,
                 MCPStreamableHTTPTool(

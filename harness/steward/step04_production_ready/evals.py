@@ -404,13 +404,8 @@ STAND_INS: dict[str, dict[str, Any]] = {
     "atlas_git": {"write": False, "parameters": {"type": "object", "properties": {"project": _TEXT}}, "description": (
         "the world's repository as it stands now: branch, head, dirty counts, upstream, and whether remote operations "
         "are walled")},
-    "atlas_git_branch": {"write": True, "parameters": {
-        "type": "object", "properties": {"action": _TEXT, "name": _TEXT, "project": _TEXT}}, "description": (
-        "the lines of work: list them (which one you are on, which is the main line, which have been sent), or open, "
-        "switch to, land (onto the main line, fast-forward only), or close one")},
-    "atlas_git_push": {"write": True, "parameters": {"type": "object", "properties": {"project": _TEXT}}, "description": (
-        "send saved work to the remote; refuses by name while the estate's wall is shut, and says so when it binds a "
-        "branch to origin for the first time")},
+    # No stand-in for the door's writes (atlas_git_branch, _commit, _push, _pr): withheld from his build since
+    # 2026-11-08 (agent._ATLAS_GIT_WITHHELD; ExecPlan 0005 M9), so an eval offers them no more than his build does.
 }
 
 
@@ -584,11 +579,14 @@ def set_files(folder: Path) -> list[Path]:
 # name it), skill (the skill folder it is) and tools (the tools of Steward's it is the capability of). A data file and
 # not the spec's tables parsed, because the tables' columns differ by section (the skills' have no source) and carry
 # prose; validate still reads the spec's ids (^| A1 |) so the two cannot drift apart unseen.
+# withheld (2026-11-08, ExecPlan 0005 M9): a capability the operator has taken out of Steward's build until his word
+# (the door's GitHub writes). Its tools are the ones withheld: validate refuses a build that offers one of them, and a
+# withheld capability is never required (it has no case of its own; its withholding has one, N17).
 CAPABILITIES_FILE = EVAL_SETS_DIR / "capabilities.yaml"
 CAPABILITY_SPEC = Path(__file__).resolve().parents[3] / "docs" / "specs" / "001-capability-evals.md"
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 _CAPABILITY_KEYS = {"id", "title", "source", "tier"}
-_CAPABILITY_OPTIONAL = {"required", "skill", "tools"}
+_CAPABILITY_OPTIONAL = {"required", "skill", "tools", "withheld"}
 
 
 @dataclass(frozen=True)
@@ -603,6 +601,7 @@ class Capability:
     required: bool = False
     skill: str | None = None
     tools: tuple[str, ...] = ()
+    withheld: bool = False
 
 
 def load_capabilities(path: Path = CAPABILITIES_FILE) -> dict[str, Capability]:
@@ -635,9 +634,13 @@ def load_capabilities(path: Path = CAPABILITIES_FILE) -> dict[str, Capability]:
                 and isinstance(tools, list) and all(isinstance(t, str) and t for t in tools)):
             problems.append(f"{path.name}: {cid}: required is true or false, skill a folder name, tools a list of names")
             continue
+        withheld = entry.get("withheld", False)
+        if not isinstance(withheld, bool) or (withheld and (entry.get("required", False) or not tools)):
+            problems.append(f"{path.name}: {cid}: withheld is true or false, and a withheld capability names its tools and is not required")
+            continue
         found[cid] = Capability(
             id=cid, title=str(entry["title"]), source=str(entry["source"]), tier=str(entry["tier"]),
-            required=entry.get("required", False), skill=entry.get("skill"), tools=tuple(tools),
+            required=entry.get("required", False), skill=entry.get("skill"), tools=tuple(tools), withheld=withheld,
         )
     if problems:
         raise EvalSetError("\n".join(problems))
@@ -678,7 +681,8 @@ def capability_problems(
     A problem (validate is red): the map cannot be read; its ids are not spec 001's; a case (any set but tier ext,
     which covers no capability) names an id the map does not list; a required capability has no case; a skill folder
     under skills/ has no entry whose skill names it, or an entry names a folder that is not there; a tool of Steward's
-    (steward_tool_names) is in no entry's tools, or an entry names a tool he does not have. A capability with no case
+    (steward_tool_names) is in no entry's tools, or an entry names a tool he does not have; a withheld entry's tool is
+    offered by his build or by a stand-in (STAND_INS). A capability with no case
     that is not required yet is not a problem: it is counted as untested (validate_main says how many)."""
     try:
         capabilities = load_capabilities(path)
@@ -712,9 +716,13 @@ def capability_problems(
     problems += [f"{path.name}: the skill {name} has no capability (an entry with skill: {name}) and no case" for name in sorted(folders - mapped_skills)]
     problems += [f"{path.name}: names the skill {name}, which is not a folder in skills/" for name in sorted(mapped_skills - folders)]
     tools = set(tools) if tools is not None else steward_tool_names()
-    mapped_tools = {t for c in capabilities.values() for t in c.tools}
-    problems += [f"{path.name}: the tool {name} has no capability (an entry whose tools name it) and no case" for name in sorted(tools - mapped_tools)]
+    withheld = {t for c in capabilities.values() if c.withheld for t in c.tools}
+    mapped_tools = {t for c in capabilities.values() if not c.withheld for t in c.tools}
+    problems += [f"{path.name}: the tool {name} has no capability (an entry whose tools name it) and no case" for name in sorted(tools - mapped_tools - withheld)]
     problems += [f"{path.name}: names the tool {name}, which Steward does not have" for name in sorted(mapped_tools - tools)]
+    # A withheld tool (M9) offered by his build, or by an eval's stand-ins, is the withholding undone.
+    problems += [f"{path.name}: the tool {name} is withheld, and Steward's build offers it" for name in sorted(withheld & tools)]
+    problems += [f"{path.name}: the tool {name} is withheld, and an eval offers it as a stand-in (STAND_INS)" for name in sorted(withheld & set(STAND_INS))]
     untested = [cid for cid in capabilities if cid not in named]
     return problems, untested
 

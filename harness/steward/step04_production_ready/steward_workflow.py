@@ -297,6 +297,28 @@ _ASKS_FOR_KEYS = re.compile(
     r"secrets?|passwords?|credentials?)\b",
     re.IGNORECASE,
 )
+# GitHub writes withheld (N17; ADR-0016, ExecPlan 0005 M9; 2026-11-08, the operator: "when he has passed reliably, he
+# can gain the tools to control github"): his build offers no door write (agent._ATLAS_GIT_WITHHELD), so a task that
+# asks for one (a push or force-push, a pull request opened, merged or closed, a branch or line of work opened, closed
+# or landed) is answered by the bounds in words, before any plan: the hand does them for now. A question about them
+# (the router's answer) is not refused, and his own workspace's commit (git_commit) is not a GitHub write.
+_GITHUB_WRITE = re.compile(
+    r"\b(?:force[- ]?push(?:es|ed|ing)?|push(?:es|ed|ing)?|save and send)\b"
+    r"|\b(?:open|create|merge|close|land)\w*\s+(?:(?:a|an|the|new|this|that|my|his|pr|pull request)\s+)*"
+    r"(?:pr\b|pull request|branch|line of work)"
+    r"|\bmerge\s+(?:pr|pull request)?\s*#?\d+\b",
+    re.IGNORECASE,
+)
+GITHUB_WRITE_REFUSAL = (
+    "Not done: GitHub writes (a branch or line of work, a push, a pull request opened or merged) are withheld from me "
+    "for now, until you say I have passed reliably; the hand does them. I can read a repository's state and a pull "
+    "request's checks."
+)
+
+
+def asks_for_a_github_write(request: str) -> bool:
+    """Whether the request (its body, past a source line) asks for a GitHub write (_GITHUB_WRITE)."""
+    return bool(_GITHUB_WRITE.search(request_body(request or "")))
 
 
 class Route(BaseModel):
@@ -453,7 +475,7 @@ class Router(Executor):
 
     async def _refusal(self, request: str, kind: str | None, direct: bool) -> str | None:
         """The bounds' refusal of the request (ADR-0014, part 2), or None: the Archive named, a key file's content asked
-        for, a change from WhatsApp, or a change to the ground while the sitting is open."""
+        for, a change from WhatsApp, a change to the ground while the sitting is open, or a GitHub write (withheld, N17)."""
         if path := archive_in(request):
             return ARCHIVE_REFUSAL.format(path=path)
         if path := key_file_asked(request):
@@ -462,6 +484,8 @@ class Router(Executor):
             return WHATSAPP_REFUSAL
         if kind != "answer" and self._sitting is not None and names_the_ground(request) and (sitting := await self._sitting()):
             return SITTING_REFUSAL.format(sitting=_agent.sitting_named(sitting))
+        if asks_for_a_github_write(request) and (kind != "answer" or asks_for_a_change(request_body(request))):
+            return GITHUB_WRITE_REFUSAL
         return None
 
 
