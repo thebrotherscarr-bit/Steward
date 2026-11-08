@@ -22,6 +22,12 @@ was never merged and has no entry.
 
 ### Fixed
 
+- In EXPLORE (the plan phase's reading; the plan call has its tools off), a call to a tool only a later step offers is answered with a plain
+  result, "That tool runs after your plan is approved: put it in your plan's steps.", not MAF's "not found" error, so
+  it no longer counts toward MAF's three consecutive function-call errors (check-m0-p36: two `service_control` calls
+  and one `file_access_ls` in EXPLORE stopped his calls before the plan). The tool is still not offered to him there,
+  nothing runs and no card is raised (`later_step_calls`; the later tools go back into the run's list once the model
+  has answered, `back_for_the_loop`). A tool offered in no step stays MAF's error.
 - A narrow profile's run is no longer offered MAF's memory tools: MAF merges a history provider's tools per service
   call, inside its own chat middleware appended after the workflow's per-step cut, so the eval-runner profile's first
   answer call was offered all six. `StewardMemoryProvider` (MAF's `MemoryContextProvider`) keeps its tools and their
