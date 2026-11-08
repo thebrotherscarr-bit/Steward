@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import secrets
 import subprocess
@@ -54,6 +55,13 @@ from agent_framework import (
 
 STEPS = ("repo_log", "merged_prs", "releases", "eval_bars", "plan_left", "versions", "pull_ff", "eval_start", "eval_wait")
 EVAL_SETS_TRANSPORTS = ("in-process", "responses", "ag-ui")
+# A host transport (responses, ag-ui) carries an asks set only: a set file whose runner is "asks" (small, heldout);
+# evals.py refuses any other set on one (exit 2). The set files are read from the folder beside this code.
+HOST_RUNNER = "asks"
+EVAL_SETS_DIR = Path(__file__).resolve().parents[1] / "evals"
+_RUNNER_LINE = re.compile(r"^runner:[ \t]*[\"']?([\w.-]+)[\"']?[ \t]*\r?$", re.M)
+_NAME_LINE = re.compile(r"^name:[ \t]*[\"']?([\w.-]+)[\"']?[ \t]*\r?$", re.M)
+_log = logging.getLogger(__name__)
 EVAL_MAX_HOURS = 8
 MAX_RUNS = 3
 DAY_SECONDS = 24 * 3600
@@ -82,6 +90,34 @@ class RecipeError(ValueError):
     """A recipe that is not one: a step outside STEPS, or arguments out of bounds."""
 
 
+def set_runners(folder: Path = EVAL_SETS_DIR) -> dict[str, str]:
+    """Each eval set's runner by set name, from the set files' ``name:`` and ``runner:`` lines (as SecondBrain's
+    estate.cjs evalSets reads them); an unreadable file is left out."""
+    runners: dict[str, str] = {}
+    for path in sorted(folder.glob("*.yaml")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        name, runner = _NAME_LINE.search(text), _RUNNER_LINE.search(text)
+        if name and name.group(1) not in runners:
+            runners[name.group(1)] = runner.group(1) if runner else ""
+    return runners
+
+
+def eval_transport(sets: Sequence[str], stored: str | None, runners: Mapping[str, str]) -> tuple[str, str | None]:
+    """The transport an eval_start step sends, and a note when the stored one was set aside. None stored: AG-UI when
+    every set is an asks set, else in-process. A stored host transport on a set that is not an asks set is stale (the
+    Flows examples were saved with ag-ui while it was the default; 2026-11-06 bfcl, steps and direct failed at once):
+    it runs in-process instead, with one line saying so. evals.py's own refusal still stands for the CLI."""
+    off_host = [s for s in sets if runners.get(s) != HOST_RUNNER]
+    if stored is None:
+        return ("in-process" if off_host else "ag-ui"), None
+    if stored != "in-process" and off_host:
+        return "in-process", f"stored transport {stored} ignored for {', '.join(off_host)}: runs in-process"
+    return stored, None
+
+
 def _step(x: Any) -> dict[str, Any]:
     return {"step": x} if isinstance(x, str) else dict(x or {})
 
@@ -106,8 +142,8 @@ def validate_recipe(recipe: Mapping[str, Any]) -> dict[str, Any]:
             runs = s.get("runs", 1)
             if not isinstance(runs, int) or not 1 <= runs <= MAX_RUNS:
                 raise RecipeError(f"eval_start runs is 1 to {MAX_RUNS}")
-            # No transport named: none is sent, and SecondBrain's eval_start picks AG-UI for asks sets only (ADR-0003)
-            # and in-process for the rest, which evals.py refuses on a host (2026-11-05: bfcl over ag-ui exited 2).
+            # A named transport is kept as saved; the step chooses what it sends (eval_transport): AG-UI for asks sets
+            # only (ADR-0003), in-process for the rest, and a stored host transport on any other set is set aside.
             transport = s.get("transport")
             if transport is not None and transport not in EVAL_SETS_TRANSPORTS:
                 raise RecipeError(f"eval_start transport is one of {', '.join(EVAL_SETS_TRANSPORTS)}")
@@ -177,6 +213,8 @@ class RecipeTools:
     secondbrain: SecondBrain | None = None
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    # each eval set's runner by name (the set files beside this code); tests give their own
+    set_runners: Callable[[], Mapping[str, str]] = set_runners
 
 
 @dataclass
@@ -337,11 +375,15 @@ async def gather(step: Mapping[str, Any], g: Gathered, tools: RecipeTools) -> st
             raise RuntimeError("SecondBrain is not connected, so no eval can start")
         now = tools.clock()
         tag = f"{'_'.join(step['sets'])}-{datetime.fromtimestamp(now).strftime('%Y-%m-%d-%H%M')}"
-        args = {"sets": step["sets"], "runs": step["runs"], "tag": tag, **({"transport": step["transport"]} if step.get("transport") else {})}
+        transport, stale = eval_transport(step["sets"], step.get("transport"), tools.set_runners())
+        if stale:
+            _log.warning(stale)
+        args = {"sets": step["sets"], "runs": step["runs"], "tag": tag, "transport": transport}
         started = json.loads(await tools.secondbrain("eval_start", args))
         g.tag = started["tag"]
-        over = started.get("transport") or step.get("transport") or "SecondBrain's default"
-        return f"## Eval run started\n{g.tag}: {', '.join(step['sets'])}, {step['runs']} run(s) each, over {over}"
+        over = started.get("transport") or transport
+        note = f"\n({stale})" if stale else ""
+        return f"## Eval run started\n{g.tag}: {', '.join(step['sets'])}, {step['runs']} run(s) each, over {over}{note}"
     if name == "eval_wait":
         if not g.tag or tools.secondbrain is None:
             return "## Eval run\n(nothing to wait for: no eval_start before eval_wait)"

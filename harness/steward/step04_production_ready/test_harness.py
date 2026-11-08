@@ -8252,8 +8252,8 @@ def test_startup_runs_as_a_maf_workflow_gathering_read_only_pulling_only_clean_m
 
 
 def test_the_nightly_eval_recipe_starts_its_run_and_waits_for_bar_done(tmp_path: Path) -> None:
-    """eval_start and eval_wait as steps: SecondBrain's eval_start with no transport (it picks one by set: aider-py runs
-    in-process), eval_status read until BAR DONE (a fake sleep between reads), the result its counts; no summarize, so
+    """eval_start and eval_wait as steps: SecondBrain's eval_start with the transport chosen by set (aider-py is not an
+    asks set, so in-process), eval_status read until BAR DONE (a fake sleep between reads), the result its counts; no summarize, so
     no agent run. A saved flow starts its eval with no card (ADR-0009: the flow is the operator's approved plan); red if
     the step stops reaching SecondBrain's eval_start."""
     import recipe_workflow as rw
@@ -8272,7 +8272,7 @@ def test_the_nightly_eval_recipe_starts_its_run_and_waits_for_bar_done(tmp_path:
     status = _run_recipe(tmp_path, {"name": "Nightly aider-py", "steps": [{"step": "eval_start", "sets": ["aider-py"]}, {"step": "eval_wait", "hours": 8}]}, tools, summarizer)
     assert status["state"] == "done" and status["ok"] is True, status
     [start] = [a for n, a in sb if n == "eval_start"]
-    assert start["sets"] == ["aider-py"] and "transport" not in start and start["tag"].startswith("aider-py-")
+    assert start["sets"] == ["aider-py"] and start["transport"] == "in-process" and start["tag"].startswith("aider-py-")
     assert len(slept) == 2 and summarizer.runs == []
     assert "ended (BAR DONE)" in status["text"] and status["short"] == "done  aider-py v1 (ext) run 1: 21/34 cases"
 
@@ -8347,10 +8347,60 @@ def test_an_eval_run_that_never_begins_fails_the_flow_and_nothing_judges_it(tmp_
 
     summarizer = _Summarizer()
     tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=refused)
-    status = _run_recipe(tmp_path, {**recipe, "steps": [{"step": "eval_start", "sets": ["bfcl"], "transport": "ag-ui"}, "eval_wait", "eval_bars"]}, tools, summarizer)
+    status = _run_recipe(tmp_path, {**recipe, "steps": [{"step": "eval_start", "sets": ["bfcl"]}, "eval_wait", "eval_bars"]}, tools, summarizer)
     assert status["state"] == "failed" and "eval_start: evals.py --transport: a host transport" in status["error"], status
     assert summarizer.runs == [] and "(no eval run: eval_start: evals.py --transport" in status["text"]
     assert "small-night" not in status["text"]
+
+
+def test_a_flow_with_a_stale_host_transport_starts_its_eval_in_process(tmp_path: Path, caplog: Any) -> None:
+    """Live 2026-11-06 16:39 (storage/recipes/20261106-1639*, 1640*): the Flows examples "Eval: bfcl", "Eval: steps" and
+    "Eval: direct" were saved with transport ag-ui while AG-UI was the default, and each failed at once with evals.py's
+    "a host transport runs an asks set (small, heldout) only". The eval_start step now chooses the transport by set from
+    the set files beside the code: a stored host transport on a set that is not an asks set runs in-process, with one
+    logged line saying so; none stored is AG-UI only when every set is an asks set; a stored transport an asks set can
+    use is kept. Red if the stale transport is sent again, the set files stop being read, or the line is not logged."""
+    import json
+    import logging
+
+    import recipe_workflow as rw
+
+    runners = rw.set_runners()
+    assert runners["small"] == runners["heldout"] == "asks", runners
+    assert {runners[n] for n in ("bfcl", "steps", "direct")} == {"bfcl", "steps", "plans"}, runners
+    ground, steward_dir = _recipe_ground(tmp_path)
+
+    def started(steps: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+        sb: list[tuple[str, dict[str, Any]]] = []
+
+        async def secondbrain(name: str, arguments: Mapping[str, Any]) -> str:
+            sb.append((name, dict(arguments)))
+            if name == "eval_start":
+                if arguments.get("transport") != "in-process" and any(runners.get(x) != "asks" for x in arguments["sets"]):
+                    raise RuntimeError("evals.py --transport: a host transport runs an asks set (small, heldout) only")
+                return json.dumps({"started": True, "tag": arguments["tag"], "transport": arguments.get("transport")})
+            return json.dumps({"done": True, "lines": ["BAR DONE"]})
+
+        tools = rw.RecipeTools(repos=[], ground=str(ground), steward_dir=str(steward_dir), secondbrain=secondbrain)
+        status = _run_recipe(tmp_path, {"name": "Eval", "steps": steps}, tools, _Summarizer())
+        [start] = [a for n, a in sb if n == "eval_start"]
+        return status, start
+
+    for name in ("bfcl", "steps", "direct"):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="recipe_workflow"):
+            status, start = started([{"step": "eval_start", "sets": [name], "runs": 1, "transport": "ag-ui"}, "eval_wait"])
+        assert status["state"] == "done" and status["ok"] is True, status
+        assert start["transport"] == "in-process", start
+        line = f"stored transport ag-ui ignored for {name}: runs in-process"
+        assert [r.getMessage() for r in caplog.records if r.name == "recipe_workflow"] == [line], caplog.records
+        assert line in status["text"], status["text"]
+    _, start = started([{"step": "eval_start", "sets": ["small", "heldout"]}])
+    assert start["transport"] == "ag-ui", "none stored and every set an asks set: AG-UI"
+    _, start = started([{"step": "eval_start", "sets": ["small", "bfcl"]}])
+    assert start["transport"] == "in-process", "none stored and one set not an asks set: in-process"
+    _, start = started([{"step": "eval_start", "sets": ["small"], "transport": "responses"}])
+    assert start["transport"] == "responses", "a stored transport the set can use is kept"
 
 
 def test_his_mcp_host_serves_run_recipe_and_recipe_status_beside_him(tmp_path: Path) -> None:
