@@ -86,6 +86,7 @@ from agent_framework import (
     FileAccessProvider,
     FunctionInvocationContext,
     Message,
+    ResponseStream,
     TodoItem,
     TodoProvider,
     Workflow,
@@ -1046,9 +1047,24 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         governed = harness_tool_names() if allowed is not None else frozenset()
         spent = step == EXPLORE_STEP and calls_made(session) >= read_budget(session)
         cut = {n for n in names if spent or not offered_in_step(n, step, closed, direct) or (allowed is not None and n in governed and n not in allowed)}
+        # The plan phase's later tools (later_offers): cut from the list the model is offered, as every left-out tool,
+        # and put back in the run's list once the model has answered (back_for_the_loop), so MAF's function loop finds a
+        # call to one and later_step_calls answers it in words. The run's list stays the one MAF merges a provider's
+        # tools into (a copy of it lost write_memory after the first call); the next call cuts them again.
+        later = later_offers(session, step)
+        back = [t for t, n in zip(tools, names) if n in cut and n in later and runs_without_its_card(t, n)]
         tools[:] = [t for t, n in zip(tools, names) if n not in cut]
         kept = {*(session.state.get(_agent.LEFT_OUT_KEY) or []), *cut} - {n for n in names if n not in cut} - {""}
         session.state[_agent.LEFT_OUT_KEY] = sorted(kept)
+        if back:
+            await _instructions_then(context, session, step, call_next)
+            context.result = back_for_the_loop(context.result, tools, back)
+            return
+    await _instructions_then(context, session, step, call_next)
+
+
+async def _instructions_then(context: ChatContext, session: Any, step: str | None, call_next: Callable[[], Awaitable[None]]) -> None:
+    """This call's instructions name only the tools its step may use (step_offers), then the call."""
     if step is not None and isinstance(instructions := (context.options or {}).get("instructions"), str):
         # The call's whole instructions (his own, the Charter, MAF's todo and mode texts, the profile's) name only the
         # tools the step offers (step_offers): t3-away's first run (2026-11-08, storage/evals/runs/away-first) called
@@ -1058,6 +1074,60 @@ async def step_tools_turn(context: ChatContext, call_next: Callable[[], Awaitabl
         # call. Each line naming one he is not offered here is dropped from this call's instructions.
         left_out = sorted(harness_tool_names() - step_offers(session, step))
         context.options["instructions"] = lines_naming_only_offered(instructions, left_out)
+    await call_next()
+
+
+# The plan phase's answer to a call to a tool only a later step offers (the lead, 2026-11-08, after profile check
+# check-m0-p36, 6765d87: in EXPLORE he called secondbrain_service_control twice and file_access_ls once, each "Requested
+# function ... not found", and MAF's three consecutive function-call errors stopped his calls before the plan). A plain
+# result, not an error: it is not counted toward MAF's stop. A tool offered in no step stays MAF's "not found".
+AFTER_APPROVAL = "That tool runs after your plan is approved: put it in your plan's steps."
+
+
+def back_for_the_loop(result: Any, tools: list[Any], back: Sequence[Any]) -> Any:
+    """The model's answer, with the later tools put back in the run's list once it is in (a stream's, when it has been
+    read: its cleanup hook, which runs before its finalizer and so before MAF's function loop sees the calls)."""
+
+    def put_back() -> None:
+        tools.extend(t for t in back if t not in tools)
+
+    if isinstance(result, ResponseStream):
+        return result.with_cleanup_hook(put_back)
+    put_back()
+    return result
+
+
+def later_offers(session: Any, step: str | None) -> frozenset[str]:
+    """The tools of his harness EXECUTE offers (within the picked profile's allow-list) that EXPLORE does not, the
+    harness's mechanics (todos, modes) left out; none in any other step (the plan call has its tools off, so it can call
+    none)."""
+    if step != EXPLORE_STEP or session is None:
+        return frozenset()
+    closed = _agent.sandbox_shell_closed(session)
+    direct = bool((getattr(session, "state", None) or {}).get(_agent.DIRECT_ACTION_KEY))
+    allowed = profile_tools(session)
+
+    def offered(at: str) -> set[str]:
+        return {n for n in harness_tool_names() if offered_in_step(n, at, closed, direct) and (allowed is None or n in allowed)}
+
+    return frozenset(offered(EXECUTE_STEP) - offered(EXPLORE_STEP) - _MECHANICS_TOOLS)
+
+
+def runs_without_its_card(tool: Any, name: str) -> bool:
+    """Whether a call to this tool in plan mode reaches the function middleware with no card: it asks no approval, or
+    it changes things (agent._CHANGES_THINGS), which plan mode passes the card to refuse (agent.plan_mode_gate). A tool
+    that asks its own card otherwise (a skill's script) is not kept in the plan phase's list."""
+    return getattr(tool, "approval_mode", None) != "always_require" or name in _CHANGES_THINGS
+
+
+async def later_step_calls(context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+    """Function middleware: in EXPLORE, a call to a tool only a later step offers (later_offers) is answered
+    with AFTER_APPROVAL, a plain result, and runs nothing."""
+    session = context.session or _agent._RUN_SESSION.get()
+    step = (getattr(session, "state", None) or {}).get(STEP_KEY) if session is not None else None
+    if context.function.name in later_offers(session, step):
+        context.result = AFTER_APPROVAL
+        return
     await call_next()
 
 
@@ -1785,6 +1855,7 @@ def build_steward_workflow(
         # Chat middleware, first of his chat middleware, so the name repair and the text-call recovery read the step's
         # tools (repair_tool_names, recover_text_tool_calls): each step's calls are offered only its tools.
         step_tools_turn,
+        later_step_calls,  # before the budget's count: a call to a later step's tool is answered, not counted
         count_calls,  # ADR-0015: EXPLORE's calls, for its reading budget
         *(agent.middleware or []),
     ]

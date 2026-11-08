@@ -129,11 +129,22 @@ door was restarted and that `estate_status` now shows it up.
   (`agent_framework/_agents.py`, `_sessions.py` `_merge_provider_context`), so `MemoryContextProvider`'s six tools
   reach a run's first call after the per-step cut. Evidence: the eval-runner test's first answer call offered
   `list_memory_topics` and five more. The provider itself now keeps to the profile (`StewardMemoryProvider`).
+- Observation (2026-11-08, Lane A): MAF answers a call to a tool outside the run's list before any function
+  middleware (`_tools.py` `_auto_invoke_function`: "Requested function ... not found", with an exception, counted), and
+  its `additional_tools` pause the run for user input, so a later step's tool has to be in the run's list for a
+  middleware to answer it. A call-local copy of the options lost the tools MAF merges per service call
+  (`write_memory`: "not found" on the next call); the later tools are instead put back into the run's own list once the
+  model has answered (a stream's cleanup hook), and cut again before the next call.
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).
 
 ## Decision Log
+
+- Decision: in EXPLORE (the plan phase's reading) a call to a tool only EXECUTE offers is answered in words ("That tool runs after your
+  plan is approved: put it in your plan's steps."), a plain result not counted toward MAF's consecutive-error stop; a
+  tool offered in no step stays MAF's "not found". Rationale: check-m0-p36 (6765d87), three "not found" in EXPLORE
+  stopped his calls. The lead's go, 2026-11-08. Date/Author: 2026-11-08, Lane A.
 
 - Decision: `code-fix`'s route takes every request that opens with "fix", so the small, steps and heldout sets' bug
   fixes run under it too (heldout's `fix_bug` is P1's ask word for word, and the router picks by the ask). Its tools

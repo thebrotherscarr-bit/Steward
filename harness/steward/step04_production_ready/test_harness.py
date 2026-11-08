@@ -163,7 +163,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
             self.route_calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
             reply = self.routes.pop(0) if self.routes else '{"kind": "task"}'
         elif options.get("response_format") is wf.StewardPlan and options.get("tool_choice") == "none":
-            self.plan_calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
+            self.plan_calls.append({"messages": list(messages), "options": {**options, "tools": list(options.get("tools") or [])}, "kwargs": dict(kwargs)})
             last_user = next((m for m in reversed(messages) if m.role == "user"), None)
             if self.plans:
                 reply = self.plans.pop(0)
@@ -172,7 +172,10 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, ChatTelem
             else:
                 reply = self.replies.pop(0) if self.replies else "done"
         else:
-            self.calls.append({"messages": list(messages), "options": dict(options), "kwargs": dict(kwargs)})
+            # The tools as offered at this call: the run's list is one list, changed in place for its later calls
+            # (steward_workflow.step_tools_turn cuts it, back_for_the_loop puts the plan phase's later tools back).
+            offered = {**options, "tools": list(options.get("tools") or [])} if options.get("tools") is not None else dict(options)
+            self.calls.append({"messages": list(messages), "options": offered, "kwargs": dict(kwargs)})
             reply = self.replies.pop(0) if self.replies else "done"
         # A list of Contents is one reply holding them all (several function calls in one turn: BFCL's parallel cases).
         contents = list(reply) if isinstance(reply, list) else [reply if isinstance(reply, Content) else Content.from_text(reply)]
@@ -5836,9 +5839,9 @@ def test_a_direct_ask_reaches_its_plan_card_with_no_code_reading() -> None:
     hints = str(client.calls[0]["options"].get("instructions") or "").split("## For this request", 1)[-1]
     assert "names your tool secondbrain_eval_start" in hints, hints[:400]
     assert 'load_skill("evals")' not in hints and "run_shell" not in hints, "no hint sends him to another tool"
-    assert function_results(client.calls[1]) == ['Error: Requested function "secondbrain_eval_start" not found.'], (
-        "his left-out tool is never repaired into another"
-    )
+    # His left-out tool is never repaired into another; since the lead's go of 2026-11-08 (check-m0-p36) a call to a
+    # tool only EXECUTE offers is answered in words, not as MAF's not-found error.
+    assert function_results(client.calls[1]) == [wf.AFTER_APPROVAL], "his left-out tool is never repaired into another"
     assert function_results(client.calls[2])[-1] == "No eval is running."
     assert code == 0, "the T0 direct case passes"
     [line] = evals.EVAL_HISTORY.read_text(encoding="utf-8").splitlines()
@@ -9875,3 +9878,85 @@ def test_each_bounds_case_runs_under_the_m0_profile_it_names() -> None:
     finally:
         profile_files.PROFILE_ROUTES.clear()
         profile_files.PROFILE_ROUTES.update(original)
+
+
+def test_a_plan_phase_call_to_a_later_steps_tool_is_answered_in_words_not_as_an_error(monkeypatch: Any) -> None:
+    """check-m0-p36 (2026-11-08, 6765d87): in EXPLORE he called secondbrain_service_control twice and file_access_ls
+    once, each "Requested function ... not found", and MAF's three consecutive function-call errors stopped his calls.
+    Now a plan-phase call to a tool only EXECUTE offers is answered with AFTER_APPROVAL, a plain result with no
+    exception (not counted toward MAF's stop), and nothing runs and no card is raised; the tool is still not advertised
+    to him there. A call to a tool offered in no step (a mode tool) stays MAF's "not found" error. With later_offers
+    unplugged, the restart call is "not found" again: red."""
+    import json
+
+    import profiles as profile_files
+    import steward_workflow as wf
+    from agent_framework import tool
+
+    ran: list[str] = []
+
+    @tool(name="secondbrain_service_control", approval_mode="always_require")
+    def service_control(service: str, action: str) -> str:
+        """Start, stop or restart one server."""
+        ran.append(f"{service} {action}")
+        return "restarted"
+
+    found = {"general": profile_files.load_profiles()["general"]}
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Restart the door."}], "steps": ["Restart the door with secondbrain_service_control"]})
+    restart = Content.from_function_call(call_id="r1", name="secondbrain_service_control", arguments={"service": "door", "action": "restart"})
+    mode = Content.from_function_call(call_id="m1", name="mode_get", arguments={})
+
+    def run() -> tuple[Any, list[Any]]:
+        client = _NamingClient([restart, mode, "I will plan it."], plans=[plan])
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=(service_control,))
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent, profiles=found).run("Restart the door.", stream=True)]
+
+        return client, asyncio.run(_go())
+
+    client, events = run()
+    assert "secondbrain_service_control" not in client.offered[0], "not advertised in EXPLORE"
+    results = {
+        c.call_id: c for m in client.calls[1]["messages"] + client.calls[2]["messages"] for c in m.contents
+        if c.type == "function_result"
+    }
+    assert results["r1"].result == wf.AFTER_APPROVAL and not results["r1"].exception, results["r1"]
+    assert "not found" in str(results["m1"].result) and results["m1"].exception, "a tool offered in no step stays an error"
+    assert ran == [] and [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+
+    monkeypatch.setattr(wf, "later_offers", lambda session, step: frozenset())  # unplugged
+    client, _ = run()
+    unplugged = [c for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_result" and c.call_id == "r1"]
+    assert unplugged and "not found" in str(unplugged[0].result), "unplugged, the call is MAF's not-found error again"
+
+
+def test_the_plan_phases_later_tools_leave_mafs_merged_memory_tools_in_reach() -> None:
+    """The later tools go back into the run's own list (back_for_the_loop), the list MAF merges a provider's tools
+    into, so his memory's write_memory, merged after the first call's cut, is still found on a later EXPLORE call (a
+    call-local copy of the options lost it: "Requested function write_memory not found")."""
+    import json
+    import tempfile
+
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    found = {"general": profile_files.load_profiles()["general"]}
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Fix it."}], "steps": ["Fix the typo in README.md"]})
+    ls = Content.from_function_call(call_id="l1", name="file_access_ls", arguments={"path": "."})
+    memo = Content.from_function_call(call_id="w1", name="write_memory", arguments={"topic": "t", "content": "c"})
+    client = _NamingClient([ls, memo, "I will plan it."], plans=[plan])
+
+    async def _go() -> None:
+        async with AsyncExitStack() as stack:
+            store = steward.steward_memory_store(stack.enter_context(tempfile.TemporaryDirectory()))
+            agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, memory_store=store)
+            async with agent:
+                [e async for e in wf.build_steward_workflow(agent, profiles=found).run("Fix the readme typo.", stream=True)]
+
+    asyncio.run(_go())
+    assert all("write_memory" in offered for offered in client.offered), client.offered
+    [result] = [c for m in client.calls[2]["messages"] for c in m.contents if c.type == "function_result" and c.call_id == "w1"]
+    assert "not found" not in str(result.result), result.result
