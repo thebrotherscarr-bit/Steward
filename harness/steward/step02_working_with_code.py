@@ -54,6 +54,9 @@ from pydantic import Field
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from console import build_observers_with_planning, run_agent_async  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import install  # noqa: E402 - the install's own entries (ExecPlan 0006 P1)
+
 load_dotenv()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or Path(__file__).resolve().parent / "working").resolve()
 
@@ -154,7 +157,7 @@ def small_commit_auto_approval_rule(call: Any) -> bool:
 
 # <automatic_memory>
 _MEMORY_DIR = Path.cwd() / "agent-memory"
-_MEMORY_SCOPE = "kyle"
+_MEMORY_SCOPE = install.owner().lower()  # the owner's scope (today's "kyle" by default)
 
 
 async def _maybe_enable_local_memory() -> Any:

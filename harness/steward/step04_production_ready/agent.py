@@ -37,6 +37,8 @@ Environment variables:
     STEWARD_CODE_SEARCH        — "off" drops his search_code tool (default on): the workspace's tracked .py and .md
                                  files searched by meaning, embedded on the CPU with embeddinggemma-2:270m; the
                                  vectors are kept in storage/code-search/embeddings.json (gitignored)
+    STEWARD_OWNER, STEWARD_BASH, STEWARD_GROUND_DIR, STEWARD_MCP_PORT
+                               — the install's own entries, each with its default (harness/steward/install.py)
     STEWARD_SANDBOX            — "hyperlight" runs CodeAct in MAF's Hyperlight sandbox and closes run_shell once
                                  untrusted content is in his context (default off). Needs Windows Hypervisor
                                  Platform; probed once at start, and if it cannot run, one line is logged and
@@ -143,6 +145,7 @@ import httpx2
 _STEWARD_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_STEWARD_DIR))
 from subprocess_script_runner import subprocess_script_runner  # noqa: E402
+import install as _install  # noqa: E402 - the install's own entries (ExecPlan 0006 P1)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import profiles as _profiles  # noqa: E402 - the harness profiles' allow-list (StewardMemoryProvider)
 
@@ -824,7 +827,7 @@ _STEWARD_WORLD = "steward"
 # The door carries research, atlas, secondbrain and steward (SecondBrain electron/door/index.cjs worldsFor). Neiro, the
 # Estate lock's repository, was retired as a gate on 2026-11-05 and archived: the versions are in estate_status.
 ESTATE_WORLDS: dict[str, str] = {
-    "research": "Manjuel, the ground (Desktop\\Research)",
+    "research": "Manjuel, the ground (the Estate's root folder)",
     "atlas": "Aurora, Atlas (atlas/ in the ground)",
     "secondbrain": "Jesster, SecondBrain (worlds/jesster)",
     "steward": "Steward, your own repository (worlds/steward)",
@@ -2138,7 +2141,8 @@ def _build_shell() -> LocalShellTool:
         clean_env=True,
         # Kyle, 2026-10-29: bash (Git Bash) by preference, through MAF's own shell override. Elsewhere (the gate's
         # Linux runner) MAF's own default, which resolves to /bin/bash (agent_framework_tools/shell/_resolve.py).
-        shell=[r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else None,
+        # Which bash is the install's entry STEWARD_BASH (install.bash; the portability audit's A5).
+        shell=[bash] if (bash := _install.bash()) else None,
         mode="persistent",
         workdir=str(_WORKING_DIR),
         confine_workdir=True,
@@ -2188,7 +2192,7 @@ SANDBOX_SHELL_REFUSAL = (
     "run_shell did not run: untrusted content (a web page, a note or an Estate log) is in your context and the "
     "Hyperlight sandbox is on (STEWARD_SANDBOX=hyperlight), so no command runs on the host for the rest of this session. "
     "Do this step in Python with execute_code, which runs in the sandbox (the workspace's harness folder is at "
-    "/input/harness), or tell Kyle it needs the shell and a new session."
+    f"/input/harness), or tell {_install.owner()} it needs the shell and a new session."
 )
 _SANDBOX_UNTRUSTED_KEY = "steward_untrusted_in_context"
 _SANDBOX_STATE: dict[str, bool] = {}  # the probe's answer, once per process
@@ -2299,7 +2303,10 @@ KEY_FILE = re.compile(
 )
 # The operator's Archive, outside the ground (RULE 1); and the ground, when this repository sits in its worlds/ folder.
 ARCHIVE_DIR = Path.home() / "Desktop" / "Archive"
-GROUND_DIR: Path | None = _STEWARD_DIR.parents[2] if _STEWARD_DIR.parents[1].name.lower() == "worlds" else None
+# STEWARD_GROUND_DIR names it (install.ground_dir; the portability audit's A7); unset, it is inferred from the layout.
+GROUND_DIR: Path | None = _install.ground_dir(
+    _STEWARD_DIR.parents[2] if _STEWARD_DIR.parents[1].name.lower() == "worlds" else None
+)
 # The ground's repository, as the door names it (ESTATE_WORLDS), and the door's writes (_CHANGES_THINGS names them too).
 _GROUND_WORLD = "research"
 _DOOR_WRITES = frozenset(f"atlas_{name}" for name in _ATLAS_GIT_WITHHELD)
