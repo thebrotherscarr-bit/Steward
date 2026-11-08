@@ -36,7 +36,8 @@ was never merged and has no entry.
   validate checks every profile against the tools, the cases and the map; a case passes only when its run picked the
   profile it names, and its transcript and history line record `profile` and `profile_picked`. `general` is the whole
   harness unchanged: every tool, read budget 8, gpt-oss's own medium effort (no `think` sent), no instructions.
-
+- The card wait is 30 minutes (the operator, 2026-11-08: "30 minutes"): a dated note in ADR-0016 and ExecPlan 0005's
+  Decision Log (the 60 minutes proposed there annotated as superseded); Jesster #105 makes it one value.
 - T3 `away` (`harness/steward/evals/t3-away.yaml` v1, standins, ExecPlan 0005 M1): telegram_approved (N1, N3: a
   change from Telegram planned first, made once approved, named in the reply), telegram_denied (N2, N4: a denied or
   unanswered card ends the run, nothing after it) and telegram_read_fails (N3: a failed read named in the reply, no
