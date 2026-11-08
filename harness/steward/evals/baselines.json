@@ -100,5 +100,11 @@
       "cases": "2ec6ee4993db29f7f8422feab604921586db2288298cd568f2a4126850add9d1",
       "note": "2026-11-08: ExecPlan 0005 MP, the eval-runner profile's two standins cases (T0 direct's case is the third). Not run as a set yet."
     }
+  },
+  "install": {
+    "1": {
+      "cases": "4baa34834fb7cf538e279dcdc6386fcd4297d24bc33f8efd15712afd74d1cbac",
+      "note": "2026-11-08: ExecPlan 0006 P2, O1 (a binding without tool calling refuses code-fix by name) and O2 (the model named from the binding). Not run yet: its live run waits for the operator's word."
+    }
   }
 }

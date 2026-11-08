@@ -5945,12 +5945,12 @@ def test_the_ag_ui_host_warms_the_code_index_as_it_starts(monkeypatch: pytest.Mo
 
 
 def test_eval_and_improvement_models_default_to_steward_1() -> None:
-    """ADR-0002, one model for everything: the guide's step 2 (its mem0 model) and the improvement loop default to
-    steward:1 when OLLAMA_MODEL is unset, never gpt-oss:20b."""
+    """ADR-0002, one model for everything: the guide's step 2 (its mem0 model) and the improvement loop run on the
+    install's binding (ExecPlan 0006 P2; steward:1 on this PC), and name no model of their own."""
     here = Path(__file__).resolve().parent
     for path in (here.parent / "step02_working_with_code.py", here / "improvement_loop.py"):
         text = path.read_text(encoding="utf-8")
-        assert 'os.environ.get("OLLAMA_MODEL", "steward:1")' in text and '"gpt-oss:20b")' not in text, path.name
+        assert "install.apply_binding()" in text and '"gpt-oss:20b"' not in text and '"steward:1"' not in text, path.name
 
 
 def test_a_blank_plan_step_or_an_invalid_tool_argument_never_ends_the_run() -> None:
@@ -8691,7 +8691,7 @@ def test_every_capability_has_a_map_entry_and_validate_goes_red_when_one_is_unpl
     problems, untested = evals.capability_problems(evals.EVAL_SETS)
     assert problems == [], problems
     required = {cid for cid, c in capabilities.items() if c.required}
-    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6", "N1", "N2", "N3", "N4", "N8"}, sorted(required)  # N1 to N4: t3-away v1; N8: t3-eval-runner v1
+    assert required == {"L3", "B3", "F4", "A4", "B4", "B5", "L1", "L2", "N17", "G10", "I6", "C7", "G7", "A12", "A13", "A14", "A15", "A16", "A17", "A18", "D4", "D5", "D6", "N1", "N2", "N3", "N4", "N8", "O1", "O2"}, sorted(required)  # N1 to N4: t3-away v1; N8: t3-eval-runner v1; O1, O2: t3-install v1
     assert not required & set(untested), "every required capability has its case"
     assert {c.skill for c in capabilities.values() if c.skill} == set(SKILLS), "every skill folder is a capability"
     assert {t for c in capabilities.values() if not c.withheld for t in c.tools} == evals.steward_tool_names()
@@ -10060,3 +10060,134 @@ def test_no_host_string_in_code_outside_the_install_defaults() -> None:
                 before = token
     assert found == [], f"a host string in code; move it to an install entry (harness/steward/install.py): {found}"
 # </install_entries>
+
+
+# <binding>
+def _binding_file(tmp_path: Path, name: str = "b.us", **changes: Any) -> Path:
+    """This install's binding with some members changed, written as a .us file of the test's own."""
+    import json
+
+    import install
+
+    raw = {
+        "stew": "2026-11-08-draft", "kind": "binding", "name": "test-binding", "api": "ollama",
+        "endpoint": "http://127.0.0.1:11434", "model": install.load_binding(install.INSTALL_DIR / "binding.us").model,
+        "provides": {"tool_calling": True, "context": 65536, "structured_output": True, "reasoning_effort": True},
+        "hardware": "a test's", "options": {"num_ctx": 65536, "keep_alive": "30m"},
+    }
+    for key, value in changes.items():
+        if isinstance(value, dict) and isinstance(raw.get(key), dict):
+            raw[key] = {**raw[key], **value}
+        else:
+            raw[key] = value
+    path = tmp_path / name
+    path.write_text(f"# A test's binding\n\n```json\n{json.dumps(raw, indent=2)}\n```\n", encoding="utf-8")
+    return path
+
+
+def test_the_model_is_the_installs_binding_and_nothing_else_names_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ExecPlan 0006 P2 (O1; ADR-0019 migration step 5; STEW spec/binding.md): the model, its endpoint and its options are
+    the install's binding (binding.us), put in OLLAMA_MODEL and OLLAMA_HOST when he loads, so every MAF Ollama client
+    reads them; his options and his compaction budget are the binding's. Another binding file (STEWARD_BINDING) changes
+    the model every call uses with no code change. A bad binding is refused in one line. And no string in his code names
+    a chat model: with the binding unplugged (a model named in code), red."""
+    import io
+    import re
+    import tokenize
+
+    import install
+    from agent_framework.ollama import OllamaChatClient
+
+    bound = install.load_binding()
+    assert bound.path == install.INSTALL_DIR / "binding.us" and bound.api == "ollama"
+    assert steward.BINDING == bound and steward._STEWARD_CONTEXT == bound.context
+    assert steward.OLLAMA_OPTIONS == {**bound.options, "num_ctx": bound.context}
+    environ = {"OLLAMA_MODEL": "an-older-model", "OLLAMA_HOST": "http://localhost:11434"}
+    assert install.apply_binding(environ) == bound and environ == {"OLLAMA_MODEL": bound.model, "OLLAMA_HOST": bound.endpoint}
+
+    other = _binding_file(tmp_path, "other.us", model="another:1", endpoint="http://127.0.0.1:11999", options={"num_ctx": 8192})
+    monkeypatch.setenv("STEWARD_BINDING", str(other))
+    monkeypatch.setattr(install, "_LOADED", {})
+    monkeypatch.setenv("OLLAMA_MODEL", bound.model)
+    monkeypatch.setenv("OLLAMA_HOST", bound.endpoint)
+    rebound = install.apply_binding()
+    assert (rebound.model, rebound.context) == ("another:1", 8192)
+    assert OllamaChatClient().model == "another:1" and os.environ["OLLAMA_HOST"] == "http://127.0.0.1:11999"
+
+    for changes, said in (
+        ({"api": "openai-compatible"}, "api 'openai-compatible' is not one Steward speaks yet"),
+        ({"model": ""}, "model is missing or empty"),
+        ({"provides": {"tool_calling": "yes"}}, "provides is not"),
+        ({"options": {"num_ctx": 999_999}}, "options.num_ctx is not a window"),
+    ):
+        with pytest.raises(install.BindingError, match=re.escape(said)):
+            install.load_binding(_binding_file(tmp_path, **changes))
+    with pytest.raises(install.BindingError, match="the install's binding cannot be read"):
+        install.load_binding(tmp_path / "none.us")
+
+    repo = Path(__file__).resolve().parents[3]
+    model_name = re.compile(r"\bsteward:\d|\bgpt-oss[:\-]\d|\bqwen[\d.]*-?\w*:\d", re.IGNORECASE)
+    skip_dirs = {".venv", ".venv-halo", "working", "data", "node_modules", "__pycache__", ".git", "get-started"}
+    found: list[str] = []
+    for path in sorted(repo.rglob("*.py")):
+        rel = path.relative_to(repo)
+        if skip_dirs & set(rel.parts) or path.name == "test_harness.py":
+            continue
+        before = None
+        for token in tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline):
+            if token.type == tokenize.STRING and model_name.search(token.string):
+                if not (before is None or before.type in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)):
+                    found.append(f"{rel.as_posix()}:{token.start[0]}")
+            if token.type not in (tokenize.COMMENT, tokenize.NL):
+                before = token
+    assert found == [], f"a chat model named in code; the binding names it (binding.us): {found}"
+    text = (repo / "binding.us").read_text(encoding="utf-8")
+    host_path = r"(^|[\s\"'(=])([A-Za-z]:[\\/]|\\\\[A-Za-z0-9]|/(Users|home|root)/|~[\\/])"  # STEW validate.py HOST_PATH_RE
+    assert not re.search(host_path, text) and not re.search(r"novad|\bKyle\b", text), "no host path or user in it (O2)"
+
+
+def test_a_profile_the_binding_does_not_fit_is_refused_by_name_before_any_plan(tmp_path: Path) -> None:
+    """ExecPlan 0006 P2 (O1; STEW spec/binding.md rule 2): every profile declares `requires` (tool calling when it offers
+    tools; min_context null, to be measured; reasoning effort), validate refuses a bad one, and a run whose profile the
+    binding does not fit is refused in one line naming what is missing: no plan, no card, no model call after the
+    router's. The same request on the install's binding is planned as before. And the reasoning option is sent only when
+    the binding provides it. With the check unplugged (binding_refusal), the run plans: red."""
+    import install
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    found = profile_files.load_profiles()
+    for profile in found.values():
+        assert profile.requires == {"tool_calling": bool(profile.tools), "min_context": None, "reasoning_effort": False}, profile.name
+    assert install.requires_problems({"tool_calling": True, "min_context": None}) == [
+        "requires is not {tool_calling, min_context, reasoning_effort}"
+    ]
+    assert install.requires_problems({"tool_calling": "yes", "min_context": 0, "reasoning_effort": False}) == [
+        "requires.tool_calling is not true or false", "requires.min_context is not a number of tokens, or null (to be measured)"
+    ]
+    no_tools = install.load_binding(_binding_file(tmp_path, "no-tools.us", provides={"tool_calling": False}))
+    small = install.load_binding(_binding_file(tmp_path, "small.us", provides={"reasoning_effort": False}, options={"num_ctx": 4096}))
+    wants = {"tool_calling": True, "min_context": 32768, "reasoning_effort": True}
+    assert install.unmet(wants, small) == ["a context window of 32768 tokens (it loads 4096)", "reasoning effort"]
+    assert install.binding_refusal("code-fix", found["code-fix"].requires, install.current_binding()) is None
+    refusal = install.binding_refusal("code-fix", found["code-fix"].requires, no_tools)
+    assert refusal == (
+        "Not done: the code-fix profile needs tool calling, which this install's binding test-binding (" + no_tools.model
+        + ") does not offer. Bind a model that does, in no-tools.us."
+    )
+
+    ask = "Fix the failing boiling point test in harness/steward/working/sample-project-2."
+    with install.using_binding(no_tools):
+        events, client = _bounds_run(ask, ["I will fix it."])
+    assert said(events) == [refusal] and client.calls == [], (said(events), len(client.calls))
+    assert not [e for e in events if e.type == "request_info"], "no card"
+    events, client = _bounds_run(ask, ["I will fix it."])
+    assert said(events) != [refusal] and client.calls, "on the install's binding it is planned as before"
+
+    narrow = _narrow_profile()
+    found = {"general": profile_files.load_profiles()["general"], "narrow": narrow}
+    plan = '{"type": "approval", "questions": [{"message": "Start it."}], "steps": ["Call secondbrain_eval_start"]}'
+    with install.using_binding(small):
+        client, _ = _profile_run("With the narrow profile: start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert "think" not in client.calls[0]["options"], "no reasoning option on a binding that does not provide it"
+# </binding>

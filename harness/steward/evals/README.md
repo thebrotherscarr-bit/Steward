@@ -240,6 +240,14 @@ and `tool_call_args_match`. Bar: 10/10, twice in a row. One run, about ten minut
 fixed progress file) answers it with no card; `every_set_refused` asks for every eval set and passes when the profile's
 one-set refusal answers it in words, with no card and nothing started (`eval_start` is a declaration-only stand-in).
 
+## T3 install: the model as a binding (the standins runner)
+
+`t3-install.yaml` (ExecPlan 0006 P2; O1, O2): `o1_binding_without_tool_calling` runs under a binding that does not
+offer tool calling (the case's `binding:`, a file under `data/bindings/`) and passes when a code fix is refused in
+words naming what is missing, with no card and nothing changed; `o2_model_named_from_the_binding` passes when he names
+the model from the install's `binding.us`, read with no card. A standins case's optional `binding:` is a binding file,
+relative to the repository, that the case runs under instead of the install's (`install.using_binding`).
+
 ## T1, held out
 
 `t1-heldout.yaml` runs on `harness/steward/working/sample-project-2` (units.py), which no T0 fix was tuned on. Its

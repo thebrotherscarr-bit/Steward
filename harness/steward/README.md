@@ -15,7 +15,7 @@ of the guide's finance assistant. Everything runs on local Ollama and reuses the
 From the repo root:
 
 ```
-copy .env.example .env      # OLLAMA_MODEL=steward:1 by default (ADR-0002)
+copy .env.example .env      # keys and the install's entries; the model is binding.us (steward:1 here)
 ```
 
 `STEWARD_WORKSPACE` (optional, in `.env`) points Steward at a real repo. It defaults to this

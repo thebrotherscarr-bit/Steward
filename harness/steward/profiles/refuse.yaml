@@ -11,6 +11,10 @@ instructions: |
   Say in one sentence that this is refused and why. Offer nothing that does it.
 read_budget: 0
 reasoning: low
+# What a model must offer to wear it (STEW spec/profile.md; ExecPlan 0006 P2): tool calling when it offers tools;
+# min_context is to be measured (the smallest window its cases pass with), null until it is; its reasoning
+# effort is sent only when the binding offers the knob, so it does not require it.
+requires: {tool_calling: false, min_context: null, reasoning_effort: false}
 gates:
   bounds: [keys, archive, sitting, whatsapp]
   extra: ["no option that performs the refused act"]

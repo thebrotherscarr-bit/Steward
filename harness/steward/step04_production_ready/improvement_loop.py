@@ -55,6 +55,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import install  # noqa: E402 - the model is the install's binding (binding.us; ExecPlan 0006 P2)
+
+_BINDING = install.apply_binding()  # OLLAMA_MODEL and OLLAMA_HOST, before anything below reads them
+
 _SELF = Path(__file__).resolve()
 _REPO_DIR = _SELF.parents[3]
 # LOOP_RUN_NAME keeps one run's files apart from another's (Kyle, 2026-10-29: one folder per model).
@@ -76,7 +81,7 @@ def _ollama_base_url() -> str:
 
 # Every model is local Ollama (OpenAI-compatible at /v1). Edit these in one place, as in the notebook.
 OLLAMA_V1 = _ollama_base_url() + "/v1"
-AGENT_MODEL = os.environ.get("OLLAMA_MODEL", "steward:1")
+AGENT_MODEL = _BINDING.model
 ANALYSIS_MODEL = os.environ.get("LOOP_ANALYSIS_MODEL", AGENT_MODEL)
 EVAL_GENERATION_MODEL = os.environ.get("LOOP_EVAL_GENERATION_MODEL", ANALYSIS_MODEL)
 JUDGE_MODEL = os.environ.get("LOOP_JUDGE_MODEL", ANALYSIS_MODEL)

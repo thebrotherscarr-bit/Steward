@@ -246,8 +246,8 @@ that lands its case.)_
 
 | ID | Capability | Source | Coverage | Existing case |
 |---|---|---|---|---|
-| O1 | The model is a binding: model, endpoint and context window come from the install's config, never from code; a profile whose `requires` the binding does not meet is refused by name with what is missing | ADR-0020; ADR-0019; ExecPlan 0006, P2 | untested | none (P2) |
-| O2 | One config: the install's one STEW `.us` declaration, written at first run; its paths relative to the install folder, no host name, user or account in it, no key in it | ADR-0020; ExecPlan 0006, P1, P2 | untested | none (P1, P2) |
+| O1 | The model is a binding: model, endpoint and context window come from the install's config, never from code; a profile whose `requires` the binding does not meet is refused by name with what is missing | ADR-0020; ADR-0019; ExecPlan 0006, P2 | required (2026-11-08; not run yet) | T3 `install` `o1_binding_without_tool_calling` |
+| O2 | One config: the install's one STEW `.us` declaration, written at first run; its paths relative to the install folder, no host name, user or account in it, no key in it | ADR-0020; ExecPlan 0006, P1, P2 | required (2026-11-08; not run yet) | T3 `install` `o2_model_named_from_the_binding` |
 | O3 | The doctor: the runtime reachable, the model bound and pulled, the ports free, the config valid, the keys of the pieces turned on present; every failure one line saying what failed and how to fix it; exit code 0 only when all pass | ADR-0020; ExecPlan 0006, P4 | untested | none (P4) |
 | O4 | First run ends with one proof: one small gating eval case run once on the bound model, its pass and its binding shown | ADR-0020; ExecPlan 0006, P4 | untested | none (P4) |
 | O5 | Optional pieces (Telegram, WhatsApp, the sandbox, Aurora, the door's forwarded tools, the notes kernel) are off in a new install; one that is off never fails the doctor or a run | ADR-0020; ExecPlan 0006, P5 | untested | none (P5) |

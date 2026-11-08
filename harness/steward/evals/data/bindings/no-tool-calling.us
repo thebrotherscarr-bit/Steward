@@ -1,0 +1,27 @@
+# Binding: no tool calling (an eval's, t3-install o1_binding_without_tool_calling)
+
+This install's model with `tool_calling` false: a binding no profile that offers tools can wear. The O1 case runs
+under it (`binding:`, `evals.py`'s standins runner) and is refused by name before any plan or card. The router's
+own call still goes to the model named here, so it is the install's model.
+
+```json
+{
+  "stew": "2026-11-08-draft",
+  "kind": "binding",
+  "name": "eval-no-tool-calling",
+  "api": "ollama",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "steward:1",
+  "provides": {
+    "tool_calling": false,
+    "context": 65536,
+    "structured_output": true,
+    "reasoning_effort": true
+  },
+  "hardware": "one 16 GB GPU",
+  "options": {
+    "num_ctx": 65536,
+    "keep_alive": "30m"
+  }
+}
+```

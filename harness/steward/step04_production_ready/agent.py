@@ -18,9 +18,12 @@ gpt-oss:20b: talks to the user, plans, uses tools) and two background agents on 
 The improvement loop's coder (step 6) is its own agent, in improvement_loop_workflow.py, on Steward's own model
 (OLLAMA_MODEL) unless STEWARD_CODER_MODEL names another.
 
+The model is the install's binding (binding.us, or STEWARD_BINDING; install.apply_binding, ExecPlan 0006 P2): its
+model, endpoint and options. It is put in OLLAMA_MODEL and OLLAMA_HOST when this module loads, which MAF's Ollama clients
+read, so a value of either in .env is replaced by the binding's.
+
 Environment variables:
-    OLLAMA_HOST                — Ollama server (defaults to http://localhost:11434)
-    OLLAMA_MODEL               — orchestrator model, e.g. gpt-oss:20b
+    STEWARD_BINDING            — the binding's file (defaults to binding.us in the install folder)
     STEWARD_CODER_MODEL        — coder model (defaults to OLLAMA_MODEL, Steward's own: one model, the operator's
                                  ruling 2026-11-05; set it to bring back a separate coder)
     STEWARD_WORKSPACE          — repo or folder Steward works in (defaults to this repo, worlds/steward,
@@ -150,6 +153,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import profiles as _profiles  # noqa: E402 - the harness profiles' allow-list (StewardMemoryProvider)
 
 load_dotenv()
+# The model is a binding (ExecPlan 0006 P2): read once, its model and endpoint put where every MAF Ollama client reads them.
+BINDING = _install.apply_binding()
 _WORKING_DIR = Path(os.environ.get("STEWARD_WORKSPACE") or _STEWARD_DIR.parents[1]).resolve()
 _SKILLS_DIR = _STEWARD_DIR / "skills"
 # The coder's model: one model (the operator's ruling, 2026-11-05: "one model to rule them all"). The coder runs on
@@ -165,7 +170,8 @@ def _coder_model() -> str | None:
 # 131,072, which put 4 GB of gpt-oss:20b in system RAM: 45.6 tok/s, against 84.6 at 65,536.
 # Steward's prompts already reach ~23k tokens, so he keeps 65,536, matching the harness budget below;
 # CodeExplorer shares his model and context so Ollama never reloads it between them.
-_STEWARD_CONTEXT = 65_536
+# The window is the binding's (ExecPlan 0006 P2): its options' num_ctx, 65,536 in this PC's binding.
+_STEWARD_CONTEXT = BINDING.context
 
 # Startup diagnostics go through ``logging`` so every host decides where they appear.
 logger = logging.getLogger(__name__)
@@ -2522,7 +2528,8 @@ def past_the_card_to_be_bounded(call: Any) -> bool:
 # Step 4, 4.2: the Ollama options sent with every model call by Steward and his team (MAF's OllamaChatOptions):
 # his own window, so it never depends on the server's default (2026-11-03: the app's context setting was set to 32K
 # for a while, under a 64K compaction budget), and the model kept loaded between turns.
-OLLAMA_OPTIONS: dict[str, Any] = {"num_ctx": _STEWARD_CONTEXT, "keep_alive": "30m"}
+# The binding's options (ExecPlan 0006 P2): this PC's binding sends {"num_ctx": 65536, "keep_alive": "30m"}.
+OLLAMA_OPTIONS: dict[str, Any] = {**BINDING.options, "num_ctx": _STEWARD_CONTEXT}
 # </ollama_options>
 
 

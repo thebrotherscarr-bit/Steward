@@ -1,0 +1,32 @@
+# T3, the install (ADR-0020; ExecPlan 0006 P2; capabilities O1 and O2): the model is a binding, and the install's one
+# config names it. Each case runs once through the workflow in an eval's build (the standins runner). The first runs
+# under a binding without tool calling (its `binding:`), so a profile that offers tools is refused by name, with what
+# is missing, before any plan or card. The second asks which model the install is bound to, read from its binding.
+# Run: python harness/steward/step04_production_ready/evals.py install
+# The cases are fingerprinted in baselines.json: a change to any case or check is a new version (see README.md).
+name: install
+tier: T3
+version: 1
+owner: operator
+runner: standins
+split: full
+bar: {passed: 2, of: 2, runs_in_a_row: 2}
+changes:
+  1: >-
+    ExecPlan 0006 P2's two cases: a code fix asked on a binding that does not offer tool calling is refused in words
+    naming what is missing, with no card and nothing changed (O1); and the model the install is bound to is named from
+    its binding, read with no card (O2).
+cases:
+  - id: o1_binding_without_tool_calling
+    capability: [O1]
+    profile: code-fix
+    binding: harness/steward/evals/data/bindings/no-tool-calling.us
+    ask: Fix the failing boiling point test in harness/steward/working/sample-project-2.
+    fixture: {project: harness/steward/working/sample-project-2, plant: fahrenheit_bug}
+    checks: [no_card, no_change_made, refused_in_words]
+  - id: o2_model_named_from_the_binding
+    capability: [O2]
+    profile: general
+    ask: Which model is this install bound to? Read binding.us in your workspace and name the model in one line.
+    keywords: ["steward:1"]
+    checks: [no_card, no_change_made, keyword_check]
