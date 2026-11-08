@@ -1,0 +1,5 @@
+# Invalid on purpose (wire proof, closed unmerged)
+
+```json
+{"stew": "2026-11-08-draft", "kind": "binding", "name": "broken"}
+```
