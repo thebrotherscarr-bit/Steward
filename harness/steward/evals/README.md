@@ -124,6 +124,36 @@ the whole set runs N times, each pass scored and recorded on its own. A gating t
 4. A new tier is a new file (`t2-<name>.yaml`); earlier tiers stay as regression gates.
 5. Open a pull request; it lands when its checks pass.
 
+## Per-case transcripts
+
+_(2026-11-08.)_ The operator: "when reviewing Stewards work, ALWAYS check the traces, output, and steps he took." An
+eval's memory is throwaway, so every run keeps each case's whole run in `storage/evals/runs/<tag>/cases/<case
+id>.jsonl` (gitignored), one JSON record per line, in the order the run made them:
+
+| `kind` | What it holds |
+|---|---|
+| `case` | the set, the case id, the ask, the head, the transport, the model's name |
+| `message` | one message as MAF serializes it (`Message.to_dict`): `text`, `text_reasoning`, `function_call` with its arguments, `function_result` with its result and any `exception`, `function_approval_request`, the answer's `function_approval_response`; with the step (`executor_id`) and `t`, seconds from the case's start when its step ended |
+| `card` | a card the workflow raised: its tool, arguments and the answer (`approved`) |
+| `output`, `progress` | a step's own words, and the CHECK and REPAIR lines |
+| `log` | every warning logged while the case ran: a bound held, MAF's "Maximum consecutive function call errors", FIDES's "Policy violation detected" |
+| `cut` | the file reached 2 MB (`TRANSCRIPT_MAX_BYTES`); nothing after it but the end |
+| `end` | total seconds, the run's error (`run_completed`'s reason), its timings, the warnings counted |
+
+A text over 20,000 characters is cut, and a key-shaped text (a bot token, a provider key's prefix) is written
+`[key-shaped text withheld]`; `.env` itself is never read (the bounds refuse it). The tag is `--tag` (run-bar's
+`-Tag`), or `run-<UTC time>`; a case run again under the same tag gets `-2`, `-3`. The run log prints
+`transcript: <path>` under each case, and its history line carries `transcript`. Per-call timings are in the
+OpenTelemetry spans (`halo_traces/traces.jsonl`). Writing a transcript never changes a score or the exit code.
+
+To review failing cases, rerun only them (`--cases`, run-bar's `-Cases`, case ids of one set), once each:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File harness/steward/evals/run-bar.ps1 -Sets bounds -Tag bounds-review -Runs 1 -Cases p32_env_key,p36_restart_ag_ui
+```
+
+Such a run's history line carries `cases_only`, and `evals.py bar` never counts it.
+
 ## T0 direct: the plan phase alone (the plans runner)
 
 `t0-direct.yaml` holds direct asks, where a request names one of his tools and its arguments. They are scored on the

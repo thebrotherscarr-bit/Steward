@@ -1132,23 +1132,31 @@ async def run_case(query: str, approve: set[str], **build: Any) -> tuple[Agent[A
     global _CLOCK
     CASE_ERRORS.pop(query, None)
     _CLOCK = clock = eval_transports.CaseClock(transport=TRANSPORT_IN_USE)
-    try:
-        if TRANSPORT_IN_USE == "in-process":
-            return await run_steward(query, approve, **build)
-        answers = {APPROVE_PLAN, *approve}
-        response, failure = await eval_transports.run_over(
-            TRANSPORT_IN_USE, query, lambda call: card_approved(call, answers), clock, CARD_ROUNDS
-        )
-        if failure:
-            CASE_ERRORS[query] = f"the {TRANSPORT_IN_USE} transport: {failure}"
-        return None, response
-    except Exception as error:
-        CASE_ERRORS[query] = raised(error)
-        return None, AgentResponse(messages=[])
-    finally:
-        clock.ended = clock.ended or time.monotonic()
-        CASE_TIMINGS[query] = clock.timings()
-        _CLOCK = None
+    kept: list[Any] = []  # the case's messages, for its transcript
+    with case_logs() as logs:
+        try:
+            if TRANSPORT_IN_USE == "in-process":
+                ran, response = await run_steward(query, approve, **build)
+                kept = list(response.messages)
+                return ran, response
+            answers = {APPROVE_PLAN, *approve}
+            response, failure = await eval_transports.run_over(
+                TRANSPORT_IN_USE, query, lambda call: card_approved(call, answers), clock, CARD_ROUNDS
+            )
+            kept = list(response.messages)
+            if failure:
+                CASE_ERRORS[query] = f"the {TRANSPORT_IN_USE} transport: {failure}"
+            return None, response
+        except Exception as error:
+            CASE_ERRORS[query] = raised(error)
+            return None, AgentResponse(messages=[])
+        finally:
+            clock.ended = clock.ended or time.monotonic()
+            CASE_TIMINGS[query] = clock.timings()
+            _CLOCK = None
+            from agent_framework import Message  # noqa: PLC0415
+
+            keep_case_transcript(SET_IN_RUN, query, message_records([Message(role="user", contents=[query]), *kept]), logs=logs)
 
 
 @evaluator(name="run_completed")
@@ -1215,11 +1223,13 @@ def history_entry(name: str, results: dict[str, Any], code: int, progress: list[
                     if score.passed is False
                 ],
                 **({"timings": CASE_TIMINGS[item.input_text]} if item.input_text in CASE_TIMINGS else {}),
+                **({"transcript": _shown(CASE_TRANSCRIPTS[item.input_text])} if item.input_text in CASE_TRANSCRIPTS else {}),
             }
             for step, item in items
         ],
         "git_head": GIT_HEAD_AT_START or _git_head(),  # the code the run loaded, not what is on disk when it ends
         "model": os.environ.get("OLLAMA_MODEL") or None,  # the model's name only; never a key
+        **({"cases_only": list(CASES_ONLY)} if CASES_ONLY else {}),
         **({"progress": list(progress)} if progress else {}),
     }
 
@@ -1240,6 +1250,231 @@ def record_history(
         written.replace(path)
     except Exception as exc:  # noqa: BLE001 - the history never changes a set's report or exit code
         logger.warning("Eval history not written (%s): %s", path, exc)
+
+
+# Per-case transcripts (2026-11-08; ADR-0006 and ADR-0012's dated lines). The operator: "when reviewing Stewards work,
+# ALWAYS check the traces, output, and steps he took." An eval's memory is throwaway, so each case's whole run is kept
+# here, under storage/evals/runs/<tag>/cases/<case id>.jsonl (storage/ is gitignored): one JSON line per record, in
+# the order the run made them. "case" first (the set, the case, the ask, the head, the transport), then every message
+# as MAF serializes it (Message.to_dict: its text, text_reasoning, function_call with its arguments and
+# function_result with its result and any exception, function_approval_request and the answer's
+# function_approval_response), each "card" with its answer, each step's "output" and "progress" text, every warning
+# logged during the case ("log": a bound held, MAF's "Maximum consecutive function call errors", FIDES's "Policy
+# violation detected"), and "end" with its total time, its error and its timings. A text over TRANSCRIPT_MAX_TEXT is cut,
+# a key-shaped text (_KEY_SHAPED) is withheld, and a file stops at TRANSCRIPT_MAX_BYTES with a "cut" line. A case run
+# again under the same tag (a second run, a repetition) gets -2, -3. The run log names each case's file, and so does
+# its history line ("transcript"). Writing one never changes a case's score or the exit code.
+EVAL_RUNS_DIR = _REPO / "storage" / "evals" / "runs"
+RUN_TAG: str | None = None  # cli's --tag (run-bar.ps1's -Tag); None: made at the first case, run-<UTC time>
+SET_IN_RUN: str | None = None  # the set cli runs, for each transcript's header
+# cli's --cases (run-bar.ps1's -Cases): the case ids a run is limited to, or None for the whole set. Such a run is a
+# rerun to review: its history line says so ("cases_only") and bar_status never counts it.
+CASES_ONLY: list[str] | None = None
+TRANSCRIPT_MAX_TEXT = 20_000
+TRANSCRIPT_MAX_BYTES = 2_000_000
+_KEY_WITHHELD = "[key-shaped text withheld]"
+# Each case's transcript by its ask, for its history line (history_entry) and the run log.
+CASE_TRANSCRIPTS: dict[str, Path] = {}
+# The running workflow's event times (time.monotonic() as each came, by id(event)) and its cards' answers (by request_id),
+# kept by _run_workflow_answering_cards for the transcript.
+_EVENT_TIMES: dict[int, float] = {}
+_CARD_ANSWERS: dict[str, bool] = {}
+# The running workflow's events as they came: a run that raises still leaves its transcript what it did.
+RUN_EVENTS: list[Any] = []
+
+
+def transcripts_dir() -> Path:
+    """This run's cases folder, storage/evals/runs/<RUN_TAG>/cases (RUN_TAG made now when none was given)."""
+    global RUN_TAG
+    if not RUN_TAG:
+        RUN_TAG = f"run-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    return EVAL_RUNS_DIR / RUN_TAG / "cases"
+
+
+def case_id_for(ask: str) -> str:
+    """The id of the set case whose ask this is, or case-<a hash of the ask> for an ask in no set."""
+    for eval_set in EVAL_SETS.values():
+        for case in eval_set.cases:
+            if case.ask == ask:
+                return case.id
+    import hashlib  # noqa: PLC0415
+
+    return f"case-{hashlib.sha256(ask.encode('utf-8')).hexdigest()[:8]}"
+
+
+def _safe(value: Any) -> Any:
+    """A record's value as it is written: every text cut at TRANSCRIPT_MAX_TEXT and its key-shaped parts withheld."""
+    if isinstance(value, str):
+        text = _KEY_SHAPED.sub(_KEY_WITHHELD, value)
+        return text if len(text) <= TRANSCRIPT_MAX_TEXT else f"{text[:TRANSCRIPT_MAX_TEXT]}... [cut, {len(text)} chars]"
+    if isinstance(value, dict):
+        return {str(k): _safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_safe(v) for v in value]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _safe(str(value))
+
+
+def message_record(message: Any) -> dict[str, Any]:
+    """A message as MAF serializes it (SerializationMixin.to_dict), its raw provider object left out."""
+    try:
+        return message.to_dict(exclude={"raw_representation"})
+    except Exception:  # noqa: BLE001 - a message MAF cannot serialize is kept as its text
+        return {"role": str(getattr(message, "role", "")), "text": str(getattr(message, "text", "") or "")}
+
+
+class CaseLog(logging.Handler):
+    """Every warning logged while a case runs (any logger), with its time from the case's start."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.started = time.monotonic()
+        self.records: list[dict[str, Any]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            text = record.getMessage()
+        except Exception:  # noqa: BLE001
+            text = str(record.msg)
+        self.records.append({
+            "kind": "log", "t": time.monotonic(), "level": record.levelname,
+            "logger": record.name, "text": text,
+        })
+
+
+@contextmanager
+def case_logs() -> Any:
+    """A CaseLog on the root logger while the block runs (the case), taken off after."""
+    handler = CaseLog()
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        root.removeHandler(handler)
+
+
+def event_records(events: list[Any]) -> list[dict[str, Any]]:
+    """A workflow run's records, in its order: each step's messages once (executor_completed's AgentExecutorResponse,
+    its system messages left out), each card with its answer (_CARD_ANSWERS), each output and progress text."""
+    import steward_workflow as wf  # noqa: PLC0415
+    from agent_framework import AgentExecutorResponse  # noqa: PLC0415
+
+    records: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    seen: set[str] = set()
+    for event in events:
+        t = _EVENT_TIMES.get(id(event))
+        step = getattr(event, "executor_id", None)
+        if event.type == "request_info":
+            card = event.data
+            call = getattr(card, "function_call", None)
+            records.append({
+                "kind": "card", "t": t, "request_id": event.request_id, "tool": getattr(call, "name", None),
+                "call_id": getattr(call, "call_id", None), "arguments": getattr(call, "arguments", None),
+                "approved": _CARD_ANSWERS.get(event.request_id),
+            })
+        elif event.type == "executor_completed":
+            for sent in event.data if isinstance(event.data, list) else [event.data]:
+                if not isinstance(sent, AgentExecutorResponse):
+                    continue
+                for message in sent.full_conversation or sent.agent_response.messages:
+                    if getattr(message, "role", None) == "system" or id(message) in seen_ids:
+                        continue
+                    seen_ids.add(id(message))
+                    data = message_record(message)
+                    key = json.dumps(data, sort_keys=True, default=str)
+                    if key in seen:
+                        continue  # the same message again, in a later step's copy of the conversation
+                    seen.add(key)
+                    records.append({"kind": "message", "t": t, "step": step, "message": data})
+        elif event.type == "output" and isinstance(event.data, str) and event.data.strip():
+            records.append({"kind": "output", "t": t, "step": step, "text": event.data})
+        elif event.type == wf.PROGRESS:
+            records.append({"kind": "progress", "t": t, "text": str(event.data)})
+    return records
+
+
+def message_records(messages: Iterable[Any]) -> list[dict[str, Any]]:
+    """An agent run's records (the asks runner's, bfcl's): each message as MAF serializes it, in order."""
+    return [{"kind": "message", "message": message_record(message)} for message in messages or []]
+
+
+def keep_case_transcript(
+    set_name: str | None,
+    ask: str,
+    records: list[dict[str, Any]],
+    *,
+    logs: CaseLog | None = None,
+    case_id: str | None = None,
+    timings: dict[str, Any] | None = None,
+) -> Path | None:
+    """Write one case's transcript (the header, ``records``, the case's logged warnings and its end) to
+    transcripts_dir()/<case id>.jsonl, and note it in CASE_TRANSCRIPTS; the path, or None when it could not be written
+    (a logged warning: the case's score and the exit code are never touched)."""
+    try:
+        case = case_id or case_id_for(ask)
+        folder = transcripts_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = re.sub(r"[^\w.-]", "_", case)
+        path, n = folder / f"{stem}.jsonl", 1
+        while path.exists():
+            n += 1
+            path = folder / f"{stem}-{n}.jsonl"
+        head = {
+            "kind": "case", "set": set_name, "case": case, "ask": ask,
+            "git_head": GIT_HEAD_AT_START or _git_head(), "transport": TRANSPORT_IN_USE,
+            "model": os.environ.get("OLLAMA_MODEL") or None, "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        logged = list(logs.records) if logs is not None else []
+        end = {
+            "kind": "end", "total_s": round(time.monotonic() - logs.started, 2) if logs is not None else None,
+            "error": CASE_ERRORS.get(ask), "timings": timings or CASE_TIMINGS.get(ask), "warnings": len(logged),
+        }
+        # One clock: a record's "t" is time.monotonic() when it came, written as seconds from the case's start, each
+        # warning placed before the first record that came after it.
+        origin = logs.started if logs is not None else None
+        ordered: list[dict[str, Any]] = []
+        waiting = list(logged)
+        for record in records:
+            t = record.get("t")
+            while waiting and isinstance(t, float) and waiting[0]["t"] <= t:
+                ordered.append(waiting.pop(0))
+            ordered.append(record)
+        ordered += waiting
+        if origin is not None:
+            ordered = [{**r, "t": round(r["t"] - origin, 2)} if isinstance(r.get("t"), float) else r for r in ordered]
+        written = 0
+        with path.open("w", encoding="utf-8", newline="\n") as out:
+            for record in [head, *ordered]:
+                line = json.dumps(_safe(record), ensure_ascii=False) + "\n"
+                size = len(line.encode("utf-8"))
+                if written + size > TRANSCRIPT_MAX_BYTES:
+                    out.write(json.dumps({"kind": "cut", "reason": f"the file reached {TRANSCRIPT_MAX_BYTES} bytes"}) + "\n")
+                    break
+                out.write(line)
+                written += size
+            out.write(json.dumps(_safe(end), ensure_ascii=False) + "\n")
+        CASE_TRANSCRIPTS[ask] = path
+        return path
+    except Exception as exc:  # noqa: BLE001 - a transcript never changes a case's score or the exit code
+        logger.warning("Case transcript not written: %s", exc)
+        return None
+
+
+def _shown(path: Path) -> str:
+    """A transcript's path as the log and the history name it: from the repository's root, or whole."""
+    try:
+        return path.relative_to(_REPO).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def transcript_line(ask: str) -> str | None:
+    """The run log's line naming a case's transcript, or None when it has none."""
+    path = CASE_TRANSCRIPTS.get(ask)
+    return None if path is None else f"      transcript: {_shown(path)}"
 
 
 async def main() -> int:
@@ -1469,8 +1704,19 @@ def steps_overall(query: str, response: str) -> dict[str, object]:
 
 
 async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[str]) -> list[Any]:
-    """Every event of one run, its cards answered: approved for the names in ``approve``, denied otherwise."""
-    events = [e async for e in workflow.run(query, stream=True)]
+    """Every event of one run, its cards answered: approved for the names in ``approve``, denied otherwise. Each event's
+    time and each card's answer are kept for the case's transcript (_EVENT_TIMES, _CARD_ANSWERS)."""
+    _EVENT_TIMES.clear()
+    _CARD_ANSWERS.clear()
+    RUN_EVENTS.clear()
+
+    async def timed(stream: Any) -> Any:
+        async for event in stream:
+            _EVENT_TIMES[id(event)] = time.monotonic()
+            RUN_EVENTS.append(event)
+            yield event
+
+    events = [e async for e in timed(workflow.run(query, stream=True))]
     answered: set[str] = set()
     for rounds in range(CARD_ROUNDS + 1):
         pending = [e for e in events if e.type == "request_info" and e.request_id not in answered]
@@ -1481,8 +1727,9 @@ async def _run_workflow_answering_cards(workflow: Any, query: str, approve: set[
         responses = {}
         for card in pending:
             answered.add(card.request_id)
-            responses[card.request_id] = card.data.to_function_approval_response(card_approved(card.data.function_call, approve))
-        events += [e async for e in workflow.run(stream=True, responses=responses)]
+            _CARD_ANSWERS[card.request_id] = card_approved(card.data.function_call, approve)
+            responses[card.request_id] = card.data.to_function_approval_response(_CARD_ANSWERS[card.request_id])
+        events += [e async for e in timed(workflow.run(stream=True, responses=responses))]
     return events
 
 
@@ -1505,7 +1752,12 @@ async def steps_main() -> int:
             CASE_ERRORS.pop(STEPS_QUERY, None)
             events = []
             untracked_before = untracked_files()
-            with contextlib.ExitStack() as fixtures:
+            RUN_EVENTS.clear()
+            _CARD_ANSWERS.clear()
+            with case_logs() as logs, contextlib.ExitStack() as fixtures:
+                fixtures.callback(  # the case's transcript, after everything else is put back
+                    lambda: keep_case_transcript("steps", STEPS_QUERY, event_records(list(RUN_EVENTS)), logs=logs, case_id=STEPS_SET.cases[0].id)
+                )
                 fixtures.callback(remove_new_untracked, untracked_before)  # last out: after the bug is put back
                 if fixture_entered(fixtures, STEPS_QUERY, plant_step(STEPS_SET.cases[0].plant)):  # else overall fails with its reason
                     try:
@@ -1540,6 +1792,8 @@ async def steps_main() -> int:
             for score in item.scores:
                 if (score.sample or {}).get("reason") != "Not this case.":
                     print(f"      [{'pass' if score.passed else 'fail'}] {(score.sample or {}).get('reason', '')}")
+    if line := transcript_line(STEPS_QUERY):
+        print(line)
     record_history("steps", scored, code, progress=[str(e.data) for e in events if e.type == wf.PROGRESS])
     return code
 
@@ -1684,15 +1938,19 @@ async def plans_main(eval_set: EvalSet, **build: Any) -> int:
     for case in eval_set.cases:
         CASE_ERRORS.pop(case.ask, None)
         events: list[Any] = []
-        try:
-            async with AsyncExitStack() as stack:
-                agent, workflow = await wf.build_steward(
-                    stack, file_memory_store=isolated_memory(stack), memory_store=isolated_memory_store(stack), **build
-                )
-                async with agent:
-                    events = await _run_workflow_answering_cards(workflow, case.ask, set())  # every card denied
-        except Exception as error:  # the run raised: the case fails with it (run_completed)
-            CASE_ERRORS[case.ask] = raised(error)
+        RUN_EVENTS.clear()
+        _CARD_ANSWERS.clear()
+        with case_logs() as logs:
+            try:
+                async with AsyncExitStack() as stack:
+                    agent, workflow = await wf.build_steward(
+                        stack, file_memory_store=isolated_memory(stack), memory_store=isolated_memory_store(stack), **build
+                    )
+                    async with agent:
+                        events = await _run_workflow_answering_cards(workflow, case.ask, set())  # every card denied
+            except Exception as error:  # the run raised: the case fails with it (run_completed)
+                CASE_ERRORS[case.ask] = raised(error)
+        keep_case_transcript(eval_set.name, case.ask, event_records(list(RUN_EVENTS)), logs=logs, case_id=case.id)
         user = Message(role="user", contents=[case.ask])
         items.append(EvalItem([user, *plan_phase_conversation(events)], split_strategy=SPLITS[eval_set.split]))
     named = {check for case in eval_set.cases for check in case.checks}
@@ -1960,12 +2218,12 @@ def standins_checks(case: EvalCase) -> list[Any]:
     return [made[name]() if name in made else globals()[name] for name in case.checks]
 
 
-async def standins_case_run(case: EvalCase, **build: Any) -> list[Any]:
+async def standins_case_run(case: EvalCase, set_name: str | None = None, **build: Any) -> list[Any]:
     """One standins case through the workflow, its conversation (standins_conversation). Its stand-ins go to the build
     as extra tools (beside any the caller gives), the eval build always; the cards are answered by card_approved with
     the case's approve list; a fixture's project is put back as committed and its plant entered, its files compared
     after the run, then put back, and any untracked file the run left removed. A run that raises fails the case
-    (run_completed)."""
+    (run_completed). Its transcript is kept (keep_case_transcript), raised or not."""
     CASE_ERRORS.pop(case.ask, None)
     approve = set(case.approve)
     record: dict[str, Any] = {"answers": {}, "unchanged": None}
@@ -1973,8 +2231,13 @@ async def standins_case_run(case: EvalCase, **build: Any) -> list[Any]:
     events: list[Any] = []
     untracked_before = untracked_files()
     project = _REPO / case.project if case.project else None
+    RUN_EVENTS.clear()
+    _CARD_ANSWERS.clear()
     try:
-        with contextlib.ExitStack() as fixtures:
+        with case_logs() as logs, contextlib.ExitStack() as fixtures:
+            fixtures.callback(  # last out: after the fixture is put back, so its warnings are the case's too
+                lambda: keep_case_transcript(set_name, case.ask, event_records(list(RUN_EVENTS)), logs=logs, case_id=case.id)
+            )
             if project is not None:
                 sample_project_as_committed(case.project)
                 fixtures.callback(sample_project_as_committed, case.project)
@@ -2016,7 +2279,7 @@ async def standins_main(eval_set: EvalSet, **build: Any) -> int:
         configure_otel_providers(exporters=[HaloJsonlSpanExporter()], enable_sensitive_data=True)
     results: dict[str, Any] = {}
     for case in eval_set.cases:
-        conversation = await standins_case_run(case, **build)
+        conversation = await standins_case_run(case, eval_set.name, **build)
         item = EvalItem(
             conversation, split_strategy=SPLITS[eval_set.split], expected_tool_calls=list(case.expected_tool_calls) or None
         )
@@ -2032,6 +2295,8 @@ async def standins_main(eval_set: EvalSet, **build: Any) -> int:
             for score in item.scores:
                 if (score.sample or {}).get("reason") != "Not this case.":
                     print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+            if line := transcript_line(item.input_text or ""):
+                print(line)
     checks_passed, checks_total = applicable_checks(item for result in results.values() for item in result.items)
     print(f"Checks: {checks_passed}/{checks_total}")
     record_history(eval_set.name, results, code)
@@ -2657,6 +2922,8 @@ def print_asks_report(cases_label: str, checks_label: str, result: Any) -> tuple
         for score in item.scores:
             if (score.sample or {}).get("reason") != "Not this case.":
                 print(f"      [{'pass' if score.passed else 'fail'}] {score.name}: {(score.sample or {}).get('reason', '')}")
+        if line := transcript_line(item.input_text or ""):
+            print(line)
     passed, total = applicable_checks(result.items)
     print(f"{checks_label}: {passed}/{total}")
     return passed, total
@@ -2668,6 +2935,10 @@ async def set_main(name: str) -> int:
     A non-gating set (tier ext) with num_repetitions runs the whole set that many times, each pass scored and recorded
     on its own (a flakiness check); the exit code is the worst pass's."""
     eval_set = EVAL_SETS[name]
+    if CASES_ONLY:  # some cases only (cli's --cases), in the set's order
+        import dataclasses  # noqa: PLC0415
+
+        eval_set = dataclasses.replace(eval_set, cases=tuple(c for c in eval_set.cases if c.id in CASES_ONLY))
     if eval_set.runner in ext_sets.EXT_RUNNERS:  # an outside set (bfcl, aider-py): ext_sets runs and scores it
         return await ext_sets.ext_main(eval_set, sys.modules[__name__])
     if eval_set.runner == "plans":  # the plan phase alone (t0-direct.yaml)
@@ -2791,7 +3062,7 @@ def bar_status(name: str, history: Path | None = None) -> tuple[bool, str]:
             run = json.loads(line)
         except ValueError:
             continue
-        if run.get("set") == name:
+        if run.get("set") == name and not run.get("cases_only"):  # a rerun of some cases is never a bar run
             runs.append(run)
     last = runs[-bar["runs_in_a_row"]:]
     scores = [f"{run.get('passed')}/{run.get('total')}" + ("" if run.get("set_version") == eval_set.version else f" (v{run.get('set_version')})") for run in last]
@@ -3032,11 +3303,12 @@ def compare_transports_main(args: list[str]) -> int:
 
 
 def cli(argv: list[str]) -> int:
-    """evals.py's command line, ``[small [--gate] | steps | memory | <set name>] [--options NAME] [--transport T]``,
+    """evals.py's command line, ``[small [--gate] | steps | memory | <set name>] [--options NAME] [--transport T]
+    [--tag TAG] [--cases ID,ID]`` (the transcripts' folder; some of a set's cases only, never counted for its bar),
     ``validate``, ``bar <set name>`` or ``compare-transports [--set NAME] [--last N]``: the set's exit code, or 2 for a
     settings set or transport that cannot be used (the reason on stderr, and nothing run). validate checks every set file (validate_main); bar prints whether a set's bar is met (0) or not (1),
     from the history, running nothing."""
-    global GIT_HEAD_AT_START, OPTIONS_IN_USE, TRANSPORT_IN_USE
+    global CASES_ONLY, GIT_HEAD_AT_START, OPTIONS_IN_USE, RUN_TAG, SET_IN_RUN, TRANSPORT_IN_USE
     OPTIONS_IN_USE = None  # a run uses only the settings set it names
     TRANSPORT_IN_USE = "in-process"  # and only the transport it names
     args = list(argv)
@@ -3075,10 +3347,31 @@ def cli(argv: list[str]) -> int:
             return 2
         TRANSPORT_IN_USE = transport
         print(f"Transport: {transport}")
+    RUN_TAG = None
+    if "--tag" in args:  # the run's transcripts folder, storage/evals/runs/<tag>/cases (run-bar.ps1's -Tag)
+        at = args.index("--tag")
+        tag = args[at + 1] if at + 1 < len(args) else ""
+        del args[at : at + 2]
+        if not re.fullmatch(r"[\w.-]+", tag):
+            print("evals.py --tag: letters, digits, '.', '-' or '_'", file=sys.stderr)
+            return 2
+        RUN_TAG = tag
+    only: list[str] = []
+    if "--cases" in args:  # some of a set's cases only (run-bar.ps1's -Cases): a rerun to review, never a bar run
+        at = args.index("--cases")
+        only = [c.strip() for c in (args[at + 1] if at + 1 < len(args) else "").split(",") if c.strip()]
+        del args[at : at + 2]
+        named = EVAL_SETS.get(args[0]) if args else None
+        unknown = [c for c in only if named is None or c not in {case.id for case in named.cases}]
+        if not only or named is None or named.runner not in ("standins", "plans", "asks") or unknown:
+            print(f"evals.py --cases: case ids of one standins, plans or asks set (unknown: {unknown})", file=sys.stderr)
+            return 2
+    SET_IN_RUN = args[0] if args else "regression"
+    CASES_ONLY = only or None
     runs = {"steps": steps_main, "small": small_main, "memory": memory_main}
-    if args[:1] == ["small"]:
+    if args[:1] == ["small"] and not only:
         return asyncio.run(small_main(use_gate="--gate" in args))
-    if args and args[0] not in runs and args[0] in EVAL_SETS:
+    if args and (args[0] not in runs or only) and args[0] in EVAL_SETS:
         return asyncio.run(set_main(args[0]))  # an asks set with no main of its own (T1's heldout)
     return asyncio.run(runs[args[0]]() if args and args[0] in runs else main())
 

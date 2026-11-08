@@ -14,18 +14,26 @@
   running Responses host (hosted.py, 127.0.0.1:43120) or AG-UI host (ag_ui_app.py, 127.0.0.1:43122) instead of
   in-process, and its line in the history carries the transport. Then `evals.py compare-transports` compares them.
 
+  The Tag is passed as --tag: each case's transcript is kept under storage/evals/runs/<Tag>/cases/<case id>.jsonl, and
+  the run's log names each file. -Cases (case ids of one set) is passed as --cases: only those cases run, a rerun to
+  review them; its history line says so and it never counts for the bar.
+
 .EXAMPLE
   powershell -File harness/steward/evals/run-bar.ps1 -Sets small,heldout -Tag nightly
 
 .EXAMPLE
   powershell -File harness/steward/evals/run-bar.ps1 -Sets small -Tag agui -Runs 3 -Transport ag-ui
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File harness/steward/evals/run-bar.ps1 -Sets bounds -Tag bounds-review -Runs 1 -Cases p32_env_key,p36_restart_ag_ui
 #>
 param(
     [Parameter(Mandatory = $true)][string[]]$Sets,
     [Parameter(Mandatory = $true)][string]$Tag,
     [int]$Runs = 2,
     [int]$RunMinutes = 60,
-    [ValidateSet('in-process', 'responses', 'ag-ui')][string]$Transport = 'in-process'
+    [ValidateSet('in-process', 'responses', 'ag-ui')][string]$Transport = 'in-process',
+    [string[]]$Cases = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +44,9 @@ $evals = Join-Path $repo 'harness\steward\step04_production_ready\evals.py'
 $history = Join-Path $repo 'storage\evals\history.jsonl'
 $Sets = @($Sets | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Tag -notmatch '^[\w.-]+$') { throw "Tag '$Tag' must be letters, digits, '.', '-' or '_'." }
+$Cases = @($Cases | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Cases.Count -gt 0 -and $Sets.Count -ne 1) { throw "-Cases names cases of one set; give one set in -Sets." }
+$caseArgs = if ($Cases.Count -gt 0) { @('--cases', ($Cases -join ',')) } else { @() }
 $folder = Join-Path $repo "storage\evals\runs\$Tag"
 New-Item -ItemType Directory -Force -Path $folder | Out-Null
 $progress = Join-Path $folder 'progress.txt'
@@ -59,7 +70,8 @@ function Last-HistoryLine([string]$set) {
 
 $valid = & $python -W ignore $evals validate 2>&1
 if ($LASTEXITCODE -ne 0) { Say "validate failed: $($valid -join ' | ')"; Say 'BAR DONE'; exit 1 }
-Say "bar $Tag : sets $($Sets -join ', '), $Runs run(s) each, transport $Transport"
+$only = if ($Cases.Count -gt 0) { ", cases $($Cases -join ', ') only" } else { '' }
+Say "bar $Tag : sets $($Sets -join ', '), $Runs run(s) each, transport $Transport$only"
 
 foreach ($set in $Sets) {
     for ($n = 1; $n -le $Runs; $n++) {
@@ -67,12 +79,12 @@ foreach ($set in $Sets) {
         $before = Last-HistoryLine $set
         Say "start $set run $n -> $log"
         $job = Start-Job -ScriptBlock {
-            param($python, $evals, $set, $repo, $transport)
+            param($python, $evals, $set, $repo, $transport, $tag, $caseArgs)
             Set-Location $repo
             $env:PYTHONIOENCODING = 'utf-8'
-            & $python -W ignore $evals $set --transport $transport 2>&1 | ForEach-Object { "$_" }
+            & $python -W ignore $evals $set --transport $transport --tag $tag @caseArgs 2>&1 | ForEach-Object { "$_" }
             "EXIT $LASTEXITCODE"
-        } -ArgumentList $python, $evals, $set, $repo, $Transport
+        } -ArgumentList $python, $evals, $set, $repo, $Transport, $Tag, $caseArgs
         $finished = Wait-Job $job -Timeout ($RunMinutes * 60)
         if (-not $finished) { Stop-Job $job; Say "stopped $set run $n after $RunMinutes min" }
         $output = Receive-Job $job

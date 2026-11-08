@@ -34,7 +34,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from agent_framework import Agent, AgentResponse, FunctionTool, LocalEvaluator, evaluate_agent, evaluator
+from agent_framework import Agent, AgentResponse, FunctionTool, LocalEvaluator, Message, evaluate_agent, evaluator
 
 EVALS_DIR = Path(__file__).resolve().parents[1] / "evals"
 _REPO = Path(__file__).resolve().parents[3]
@@ -340,11 +340,15 @@ async def run_bfcl(eval_set: Any, host: Any, client: Any = None) -> tuple[list[A
             row = rows[case.id]
             agent = Agent(client=client, name="bfcl", tools=bfcl_tools(row["function"]))
             host.CASE_ERRORS.pop(case.ask, None)
-            try:
-                response = await agent.run(case.ask)
-            except Exception as error:  # the case fails with its reason (run_completed); the set goes on
-                host.CASE_ERRORS[case.ask] = host.raised(error)
-                response = AgentResponse(messages=[])
+            with host.case_logs() as logs:
+                try:
+                    response = await agent.run(case.ask)
+                except Exception as error:  # the case fails with its reason (run_completed); the set goes on
+                    host.CASE_ERRORS[case.ask] = host.raised(error)
+                    response = AgentResponse(messages=[])
+            # its transcript (evals.keep_case_transcript): the ask's message, then the run's
+            messages = [Message(role="user", contents=[case.ask]), *response.messages]
+            host.keep_case_transcript(eval_set.name, case.ask, host.message_records(messages), logs=logs, case_id=case.id)
             responses.append(response)
             asks.append(case.ask)
             expected.append(bfcl_expected(row))

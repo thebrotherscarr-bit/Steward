@@ -116,6 +116,7 @@ All on loopback (127.0.0.1). Nothing listens on another interface.
 | Part | Data | Where |
 |---|---|---|
 | Steward | Eval history (every run, with set name and version, transport, timings) | `storage/evals/history.jsonl` |
+| Steward | Each eval case's transcript (2026-11-08): its messages as MAF serializes them, its cards and answers, its warnings, its timings ([evals README](../harness/steward/evals/README.md#per-case-transcripts)) | `storage/evals/runs/<tag>/cases/<case id>.jsonl` |
 | Steward | Traces (OpenTelemetry-style JSONL, capped at 100 MB) | `halo_traces/traces.jsonl` |
 | Steward | Recipe runs: checkpoints, MAF's events, and each run's state (its flow's id, trigger `now` or `schedule`, executors in order, result); the Flows shelf's run history reads these (`recipe_runs`) | `storage/recipes/checkpoints`, `storage/recipes/<run_id>.jsonl`, `storage/recipes/<run_id>.json` |
 | Steward | Host state (Responses checkpoints) | `.as/` (gitignored) |

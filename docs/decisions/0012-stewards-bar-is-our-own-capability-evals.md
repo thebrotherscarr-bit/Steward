@@ -143,3 +143,6 @@ a fact the run left (a tool called, a card raised, a rule kept, a file's state),
   and `ext` sets as calibration only.
 - The coverage map and the proposed cases: [spec 001](../specs/001-capability-evals.md).
 - Revisit when a tier's cases are all written and its bar is met: the next reach the dev path names is unlocked then.
+- 2026-11-08: a capability case that fails is reviewed from its transcript (`storage/evals/runs/<tag>/cases/<case
+  id>.jsonl`: his reasoning, every call with its arguments and result, each card and its answer, his reply), before
+  any fix is named; `run-bar.ps1 -Cases` reruns only the failing cases for that review, never as a bar run.

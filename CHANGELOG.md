@@ -13,6 +13,16 @@ was never merged and has no entry.
 
 ## [Unreleased]
 
+### Added
+
+- Every eval run keeps each case's transcript, `storage/evals/runs/<tag>/cases/<case id>.jsonl`: the ask, every
+  message as MAF serializes it (`Message.to_dict`: text, `text_reasoning`, each call with its arguments, each result
+  and any exception), each card with its answer, the steps' output and progress, every warning logged during the case
+  (a bound held, MAF's "Maximum consecutive function call errors", FIDES's "Policy violation detected") and its end
+  with timings and error. Texts are capped, key-shaped text is withheld, a file stops at 2 MB. The run log and the
+  case's history line name the file. `evals.py --tag` and `--cases`, and run-bar's `-Cases`: some cases rerun to
+  review them, recorded with `cases_only` and never counted for a bar. (ADR-0006, ADR-0012, dated lines.)
+
 ### Changed
 
 - ADR-0011 (the harness parity set) is `rejected`, its text kept, with the operator's words of 2026-11-05: "ok, so
