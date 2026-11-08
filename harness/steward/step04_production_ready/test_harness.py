@@ -9891,7 +9891,7 @@ def test_a_plan_phase_call_to_a_later_steps_tool_is_answered_in_words_not_as_an_
 
     import profiles as profile_files
     import steward_workflow as wf
-    from agent_framework import tool
+    from agent_framework import FunctionTool, tool
 
     ran: list[str] = []
 
@@ -9901,17 +9901,25 @@ def test_a_plan_phase_call_to_a_later_steps_tool_is_answered_in_words_not_as_an_
         ran.append(f"{service} {action}")
         return "restarted"
 
+    # An eval's stand-in is declaration-only (evals.stand_in_tools): MAF pauses the run for one before any middleware
+    # (check-later-p36, 3119aad: the run ended on a ContentError), so it is checked too.
+    stand_in = FunctionTool(
+        name="secondbrain_service_control", description="Start, stop or restart one server.", func=None,
+        approval_mode="always_require",
+        input_model={"type": "object", "properties": {"service": {"type": "string"}, "action": {"type": "string"}}},
+    )
+
     found = {"general": profile_files.load_profiles()["general"]}
     plan = json.dumps({"type": "approval", "questions": [{"message": "Restart the door."}], "steps": ["Restart the door with secondbrain_service_control"]})
     restart = Content.from_function_call(call_id="r1", name="secondbrain_service_control", arguments={"service": "door", "action": "restart"})
     mode = Content.from_function_call(call_id="m1", name="mode_get", arguments={})
 
-    def run() -> tuple[Any, list[Any]]:
+    def run(later: Any = service_control) -> tuple[Any, list[Any]]:
         client = _NamingClient([restart, mode, "I will plan it."], plans=[plan])
 
         async def _go() -> list[Any]:
             async with AsyncExitStack() as stack:
-                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=(service_control,))
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False, extra_tools=(later,))
                 async with agent:
                     return [e async for e in wf.build_steward_workflow(agent, profiles=found).run("Restart the door.", stream=True)]
 
@@ -9926,6 +9934,10 @@ def test_a_plan_phase_call_to_a_later_steps_tool_is_answered_in_words_not_as_an_
     assert results["r1"].result == wf.AFTER_APPROVAL and not results["r1"].exception, results["r1"]
     assert "not found" in str(results["m1"].result) and results["m1"].exception, "a tool offered in no step stays an error"
     assert ran == [] and [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+    client, events = run(stand_in)
+    answered = [c for m in client.calls[1]["messages"] for c in m.contents if c.type == "function_result" and c.call_id == "r1"]
+    assert answered and answered[0].result == wf.AFTER_APPROVAL, answered
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN], "no pause, no card"
 
     monkeypatch.setattr(wf, "later_offers", lambda session, step: frozenset())  # unplugged
     client, _ = run()

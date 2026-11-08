@@ -135,6 +135,10 @@ door was restarted and that `estate_status` now shows it up.
   middleware to answer it. A call-local copy of the options lost the tools MAF merges per service call
   (`write_memory`: "not found" on the next call); the later tools are instead put back into the run's own list once the
   model has answered (a stream's cleanup hook), and cut again before the next call.
+- Observation (2026-11-08, Lane A): the single case after #198 (check-later-p36, 3119aad) failed: P36's
+  `secondbrain_service_control` is a declaration-only stand-in, and MAF pauses the run for user input on such a call
+  before any function middleware, so the put-back tool ended the run (ContentError). The later tools are now answered
+  by stand-in answerers that ask nothing; the unit test now covers a declaration-only tool.
 - Observation (2026-11-08, Lane B): an automation's change is answered in words with no card (B4, P31), so the away
   set has no automation card case; the automation's end reaches the phone by Jesster's summary
   (`schedules.cjs` `runSchedule`, a Steward automation's summary always sent to Telegram).

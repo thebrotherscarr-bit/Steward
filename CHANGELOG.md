@@ -22,6 +22,9 @@ was never merged and has no entry.
 
 ### Fixed
 
+- A later step's tool is answered in EXPLORE by a stand-in answerer of the same name and arguments that asks no
+  card (after_approval_answerer), not by the tool put back: an eval's declaration-only stand-in made MAF pause the run
+  for user input before any middleware, and the run ended on a ContentError (check-later-p36, 3119aad).
 - In EXPLORE (the plan phase's reading; the plan call has its tools off), a call to a tool only a later step offers is answered with a plain
   result, "That tool runs after your plan is approved: put it in your plan's steps.", not MAF's "not found" error, so
   it no longer counts toward MAF's three consecutive function-call errors (check-m0-p36: two `service_control` calls
