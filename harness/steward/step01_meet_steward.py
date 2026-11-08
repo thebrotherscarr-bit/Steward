@@ -88,8 +88,9 @@ async def main() -> None:
     # <create_agent>
     async with AsyncExitStack() as stack:
         tools = [get_repo_status]
-        url = os.environ.get("SECONDBRAIN_MCP_URL")
-        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        # The .env names win; else what SecondBrain sets in its children's environment while sharing is on (D9, E2).
+        url = os.environ.get("SECONDBRAIN_MCP_URL") or os.environ.get("SECONDBRAIN_SHARE_URL")
+        key = os.environ.get("SECONDBRAIN_MCP_KEY") or os.environ.get("SECONDBRAIN_SHARE_KEY")
         if url and key:
             secondbrain = MCPStreamableHTTPTool(
                 name="secondbrain",

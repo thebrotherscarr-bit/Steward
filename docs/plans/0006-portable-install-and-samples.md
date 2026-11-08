@@ -58,11 +58,11 @@ the runtime as unreachable and how to start it, and a non-zero exit code.
   - [ ] D1 the Python version said four ways (P3: one version, checked by the installer).
   - [ ] D2 the README installs unlocked from PyPI (P3: the installer uses the lock).
   - [x] (2026-11-08, p1-config-entries: `STEWARD_MCP_PORT`) D7 `mcp_app.PORT` 43121 cannot be overridden (P1: a config entry).
-  - [ ] D9 the MCP key pasted by hand into `.env` (P4, Lane B: SecondBrain passes it in the child environment).
+  - [x] (2026-11-08, Steward PR p1-share-env; Jesster PR #108) D9 the MCP key pasted by hand into `.env` (P4, Lane B: SecondBrain passes it in the child environment). SecondBrain passes `SECONDBRAIN_SHARE_URL` and `SECONDBRAIN_SHARE_KEY` while sharing is on; Steward reads them when `SECONDBRAIN_MCP_URL` and `_KEY` are unset (`install.secondbrain_mcp`).
   - [x] D12 Hyperlight's packages imported unconditionally (no change: they are in the lock; opt-in at run time).
   - [ ] D16 README step 5 starts `hosted.py`, though SecondBrain starts AG-UI itself (P3: the install's README).
   - [ ] E1 the Charter is not shipped; a missing note runs him without it, silently (P4 and P5: a shipped default).
-  - [ ] E2 SecondBrain's MCP is effectively required yet only warned about (P4: the doctor fails loudly).
+  - [ ] E2 SecondBrain's MCP is effectively required yet only warned about (P4: the doctor fails loudly). (2026-11-08, p1-share-env: Steward now finds it from SecondBrain's share names without `.env`; the doctor's loud failure is still P4.)
   - [ ] E3 code search on by default needs the embedder pulled (P5, with C5).
 - [ ] P2 the model as a binding (Lane A; O1, O2). Built 2026-11-08 (Steward PR p2-binding): `binding.us`, read by
   `install.py`; `requires` on every profile; the router's refusal; T3 `install` v1 with O1 and O2 required.

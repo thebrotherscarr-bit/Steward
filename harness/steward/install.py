@@ -3,12 +3,15 @@ place, each with today's value as its default or a path computed from the instal
 
 The install folder is this repository's root (INSTALL_DIR). Each entry is an environment variable, set in the install's
 `.env` (see `.env.example`) or by the launcher; an empty or absent entry means its default. A relative path is read
-against the install folder. No entry holds a key (keys stay in `.env`, read by nothing here).
+against the install folder. No entry holds a key (keys stay in `.env`); secondbrain_mcp() only hands SecondBrain's URL
+and key from the environment to its caller, and never logs them.
 
     STEWARD_OWNER       who Steward works for, as the model is told it (default: OWNER_DEFAULT)
     STEWARD_BASH        the bash his shell runs on Windows (default: Git for Windows under %ProgramFiles%)
     STEWARD_GROUND_DIR  Manjuel's ground, when there is one (default: inferred from the folder layout, else none)
     STEWARD_MCP_PORT    the port of his MCP host, mcp_app.py (default: 43121)
+    SECONDBRAIN_MCP_URL, SECONDBRAIN_MCP_KEY  SecondBrain's MCP; else SECONDBRAIN_SHARE_URL, SECONDBRAIN_SHARE_KEY,
+                        which SecondBrain puts in its children's environment while sharing is on (audit D9, E2)
 
 The portability audit (the SecondBrain note portability-audit-2026-11-08-8af9d1, entries A5, A7, B1, B6 and D7) named
 each one; ExecPlan 0006's P4 folds them into the install's one `.us` declaration when STEW gives an install a kind.
@@ -42,6 +45,9 @@ BASH_ENV = "STEWARD_BASH"
 GROUND_ENV = "STEWARD_GROUND_DIR"
 MCP_PORT_ENV = "STEWARD_MCP_PORT"
 MCP_PORT_DEFAULT = 43121
+# SecondBrain's MCP (audit D9, E2): the names .env sets win; SecondBrain passes the share names to its children.
+SECONDBRAIN_URL_ENVS = ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_SHARE_URL")
+SECONDBRAIN_KEY_ENVS = ("SECONDBRAIN_MCP_KEY", "SECONDBRAIN_SHARE_KEY")
 
 
 def _entry(name: str, environ: Mapping[str, str] | None) -> str:
@@ -84,6 +90,16 @@ def mcp_port(environ: Mapping[str, str] | None = None) -> int:
     if not (raw.isdigit() and 0 < int(raw) < 65536):
         raise ValueError(f"{MCP_PORT_ENV}={raw!r} is not a port: use a number from 1 to 65535")
     return int(raw)
+
+
+def secondbrain_mcp(environ: Mapping[str, str] | None = None) -> tuple[str | None, str | None]:
+    """SecondBrain's MCP URL and key (D9, E2): SECONDBRAIN_MCP_URL and SECONDBRAIN_MCP_KEY, each else the share name
+    SecondBrain sets in its children's environment while sharing is on; None when neither is set. Never logged."""
+
+    def first(names: tuple[str, ...]) -> str | None:
+        return next((value for name in names if (value := _entry(name, environ))), None)
+
+    return first(SECONDBRAIN_URL_ENVS), first(SECONDBRAIN_KEY_ENVS)
 
 
 # <binding>

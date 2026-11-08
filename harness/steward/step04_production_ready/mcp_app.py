@@ -329,15 +329,14 @@ async def main() -> None:
         # His cards go to SecondBrain's approval_ask, on a client of their own: a card waits up to 10 minutes, longer
         # than agent.py's client reads (300 s). The same URL and key as agent.py's; the key is never printed.
         ask_card: AskCard | None = None
-        url = os.environ.get("SECONDBRAIN_MCP_URL")
-        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        url, key = _install.secondbrain_mcp()
         if url and key:
             http = await stack.enter_async_context(
                 httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(30.0, read=CARD_WAIT_SECONDS))
             )
             ask_card = secondbrain_cards(await stack.enter_async_context(Client(streamable_http_client(url, http_client=http))))
         else:
-            logger.warning("SECONDBRAIN_MCP_URL or SECONDBRAIN_MCP_KEY is not set: approval cards are left unanswered")
+            logger.warning("SecondBrain's MCP URL or key is not set (SECONDBRAIN_MCP_URL and _KEY, else SECONDBRAIN_SHARE_URL and _KEY): approval cards are left unanswered")
         recipes = RecipeRuns(RECIPES_DIR, tools=await recipe_tools(stack, url, key), summarizer=recipe_summarizer())
         async with agent:
             app = build_mcp_app(agent, ask_card, recipes)

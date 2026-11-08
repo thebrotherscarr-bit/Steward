@@ -3870,8 +3870,7 @@ async def build_steward_agent(
         # as Part 1 does. (Kyle, 2026-10-29: "fix the shit that you left out", superseding his earlier
         # "Part 2 has no web tools".)
         tools: list[Any] = [get_repo_status]
-        url = os.environ.get("SECONDBRAIN_MCP_URL")
-        key = os.environ.get("SECONDBRAIN_MCP_KEY")
+        url, key = _install.secondbrain_mcp()
         secondbrain_client: Client | None = None
         if url and key:
             # One high-level MCP client for SecondBrain, as MAF's mcp_based_skill sample opens one: the

@@ -122,7 +122,7 @@ def _his_shelf_files_are_never_the_real_ones(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(evals, "CASE_TRANSCRIPTS", {})
 
 # Hermetic: no SecondBrain connection (and so no Atlas door), whatever agent.py's load_dotenv() found.
-for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY"):
+for _name in ("SECONDBRAIN_MCP_URL", "SECONDBRAIN_MCP_KEY", "SECONDBRAIN_SHARE_URL", "SECONDBRAIN_SHARE_KEY"):
     os.environ.pop(_name, None)
 # Hermetic: a workflow run here never runs the default check on the real repo, whose changed .py files include these
 # tests (2026-11-02: that ran this file inside itself, level after level). Only the check's own test clears it.
@@ -10032,6 +10032,28 @@ def test_the_install_entries_keep_todays_values_and_move_by_config(monkeypatch: 
     import mcp_app
 
     assert mcp_app.PORT == install.mcp_port()
+
+
+def test_secondbrain_mcp_falls_back_to_the_share_names_secondbrain_passes() -> None:
+    """ExecPlan 0006 P1, audit D9 and E2 (ADR-0020): SecondBrain puts SECONDBRAIN_SHARE_URL and SECONDBRAIN_SHARE_KEY in
+    its children's environment while sharing is on, so Steward reads its MCP from them when the .env names are unset;
+    the .env names win. agent.py, mcp_app.py and step01 read it there. Dummy values only."""
+    import install
+
+    share = {"SECONDBRAIN_SHARE_URL": "http://127.0.0.1:1/share", "SECONDBRAIN_SHARE_KEY": "dummy-share"}
+    own = {"SECONDBRAIN_MCP_URL": "http://127.0.0.1:1/own", "SECONDBRAIN_MCP_KEY": "dummy-own"}
+    assert install.secondbrain_mcp({}) == (None, None)
+    assert install.secondbrain_mcp(share) == ("http://127.0.0.1:1/share", "dummy-share"), "the share names are read"
+    assert install.secondbrain_mcp({**share, **own}) == ("http://127.0.0.1:1/own", "dummy-own"), "the .env names win"
+    assert install.secondbrain_mcp({**share, "SECONDBRAIN_MCP_KEY": " "}) == ("http://127.0.0.1:1/share", "dummy-share")
+    here = Path(__file__).resolve().parent
+    for name in ("agent.py", "mcp_app.py"):
+        text = (here / name).read_text(encoding="utf-8")
+        assert "_install.secondbrain_mcp()" in text and 'os.environ.get("SECONDBRAIN_MCP_KEY")' not in text, name
+    step01 = (here.parent / "step01_meet_steward.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("SECONDBRAIN_MCP_KEY") or os.environ.get("SECONDBRAIN_SHARE_KEY")' in step01
+    assert 'os.environ.get("SECONDBRAIN_MCP_URL") or os.environ.get("SECONDBRAIN_SHARE_URL")' in step01
+    assert "SECONDBRAIN_SHARE_KEY" not in steward.shell_env({**share, "PATH": "p"}), "his shell never sees the share key"
 
 
 def test_no_host_string_in_code_outside_the_install_defaults() -> None:
