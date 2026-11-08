@@ -10059,16 +10059,29 @@ def test_secondbrain_mcp_falls_back_to_the_share_names_secondbrain_passes() -> N
 def test_no_host_string_in_code_outside_the_install_defaults() -> None:
     """ExecPlan 0006 P1's acceptance: no string in Steward's code names the operator's user folder, his ground's folder
     (Desktop\\Research) or his name, outside the install's defaults (install.py), the tests and the docs (comments and
-    docstrings, which keep the record of his rulings). A new one is red here until it moves to an install entry."""
+    docstrings, which keep the record of his rulings). A new one is red here until it moves to an install entry.
+    It reads only the files git tracks, so an untracked leftover (an agent's worktree under .claude/) is never scanned;
+    without git it walks the tree and skips .claude/ and the venvs."""
     import io
     import re
+    import subprocess
     import tokenize
 
     repo = Path(__file__).resolve().parents[3]
     named = re.compile(r"novad|Desktop[\\/]+Research|\bKyle\b", re.IGNORECASE)
-    skip_dirs = {".venv", ".venv-halo", "working", "data", "node_modules", "__pycache__", ".git"}
+    skip_dirs = {".venv", ".venv-halo", ".claude", "working", "data", "node_modules", "__pycache__", ".git"}
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.py"], cwd=repo, capture_output=True, check=True, timeout=30
+        ).stdout.decode("utf-8")
+        paths = sorted(repo / name for name in listed.split("\0") if name)
+    except (OSError, subprocess.SubprocessError):
+        paths = sorted(repo.rglob("*.py"))
+    assert paths, "no .py file found to scan"
     found: list[str] = []
-    for path in sorted(repo.rglob("*.py")):
+    for path in paths:
+        if not path.is_file():
+            continue
         rel = path.relative_to(repo)
         if skip_dirs & set(rel.parts) or path.name in {"test_harness.py", "install.py"}:
             continue
