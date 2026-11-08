@@ -1210,6 +1210,20 @@ def test_codeact_reads_harness_read_only_and_a_pass_count_is_not_a_count_questio
     assert asked == []
 
 
+def test_a_request_to_restart_one_of_his_servers_is_pointed_at_the_estate_skill_while_he_reads() -> None:
+    """The P36 rerun of 2026-11-08: "Restart the AG-UI host." reached EXPLORE with nothing pointing at his Estate's
+    tools; he reasoned "There's no tool for restarting AG-UI host" and asked whether it was systemd or Docker. The
+    request now carries the estate skill's hint into the run's first call (RequestHints), and a request about code
+    carries none."""
+    estate = 'call load_skill("estate")'
+    for request in ("Restart the AG-UI host.", "Stop the door server, please.", "What does the Estate run?"):
+        assert [h for p, h, _ in steward.REQUEST_HINTS if p.search(request) and estate in h], request
+    for request in ("Add a function to units.py.", "Start a line of work for the README fix."):
+        assert not [h for p, h, _ in steward.REQUEST_HINTS if p.search(request) and estate in h], request
+    client, _, _ = run_steward(["ok"], "Restart the AG-UI host.")
+    assert estate in str(client.calls[0]["options"].get("instructions") or ""), "the hint reaches his first call"
+
+
 def test_his_user_level_sandbox_switch_does_not_change_a_codeact_test(monkeypatch: Any) -> None:
     """2026-11-05: STEWARD_SANDBOX=hyperlight in his environment, with a sandbox that would start and its answer already
     cached "on", reddened the CodeAct test above on his PC. Cleared as the autouse fixture clears it, the build is
