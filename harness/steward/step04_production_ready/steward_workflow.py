@@ -24,8 +24,9 @@ Pieces 1 to 4 of the build order:
   AgentExecutor-based agents", agent_framework/_evaluation.py). Each keeps its own session, which MAF saves in
   the workflow's checkpoint at the pause and restores on the answer.
 * The plan is structured output (the guide's PlanningResponse, plus its steps), read in code (the cookbook:
-  "Validate JSON ... in code"). A clarification, or a reply that holds no plan, ends the run with that reply;
-  the user's answer is the next request.
+  "Validate JSON ... in code"). A clarification ends the run with its question; a reply that still holds no plan
+  after ReadPlan's one ask again ends it with one line saying no plan came and nothing ran (NO_PLAN); the user's
+  answer is the next request.
 * The approval is a function_approval_request, so MAF's host sends it as the Responses mcp_approval_request
   (agent_framework_foundry_hosting/_workflow_responses.py) and the Agent tab shows its Allow/Deny card. Denied,
   the run ends and nothing has run.
@@ -631,13 +632,30 @@ def clarification_text(plan: StewardPlan) -> str:
 def steward_plan_in(text: str) -> StewardPlan | None:
     """The StewardPlan ending a reply, or None: an approval needs its steps, a clarification its questions.
 
-    A plan written in its own shape (plan_in_its_own_shape) is read as the approval it is."""
+    A plan written in its own shape (plan_in_its_own_shape) is read as the approval it is, and a plan wrapped as
+    {"content": <the plan>} (content_wrapped) is read as the plan inside."""
+    if (inner := content_wrapped(text)) is not None:
+        return steward_plan_in(inner)
     plan = planning_response_in(text, model=StewardPlan)
     if plan is None:
         return plan_in_its_own_shape(text)
     if plan.type == PlanningResponseType.APPROVAL and not plan.steps:
         return None
     return plan
+
+
+def content_wrapped(text: str) -> str | None:
+    """The plan inside a reply that is (or ends with) one object whose one key is "content", or None: the JSON text a
+    string holds, or the object itself as JSON text. night-1109-sets, reads_within_budget (833b991): the plan call's
+    reply was '{"content":"{\\"type\\":\\"approval\\",\\"summary\\":...,\\"steps\\":[...]}"}', ended the run as it
+    was, and no card came."""
+    found = trailing_json_object(text)
+    if found is None or set(found) != {"content"}:
+        return None
+    inner = found["content"]
+    if isinstance(inner, dict) and inner:
+        return json.dumps(inner)
+    return inner if isinstance(inner, str) and inner.strip() else None
 
 
 # A plan step written as an object (the bar at 6d8b127, the README ask's run 2: {"title": ..., "action": ...}): its
@@ -740,6 +758,30 @@ def plan_call_reads(response: AgentExecutorResponse) -> list[str]:
         for c in m.contents
         if c.type == "function_call" and c.name in PLAN_TOOLS
     ]
+
+
+def plan_call_names(response: AgentExecutorResponse) -> list[str]:
+    """Every tool a plan call answered with, by name, once each, in order (tools are off there, so none ran)."""
+    names = [c.name for m in response.agent_response.messages for c in m.contents if c.type == "function_call" and c.name]
+    return list(dict.fromkeys(names))
+
+
+# The run's last line when the plan call, asked again, still gave no plan (night-1109, 833b991): p1_denied_plan-2 and
+# telegram_approved ended with no output at all (the plan call answered with tool calls only: file_access_replace_lines,
+# repo_browser.file_access_ls), and discount and the held-out refactor and readme asks ended on his reasoning ("We need
+# to produce a plan..."). One plain line says what happened and that nothing ran.
+NO_PLAN = "No plan came back, so nothing ran: {why}. Ask again, or say more about what you want done."
+
+
+def no_plan_line(last: str, response: AgentExecutorResponse) -> str:
+    """NO_PLAN for a plan call's reply that holds no plan: what the reply was."""
+    if names := plan_call_names(response):
+        why = f"the plan step called {', '.join(names)} instead of writing the plan"
+    elif last.strip():
+        why = "the plan step's reply was not a plan"
+    else:
+        why = "the plan step's reply was empty"
+    return NO_PLAN.format(why=why)
 
 
 def _first_user_text(response: AgentExecutorResponse) -> str:
@@ -1491,7 +1533,7 @@ class ReadPlan(Executor):
             await ctx.yield_output(ALREADY_DONE.format(evidence=evidence))  # ADR-0015: no plan, no card, no change
             return
         if plan is None:
-            await ctx.yield_output(last)
+            await ctx.yield_output(no_plan_line(last, response))  # never silent, never his raw reasoning (NO_PLAN)
         elif plan.type != PlanningResponseType.APPROVAL:
             await ctx.yield_output(clarification_text(plan))
         else:

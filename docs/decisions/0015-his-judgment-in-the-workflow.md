@@ -101,3 +101,15 @@ broke it; each rule now has a place in code where the model's choice is read, or
   is managed. A restart, start or stop of a server, or the Estate named, now carries the estate skill's hint
   (`REQUEST_HINTS`), which names `secondbrain_service_control`. Held by
   `test_a_request_to_restart_one_of_his_servers_is_pointed_at_the_estate_skill_while_he_reads`.
+- 2026-11-09, the plan call's reply (the night runs at 833b991, `storage/evals/runs/night-1109-sets` and
+  `night-1109-bars`): with its tools off, he called invented tools (`repo_browser.file_access_ls`), wrote `plan.json`,
+  wrapped the plan as `{"content": "<json>"}` (`reads_within_budget`), or sent his reasoning as the text
+  (`discount`); runs ended with no card, and `p1_denied_plan-2` and `telegram_approved` with no output at all.
+  (a) The plan call is MAF's structured output already: `plan_phases_turn` sets `StewardPlan` as its
+  `response_format`, and MAF 1.24's `OllamaChatClient` sends it as Ollama's `format`, the model's JSON schema, with
+  no tools under tool_choice "none" (`agent_framework_ollama/_chat_client.py`, `_prepare_options`). Held by
+  `test_the_plan_call_reaches_ollama_as_the_plans_json_schema_with_no_tools`; the replies above came back with that
+  schema sent. (b) A plan wrapped as one `content` key is read as the plan inside (`content_wrapped`), held by
+  `test_a_plan_wrapped_as_content_is_read_as_the_plan_and_carded`. (c) A plan call that gives no plan after
+  ReadPlan's one ask again ends the run on one line, `NO_PLAN`: what the reply was, and that nothing ran. Held by
+  `test_a_plan_call_that_gives_no_plan_ends_the_run_on_one_plain_line_never_silent`.
