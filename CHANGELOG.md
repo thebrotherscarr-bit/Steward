@@ -53,6 +53,13 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The plan call's reply (ADR-0015, 2026-11-09 note; the night runs at 833b991): a plan wrapped as
+  `{"content": "<json>"}` is read as the plan inside and carded (`content_wrapped`; `reads_within_budget`); and a
+  plan call that still gives no plan after ReadPlan's one ask again ends the run on one line, "No plan came back, so
+  nothing ran: ...", naming what the reply was (tool calls by name, words that are not a plan, or nothing), instead of
+  ending silent (`p1_denied_plan-2`, `telegram_approved`) or on his reasoning (`discount`). A test now holds that the
+  plan call reaches Ollama as MAF's structured output: `StewardPlan`'s JSON schema as `format`, with no tools.
+  Restart required.
 - EXPLORE's instructions carry one line naming the picked profile's tools that come after approval ("After your plan
   is approved you will also have: ... Put the steps that need them in your plan."; `later_tools_line`, exactly
   `later_offers`). The tools are still not offered there. Not shown them, he took their absence for "can't" in the

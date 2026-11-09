@@ -1413,7 +1413,8 @@ def test_the_workflow_plans_waits_for_approval_and_only_then_executes_the_plans_
     assert denied["outputs"] == [wf.NOT_APPROVED] and len(denied["calls"]) == 1 and denied["todos"] == [], "denied: nothing ran"
 
     words = run(["Just words."], approve=None)
-    assert words["outputs"] == ["Just words."] and words["cards"] == [], "no plan, no card"
+    # A reply in words holds no plan: the run ends on one line saying so, never on his raw words (NO_PLAN, night-1109).
+    assert words["outputs"] == [wf.NO_PLAN.format(why="the plan step's reply was not a plan")] and words["cards"] == [], "no plan, no card"
 
     # An empty plan reply (the model's answer left in its reasoning) is asked again once, then the plan goes on.
     again = run(["", plan], approve=None)
@@ -5551,9 +5552,120 @@ def test_a_plan_step_ending_on_a_tool_calls_arguments_gets_a_plan_card(tmp_path:
     assert wf.PLAN_NOT_A_CALL in " ".join(m.text or "" for m in client.plan_calls[1]["messages"])
 
     client, cards, outputs = run([QUERY_AS_TEXT, QUERY_AS_TEXT])
-    assert cards == [] and len(client.plan_calls) == 2 and outputs == [QUERY_AS_TEXT], "asked again once, not in a loop"
+    no_plan = wf.NO_PLAN.format(why="the plan step's reply was not a plan")
+    assert cards == [] and len(client.plan_calls) == 2 and outputs == [no_plan], "asked again once, not in a loop"
     assert wf.ends_with_a_json_object('I will search.\n```json\n{"query": "pytest"}\n```')
     assert not wf.ends_with_a_json_object("Just words.") and not wf.ends_with_a_json_object("{}")
+
+
+def test_the_plan_call_reaches_ollama_as_the_plans_json_schema_with_no_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """night-1109 (833b991): the plan call came back as invented tools, a write of plan.json, a wrapped plan or his
+    reasoning. MAF 1.24's own structured output is what the plan call uses: plan_phases_turn sets StewardPlan as its
+    response_format and tool_choice "none", and MAF's OllamaChatClient sends a Pydantic response_format as Ollama's
+    `format`, the model's JSON schema, and sends no tools under "none" (agent_framework_ollama/_chat_client.py,
+    _prepare_options: OLLAMA_OPTION_TRANSLATIONS response_format -> format, value.model_json_schema(); "none omits the
+    tools"). Steward is built on MAF's OllamaChatClient with ollama's AsyncClient.chat faked (no network): the one call
+    sent with the plan's schema has no tools, the router's carries its Route schema, EXPLORE's none, and the card
+    comes. With plan_phases_turn unplugged, no call carries the plan's schema: red."""
+    import json
+
+    import ollama
+    import steward_workflow as wf
+    from agent_framework import agent_middleware
+    from agent_framework.ollama import OllamaChatClient
+
+    plan_schema, route_schema = wf.StewardPlan.model_json_schema(), wf.Route.model_json_schema()
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Add the line."}], "steps": ["Add the line to README.md"]})
+
+    def run() -> tuple[list[dict[str, Any]], list[Any]]:
+        sent: list[dict[str, Any]] = []
+
+        async def chat(self: Any, **kwargs: Any) -> Any:
+            sent.append(kwargs)
+            text = '{"kind": "task"}' if kwargs.get("format") == route_schema else plan if kwargs.get("format") == plan_schema else "Read enough."
+            reply = ollama.ChatResponse(model="steward:1", message=ollama.Message(role="assistant", content=text), done=True, done_reason="stop")
+            if not kwargs.get("stream"):
+                return reply
+
+            async def parts() -> Any:
+                yield reply
+
+            return parts()
+
+        monkeypatch.setattr(ollama.AsyncClient, "chat", chat)
+        client = OllamaChatClient(model="steward:1", host="http://127.0.0.1:9")
+
+        async def _go() -> list[Any]:
+            async with AsyncExitStack() as stack:
+                agent = await steward.build_steward_agent(stack, client=client, enable_shell=False)
+                async with agent:
+                    return [e async for e in wf.build_steward_workflow(agent, checks=lambda m: None).run("Add a line to the README.", stream=True)]
+
+        return sent, asyncio.run(_go())
+
+    sent, events = run()
+    planned = [k for k in sent if k.get("format") == plan_schema]
+    assert len(planned) == 1 and "tools" not in planned[0], [sorted(k) for k in planned]
+    assert any(k.get("format") == route_schema for k in sent), "the router's call carries its Route schema"
+    assert any("format" not in k and k.get("tools") for k in sent), "EXPLORE reads with its tools and no format"
+    assert [e.data.function_call.name for e in events if e.type == "request_info"] == [wf.APPROVE_PLAN]
+
+    @agent_middleware
+    async def no_structured_plan(context: Any, call_next: Any) -> None:  # unplugged: the plan call sends no format
+        context.options = {k: v for k, v in (context.options or {}).items() if k != "response_format"}
+        await call_next()
+
+    monkeypatch.setattr(wf, "plan_phases_turn", no_structured_plan)
+    sent, _ = run()
+    assert not [k for k in sent if k.get("format") == plan_schema], "unplugged, no call carries the plan's schema"
+
+
+def test_a_plan_wrapped_as_content_is_read_as_the_plan_and_carded(monkeypatch: Any) -> None:
+    """night-1109-sets, reads_within_budget (833b991): the plan call answered '{"content":"{\\"type\\":\\"approval\\",
+    \\"summary\\":...,\\"steps\\":[...]}"}', the run ended on that text, and no card came. Now a plan wrapped as one
+    "content" key (a JSON string, or the object itself) is read as the plan inside (content_wrapped), and carded. With
+    the unwrap unplugged, no card: red."""
+    import json
+
+    import steward_workflow as wf
+
+    inner = {"type": "approval", "summary": "Add kelvin_to_celsius to units.py.", "steps": ["Add kelvin_to_celsius to units.py"]}
+    for wrapped in (json.dumps({"content": json.dumps(inner)}), json.dumps({"content": inner})):
+        plan = wf.steward_plan_in(wrapped)
+        assert plan is not None and plan.steps == inner["steps"] and plan.questions[0].message == inner["summary"], wrapped
+        events, _ = _bounds_run("Add a function kelvin_to_celsius to units.py.", ["Read enough."], plans=[wrapped])
+        cards = [e.data.function_call for e in events if e.type == "request_info"]
+        assert [c.name for c in cards] == [wf.APPROVE_PLAN] and cards[0].parse_arguments()["steps"] == inner["steps"]
+    assert wf.content_wrapped('{"content": "x", "other": 1}') is None and wf.content_wrapped('{"content": ""}') is None
+
+    monkeypatch.setattr(wf, "content_wrapped", lambda text: None)  # unplugged
+    events, _ = _bounds_run("Add a function kelvin_to_celsius to units.py.", ["Read enough."], plans=[json.dumps({"content": json.dumps(inner)})])
+    assert not [e for e in events if e.type == "request_info"], "unplugged, the wrapped plan gets no card"
+
+
+def test_a_plan_call_that_gives_no_plan_ends_the_run_on_one_plain_line_never_silent(monkeypatch: Any) -> None:
+    """night-1109 (833b991): p1_denied_plan-2 and telegram_approved ended with no output at all (the plan call, asked
+    again, answered with tool calls only), and discount and the held-out refactor and readme asks ended on his
+    reasoning ("We need to produce a plan..."). Now a plan call that still gives no plan after ReadPlan's one ask again
+    ends the run on NO_PLAN: one line saying what the reply was and that nothing ran, with no card. With the line
+    unplugged (the reply passed on as it was), the tool-call run is silent again: red."""
+    import steward_workflow as wf
+
+    write = Content.from_function_call(call_id="w1", name="file_access_write", arguments={"file_name": "plan.json", "content": "{}"})
+    invented = Content.from_function_call(call_id="w2", name="repo_browser.file_access_ls", arguments={"path": ""})
+    reasoning = "We need to produce a plan for the discount fix. Let's think about which line to change."
+
+    def run(plans: list[Any]) -> list[Any]:
+        events, _ = _bounds_run("Add a line 'away test' at the end of README.md.", ["Read enough."], plans=plans)
+        assert not [e for e in events if e.type == "request_info"], "no plan, no card"
+        return [s for s in said(events) if s.strip()]
+
+    assert run([write, invented]) == [wf.NO_PLAN.format(why="the plan step called repo_browser.file_access_ls instead of writing the plan")]
+    assert run([reasoning]) == [wf.NO_PLAN.format(why="the plan step's reply was not a plan")]
+    assert run(["", ""]) == [wf.NO_PLAN.format(why="the plan step's reply was empty")]
+
+    monkeypatch.setattr(wf, "no_plan_line", lambda last, response: last)  # unplugged
+    assert run([write, invented]) == [], "unplugged, the run ends silent"
 
 
 def test_a_bare_file_name_the_request_put_in_a_folder_is_refused_and_the_evals_remove_a_runs_stray_files(
