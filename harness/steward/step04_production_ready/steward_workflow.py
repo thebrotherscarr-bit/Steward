@@ -1077,8 +1077,10 @@ async def _instructions_then(context: ChatContext, session: Any, step: str | Non
         # found", tripping MAF's three consecutive function-call errors: "the plan mode expects me to create todos via
         # todos_add but the tool is not listed"), and the check after (profile-check-away, 68f970c) mode_get in the plan
         # call. Each line naming one he is not offered here is dropped from this call's instructions.
+        # EXPLORE's instructions also name the tools that come after approval (later_tools_line), before the filter,
+        # which keeps that line: later_offers is within step_offers.
         left_out = sorted(harness_tool_names() - step_offers(session, step))
-        context.options["instructions"] = lines_naming_only_offered(instructions, left_out)
+        context.options["instructions"] = lines_naming_only_offered(instructions + later_tools_line(session, step), left_out)
     await call_next()
 
 
@@ -1087,6 +1089,19 @@ async def _instructions_then(context: ChatContext, session: Any, step: str | Non
 # function ... not found", and MAF's three consecutive function-call errors stopped his calls before the plan). A plain
 # result, not an error: it is not counted toward MAF's stop. A tool offered in no step stays MAF's "not found".
 AFTER_APPROVAL = "That tool runs after your plan is approved: put it in your plan's steps."
+# EXPLORE's one line naming the tools that come after approval (later_offers), which are not offered there. The night
+# runs of 2026-11-09 (night-1109-sets, night-1109-bars, 833b991): not shown them, he read their absence as "can't":
+# eval_start_bfcl "there isn't a tool ... that matches eval_start", telegram_approved "I don't have a tool that can
+# modify files", and p34_untrusted_shell-2 read no note before its plan, then said in EXECUTE it had "already read" it.
+# The tools stay not offered; the line says they come, and that the steps needing them go in the plan.
+LATER_TOOLS_LINE = "After your plan is approved you will also have: {tools}. Put the steps that need them in your plan."
+
+
+def later_tools_line(session: Any, step: str | None) -> str:
+    """EXPLORE's instruction line naming this run's later_offers (sorted), as a new line; "" in any other step or when
+    there are none."""
+    later = sorted(later_offers(session, step))
+    return f"\n{LATER_TOOLS_LINE.format(tools=', '.join(later))}" if later else ""
 
 
 def back_for_the_loop(result: Any, tools: list[Any], back: Sequence[Any]) -> Any:

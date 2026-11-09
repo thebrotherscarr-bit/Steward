@@ -174,3 +174,7 @@ model**: the same `steward:1`, given only the tools, instructions and budget of 
 - Amended in part: [ADR-0012](0012-stewards-bar-is-our-own-capability-evals.md) (a case names its `profile:`, spec
   003) and [ADR-0016](0016-steward-is-the-brain-of-the-pc.md) (each operation of its table is a profile, spec 004).
 - The plan, its lanes and its order: [ExecPlan 0005](../plans/0005-steward-runs-the-pc-from-the-phone.md).
+- 2026-11-09, no change to the plan: EXPLORE's instructions name the tools of the picked profile that come after
+  approval (`later_tools_line`, exactly `later_offers`), which it still does not offer. Evidence: night-1109-sets'
+  `eval_start_bfcl` ("there isn't a tool ... that matches eval_start") and `telegram_approved` ("I don't have a tool
+  that can modify files"). Held by `test_explores_instructions_name_exactly_the_tools_that_come_after_approval`.
