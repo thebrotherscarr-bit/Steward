@@ -10022,6 +10022,43 @@ def test_the_plan_phases_later_tools_leave_mafs_merged_memory_tools_in_reach() -
     assert "not found" not in str(result.result), result.result
 
 
+def test_explores_instructions_name_exactly_the_tools_that_come_after_approval(monkeypatch: Any) -> None:
+    """night-1109 (833b991): EXPLORE is not offered the tools that come after approval (later_offers), and nothing told
+    him they come, so he read their absence as "can't" (eval_start_bfcl: "there isn't a tool ... that matches
+    eval_start"; telegram_approved: "I don't have a tool that can modify files"). Now EXPLORE's instructions carry one
+    line naming exactly this run's later_offers, past the instruction filter; the tools are still not offered. With the
+    line unplugged, it is gone: red."""
+    import json
+    from types import SimpleNamespace
+
+    import profiles as profile_files
+    import steward_workflow as wf
+
+    def line_in(text: str) -> list[str] | None:
+        head, tail = wf.LATER_TOOLS_LINE.split("{tools}")
+        found = next((l for l in text.split("\n") if l.startswith(head) and l.endswith(tail)), None)
+        return None if found is None else found[len(head):-len(tail)].split(", ")
+
+    plan = json.dumps({"type": "approval", "questions": [{"message": "Start it."}], "steps": ["Start the bfcl set"]})
+    narrow = _narrow_profile(tools=("secondbrain_eval_status", "secondbrain_eval_start"), read_budget=1, instructions="")
+    general = profile_files.load_profiles()["general"]
+    found = {"general": general, "narrow": narrow}
+    client, _ = _profile_run("With the narrow profile: start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert client.offered[0] == {"secondbrain_eval_status"}, "eval_start is still not offered in EXPLORE"
+    assert line_in(client.instructions[0]) == ["secondbrain_eval_start"], client.instructions[0][-300:]
+
+    client, _ = _profile_run("Add a line to the README.", {"general": general}, ["I will plan it."], plan)
+    session = SimpleNamespace(state={wf.STEP_KEY: wf.EXPLORE_STEP, wf.PROFILE_KEY: general.state()})
+    later = sorted(wf.later_offers(session, wf.EXPLORE_STEP))
+    assert later and line_in(client.instructions[0]) == later, (line_in(client.instructions[0]), later)
+    assert not set(later) & client.offered[0], "the later tools are named, not offered"
+    assert wf.later_tools_line(session, wf.PLAN_STEP) == "", "only EXPLORE names them"
+
+    monkeypatch.setattr(wf, "later_tools_line", lambda session, step: "")  # unplugged
+    client, _ = _profile_run("With the narrow profile: start the bfcl eval set.", found, ["I will plan it."], plan)
+    assert line_in(client.instructions[0]) is None, "unplugged, nothing names the tools that come after approval"
+
+
 
 def test_explores_answered_later_call_counts_toward_its_budget_and_is_no_change_before_the_card() -> None:
     """check-answerer-p36 (2026-11-08, ce5720d): EXPLORE's answered call to service_control was read by the bounds

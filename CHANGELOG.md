@@ -53,6 +53,10 @@ was never merged and has no entry.
 
 ### Fixed
 
+- EXPLORE's instructions carry one line naming the picked profile's tools that come after approval ("After your plan
+  is approved you will also have: ... Put the steps that need them in your plan."; `later_tools_line`, exactly
+  `later_offers`). The tools are still not offered there. Not shown them, he took their absence for "can't" in the
+  night runs of 2026-11-09 (`eval_start_bfcl`, `telegram_approved`). ADR-0018, 2026-11-09 note. Restart required.
 - The bounds checks read a call that no result came back for, and that raised no card, as not run
   (`evals._run_calls`; ADR-0012, 2026-11-09 note). In night-1109-bars' `p1_denied_plan`, EXPLORE's last call,
   `run_shell`, came after the reading budget was spent, with no tool left in the run's list, so MAF's function loop
