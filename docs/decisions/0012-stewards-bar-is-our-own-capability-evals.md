@@ -153,3 +153,7 @@ a fact the run left (a tool called, a card raised, a rule kept, a file's state),
 - 2026-11-08: a capability case that fails is reviewed from its transcript (`storage/evals/runs/<tag>/cases/<case
   id>.jsonl`: his reasoning, every call with its arguments and result, each card and its answer, his reply), before
   any fix is named; `run-bar.ps1 -Cases` reruns only the failing cases for that review, never as a bar run.
+- 2026-11-09: a call no result came back for, and no card, is read by the checks as not run (`evals._run_calls`).
+  Evidence: `storage/evals/runs/night-1109-bars/cases/p1_denied_plan.jsonl`, where EXPLORE's last call, `run_shell`,
+  came after the reading budget was spent, MAF's function loop returned it unrun, and `plan_card_first` failed on it.
+  Held by `test_a_call_no_result_came_back_for_ran_nothing_and_is_no_change_before_the_plan_card`.
