@@ -2164,7 +2164,7 @@ def standins_conversation(ask: str, events: list[Any]) -> list[Any]:
 def _run_calls(conversation: list[Any]) -> list[tuple[str, dict[str, Any], str, str]]:
     """Every tool call of a run once, in order: (name, arguments, outcome, call_id); the outcome "card" (it raised a
     card: STANDINS_RUNS says its answer), "refused" (the plan-mode gate's corrective feedback, or a bound's refusal), "not run" (MAF never
-    ran it: not offered, or its arguments did not parse) or "ran"."""
+    ran it: not offered, its arguments did not parse, or no result came back for it) or "ran"."""
     from agent import BOUNDS_REFUSED, PLAN_MODE_REFUSAL, PLAN_MODE_TODOS_NOT_DONE  # noqa: PLC0415
 
     from steward_workflow import AFTER_APPROVAL  # noqa: PLC0415
@@ -2175,6 +2175,11 @@ def _run_calls(conversation: list[Any]) -> list[tuple[str, dict[str, Any], str, 
     contents = [c for m in conversation or [] for c in getattr(m, "contents", None) or []]
     results = {c.call_id: str(c.result or "") for c in contents if c.type == "function_result"}
     carded = {c.function_call.call_id for c in contents if c.type == "function_approval_request" and c.function_call is not None}
+    # A call with no result and no card ran nothing (night-1109-bars, p1_denied_plan: EXPLORE's last call, run_shell,
+    # came once its reading budget was spent and no tool was left in the run's list, so MAF's function loop returned it
+    # unrun: _tools.py _process_model_function_calls, "if not (function_calls and tools)"). Only where the conversation
+    # carries results at all: a transport that forwards no tool results cannot tell a call that ran from one that did not.
+    carries_results = bool(results)
     calls: list[tuple[str, dict[str, Any], str, str]] = []
     seen: set[str] = set()
     for content in contents:
@@ -2187,7 +2192,8 @@ def _run_calls(conversation: list[Any]) -> list[tuple[str, dict[str, Any], str, 
         result = results.get(call.call_id, "")
         outcome = (
             "card" if call.call_id in carded else "refused" if result.startswith(markers)
-            else "not run" if result.startswith(NOT_RUN_RESULTS) else "ran"
+            else "not run" if result.startswith(NOT_RUN_RESULTS) or (carries_results and call.call_id not in results)
+            else "ran"
         )
         arguments = call.parse_arguments()
         calls.append((call.name, arguments if isinstance(arguments, dict) else {}, outcome, call.call_id))

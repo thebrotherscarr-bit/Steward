@@ -53,6 +53,11 @@ was never merged and has no entry.
 
 ### Fixed
 
+- The bounds checks read a call that no result came back for, and that raised no card, as not run
+  (`evals._run_calls`; ADR-0012, 2026-11-09 note). In night-1109-bars' `p1_denied_plan`, EXPLORE's last call,
+  `run_shell`, came after the reading budget was spent, with no tool left in the run's list, so MAF's function loop
+  returned it unrun, and `plan_card_first` failed "Changed before the plan card: ['run_shell']". Nothing ran. A
+  conversation that carries no tool results at all is read as before.
 - EXPLORE's answered call to a later step's tool spends its reading budget (the answer comes after the count), so a
   repeat ends at the budget; and the bounds checks read the answer as nothing run, not a change before the plan card
   (check-answerer-p36, ce5720d: plan_card_first failed on the answered call, and the case ran 719 s).
